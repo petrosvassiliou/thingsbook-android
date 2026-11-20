@@ -1,0 +1,2333 @@
+import SwiftUI
+import AppKit
+import CoreGraphics
+import UniformTypeIdentifiers
+import ThingsbookCore
+
+// MARK: - Soft Bento 3-Mode Project Switcher (List | Board | Roadmap)
+
+struct ProjectModeSegmentedSwitcher: View {
+    @ObservedObject var store: ThingsbookStore
+    let project: Project
+
+    private var activeMode: ProjectViewMode {
+        ProjectViewMode.normalized(project.viewMode)
+    }
+
+    private func label(for mode: ProjectViewMode) -> String {
+        switch mode {
+        case .list:
+            return store.tr("v30_project_mode_list")
+        case .board:
+            return store.tr("v30_project_mode_board")
+        case .roadmap:
+            return store.tr("v30_project_mode_roadmap")
+        }
+    }
+
+    private func icon(for mode: ProjectViewMode) -> String {
+        switch mode {
+        case .list:
+            return "list.bullet"
+        case .board:
+            return "rectangle.split.3x1"
+        case .roadmap:
+            return "calendar.day.timeline.left"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(ProjectViewMode.allCases) { mode in
+                let isSelected = activeMode == mode
+                Button {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.84)) {
+                        store.setProjectViewMode(project.id, mode: mode)
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon(for: mode))
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(label(for: mode))
+                            .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                            .lineLimit(1)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(isSelected ? ThingsMacPalette.accentBlue : .secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(isSelected ? ThingsMacPalette.cardSurface : Color.clear)
+                            .shadow(
+                                color: Color.black.opacity(isSelected ? 0.07 : 0.0),
+                                radius: 4,
+                                y: 1
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(
+                                isSelected ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.clear,
+                                lineWidth: 0.85
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(label(for: mode))
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                )
+        )
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+// MARK: - Phase Start & End Date Pills
+
+struct PhaseStartDatePillButton: View {
+    @ObservedObject var store: ThingsbookStore
+    let heading: Heading
+
+    @State private var isPopoverOpen = false
+    @State private var isHovering = false
+
+    private var formattedStartDate: String? {
+        guard let startMs = heading.startDate else { return nil }
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("dMMM")
+        return df.string(from: DateEpochConverter.date(fromMillis: startMs))
+    }
+
+    var body: some View {
+        let hasStartDate = heading.startDate != nil
+
+        Button {
+            isPopoverOpen = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: hasStartDate ? "calendar" : "calendar.badge.plus")
+                    .font(.system(size: 10, weight: .semibold))
+                if let formattedStartDate {
+                    Text(store.trf("v30_phase_starts_on", formattedStartDate))
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                } else {
+                    Text(store.tr("v30_phase_set_start_date"))
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(hasStartDate ? ThingsMacPalette.accentBlue : (isHovering ? ThingsMacPalette.accentBlue : .secondary))
+            .padding(.horizontal, 8.5)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(
+                        hasStartDate
+                            ? ThingsMacPalette.inboxBlue.opacity(isHovering ? 0.24 : 0.15)
+                            : Color.primary.opacity(isHovering ? 0.08 : 0.045)
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .thingsTooltip(store.tr("v30_phase_set_start_date"))
+        .popover(isPresented: $isPopoverOpen) {
+            DeadlinePopoverView(
+                store: store,
+                currentDeadlineMillis: heading.startDate,
+                customTitle: store.tr("v30_phase_set_start_date"),
+                customClearTitle: store.tr("v30_phase_clear_start_date"),
+                accentTint: ThingsMacPalette.accentBlue
+            ) { newStartMs in
+                if let newStartMs, let existingEnd = heading.endDate, newStartMs > existingEnd {
+                    store.updateHeadingDates(heading.id, startDate: newStartMs, endDate: newStartMs)
+                } else {
+                    store.updateHeadingStartDate(heading.id, startDate: newStartMs)
+                }
+            }
+        }
+    }
+}
+
+struct PhaseEndDatePillButton: View {
+    @ObservedObject var store: ThingsbookStore
+    let heading: Heading
+    let hasOpenTasks: Bool
+
+    @State private var isPopoverOpen = false
+    @State private var isHovering = false
+
+    private var formattedEndDate: String? {
+        guard let endMs = heading.endDate else { return nil }
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("dMMM")
+        return df.string(from: DateEpochConverter.date(fromMillis: endMs))
+    }
+
+    private var isOverdue: Bool {
+        guard hasOpenTasks, let endMs = heading.endDate else { return false }
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        return DateEpochConverter.epochDay(forMillis: endMs) < todayEpochDay
+    }
+
+    var body: some View {
+        let activeTint = isOverdue ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue
+        let hasEndDate = heading.endDate != nil
+
+        Button {
+            isPopoverOpen = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: hasEndDate ? "calendar.badge.clock" : "calendar.badge.plus")
+                    .font(.system(size: 10, weight: .semibold))
+                if let formattedEndDate {
+                    Text(store.trf("phase_ends_on", formattedEndDate))
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                } else {
+                    Text(store.tr("phase_set_end_date"))
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(hasEndDate ? activeTint : (isHovering ? ThingsMacPalette.accentBlue : .secondary))
+            .padding(.horizontal, 8.5)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(
+                        hasEndDate
+                            ? activeTint.opacity(isHovering ? 0.18 : 0.12)
+                            : Color.primary.opacity(isHovering ? 0.08 : 0.045)
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .thingsTooltip(store.tr("phase_set_end_date"))
+        .popover(isPresented: $isPopoverOpen) {
+            DeadlinePopoverView(
+                store: store,
+                currentDeadlineMillis: heading.endDate,
+                customTitle: store.tr("phase_set_end_date"),
+                customClearTitle: store.tr("phase_clear_end_date"),
+                accentTint: ThingsMacPalette.accentBlue
+            ) { newEndMs in
+                if let newEndMs, let existingStart = heading.startDate, newEndMs < existingStart {
+                    store.updateHeadingDates(heading.id, startDate: newEndMs, endDate: newEndMs)
+                } else {
+                    store.updateHeadingEndDate(heading.id, endDate: newEndMs)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Mode 2: ProjectBoardWorkspaceView (Soft Bento Kanban)
+
+public struct ProjectBoardWorkspaceView: View {
+    @ObservedObject var store: ThingsbookStore
+    public let project: Project
+    public let openTasks: [TaskItem]
+    public let headings: [Heading]
+
+    @State private var isCreatingPhase = false
+    @State private var newPhaseTitle = ""
+    @State private var renamingHeadingId: String? = nil
+    @State private var renameText = ""
+    @State private var editingTaskInSheet: TaskItem? = nil
+
+    public init(
+        store: ThingsbookStore,
+        project: Project,
+        openTasks: [TaskItem],
+        headings: [Heading]
+    ) {
+        self.store = store
+        self.project = project
+        self.openTasks = openTasks
+        self.headings = headings
+    }
+
+    private var activeHeadings: [Heading] {
+        headings
+            .filter { !$0.isDeleted && !$0.isArchived }
+            .sorted {
+                if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                return $0.id < $1.id
+            }
+    }
+
+    private var validHeadingIds: Set<String> {
+        Set(activeHeadings.map(\.id))
+    }
+
+    private var unheadedTasks: [TaskItem] {
+        TaskViewSorter.sort(
+            openTasks.filter { task in
+                guard let hid = task.headingId else { return true }
+                return !validHeadingIds.contains(hid)
+            },
+            mode: store.preferences.viewSortMode
+        )
+    }
+
+    public var body: some View {
+        let currentHeadings = activeHeadings
+        let unheaded = unheadedTasks
+        let showGeneralColumn = !unheaded.isEmpty || currentHeadings.isEmpty
+
+        ScrollView(.horizontal, showsIndicators: true) {
+            HStack(alignment: .top, spacing: 14) {
+                if showGeneralColumn {
+                    kanbanColumn(
+                        heading: nil,
+                        title: store.tr("v30_board_ungrouped_column"),
+                        tasks: unheaded
+                    )
+                }
+
+                ForEach(currentHeadings) { heading in
+                    let columnTasks = TaskViewSorter.sort(
+                        openTasks.filter { $0.headingId == heading.id },
+                        mode: store.preferences.viewSortMode
+                    )
+                    kanbanColumn(
+                        heading: heading,
+                        title: heading.title,
+                        tasks: columnTasks
+                    )
+                }
+
+                addPhaseColumnCard
+            }
+            .padding(.vertical, 4)
+            .padding(.trailing, 8)
+        }
+        .onChange(of: store.expandedTaskId) { _, nextId in
+            if let nextId, let found = store.allOpenTasks.first(where: { $0.id == nextId && $0.projectId == project.id }) {
+                editingTaskInSheet = found
+            } else if nextId == nil {
+                editingTaskInSheet = nil
+            }
+        }
+        .sheet(item: $editingTaskInSheet, onDismiss: {
+            if store.expandedTaskId != nil {
+                store.expandedTaskId = nil
+            }
+        }) { task in
+            ScrollView {
+                TaskRowCardView(store: store, task: task, showContextSubtitle: false)
+                    .padding(16)
+            }
+            .frame(minWidth: 560, idealWidth: 600, maxHeight: 580)
+            .background(ThingsMacPalette.canvasBackground)
+        }
+    }
+
+    private func kanbanColumn(
+        heading: Heading?,
+        title: String,
+        tasks: [TaskItem]
+    ) -> some View {
+        let rawOpenCount: Int = {
+            if let heading {
+                return store.allOpenTasks.filter { $0.projectId == project.id && $0.headingId == heading.id }.count
+            }
+            return store.allOpenTasks.filter { task in
+                guard task.projectId == project.id else { return false }
+                guard let hid = task.headingId else { return true }
+                return !validHeadingIds.contains(hid)
+            }.count
+        }()
+        let doneCount: Int = {
+            if let heading {
+                return store.completedTasksForProject(project.id).filter { $0.headingId == heading.id }.count
+            }
+            return store.completedTasksForProject(project.id).filter { task in
+                guard let hid = task.headingId else { return true }
+                return !validHeadingIds.contains(hid)
+            }.count
+        }()
+        let totalCount = rawOpenCount + doneCount
+        let progress = totalCount > 0 ? Double(doneCount) / Double(totalCount) : 0.0
+        let isRenaming = heading != nil && renamingHeadingId == heading?.id
+
+        return VStack(alignment: .leading, spacing: 10) {
+            // Column Header
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 4, height: 18)
+
+                    if let heading, isRenaming {
+                        TextField(store.tr("entity_new_heading"), text: $renameText)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 13, weight: .semibold))
+                            .onSubmit {
+                                commitRename(heading)
+                            }
+                        Button(store.tr("action_save")) {
+                            commitRename(heading)
+                        }
+                        .controlSize(.mini)
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Text(title)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        Text("\(tasks.count)")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.primary.opacity(0.06)))
+                    }
+
+                    Spacer(minLength: 4)
+
+                    if totalCount > 0 && !isRenaming {
+                        ProjectProgressRing(
+                            progress: progress,
+                            size: 13,
+                            tint: ThingsMacPalette.accentBlue,
+                            isCompleted: rawOpenCount == 0 && doneCount > 0
+                        )
+                    }
+
+                    Button {
+                        store.createNewTaskInCurrentContext(preferredHeadingId: heading?.id)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22, height: 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color.primary.opacity(0.045))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("heading_add_task"))
+
+                    if let heading {
+                        Menu {
+                            Button(store.tr("macos_rename_heading")) {
+                                renameText = heading.title
+                                renamingHeadingId = heading.id
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                try? store.database.deleteHeading(heading.id)
+                            } label: {
+                                Text(store.tr("action_delete"))
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20, height: 22)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                    }
+                }
+
+                if let heading {
+                    HStack(spacing: 6) {
+                        PhaseStartDatePillButton(store: store, heading: heading)
+                        PhaseEndDatePillButton(
+                            store: store,
+                            heading: heading,
+                            hasOpenTasks: rawOpenCount > 0
+                        )
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+
+            // Task Cards Stack
+            VStack(spacing: 8) {
+                ForEach(tasks) { task in
+                    KanbanTaskCardView(
+                        store: store,
+                        project: project,
+                        columnHeadingId: heading?.id,
+                        task: task
+                    ) {
+                        store.selectedTaskIds = [task.id]
+                        store.lastSelectedTaskId = task.id
+                        store.expandedTaskId = task.id
+                        editingTaskInSheet = task
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .top)
+
+            // Column Footer (+ New To-Do)
+            Button {
+                store.createNewTaskInCurrentContext(preferredHeadingId: heading?.id)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(store.tr("entity_new_todo"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(0.035))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .thingsTooltip(store.tr("entity_new_todo"))
+        }
+        .padding(12)
+        .frame(width: 300, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer.opacity(0.84))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.075), lineWidth: 0.85)
+                )
+        )
+        .thingsDropTarget(cornerRadius: 15) { payloads in
+            store.dropTasksIntoProjectSection(
+                payloads,
+                projectId: project.id,
+                headingId: heading?.id,
+                beforeTaskId: nil
+            )
+        }
+    }
+
+    private var addPhaseColumnCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if isCreatingPhase {
+                Text(store.tr("v30_board_add_phase"))
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                TextField(store.tr("entity_new_heading"), text: $newPhaseTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        submitNewPhase()
+                    }
+
+                HStack(spacing: 8) {
+                    Button(store.tr("macos_action_add")) {
+                        submitNewPhase()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                    Button(store.tr("action_cancel")) {
+                        isCreatingPhase = false
+                        newPhaseTitle = ""
+                    }
+                    .controlSize(.small)
+                }
+            } else {
+                Button {
+                    isCreatingPhase = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                        Text(store.tr("v30_board_add_phase"))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .frame(width: 268, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer.opacity(0.52))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            Color.primary.opacity(0.11),
+                            style: StrokeStyle(lineWidth: 1.0, dash: [5, 4])
+                        )
+                )
+        )
+    }
+
+    private func submitNewPhase() {
+        let clean = newPhaseTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        _ = try? store.database.createHeading(projectId: project.id, title: clean)
+        newPhaseTitle = ""
+        isCreatingPhase = false
+    }
+
+    private func commitRename(_ heading: Heading) {
+        let clean = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { renamingHeadingId = nil }
+        guard !clean.isEmpty else { return }
+        var copy = heading
+        copy.title = clean
+        try? store.database.updateHeading(copy)
+    }
+}
+
+private struct KanbanTaskCardView: View {
+    @ObservedObject var store: ThingsbookStore
+    let project: Project
+    let columnHeadingId: String?
+    let task: TaskItem
+    let onOpenDetail: () -> Void
+
+    @State private var isHovering = false
+    @State private var isDependenciesPopoverOpen = false
+
+    private var isSelected: Bool {
+        store.selectedTaskIds.contains(task.id)
+    }
+
+    private var latestTask: TaskItem {
+        store.allOpenTasks.first(where: { $0.id == task.id }) ?? task
+    }
+
+    var body: some View {
+        let isBlocked = store.isTaskActivelyBlocked(task)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 9) {
+                ThingsCheckboxButton(
+                    status: task.status,
+                    isSomeday: task.scheduleState == .someday,
+                    helpText: store.tr("macos_checkbox_help"),
+                    onToggleComplete: { store.toggleTaskCompletion(latestTask) },
+                    onCancelTask: { store.cancelTask(latestTask) }
+                )
+                .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        if task.isPinned {
+                            Image(systemName: "pin.fill")
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(ThingsMacPalette.todayYellow)
+                                .thingsTooltip(store.tr("v25_pinned_badge"))
+                        }
+
+                        Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(task.title.isEmpty ? .secondary : .primary)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if !task.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(task.notes.replacingOccurrences(of: "\n", with: " "))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                if isHovering {
+                    Button(action: onOpenDetail) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if hasAnyMetadataBadges {
+                ThingsFlowLayout(horizontalSpacing: 5, verticalSpacing: 5) {
+                    if let blockedText = store.blockedByBadgeText(for: task) {
+                        Button {
+                            isDependenciesPopoverOpen = true
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "hourglass")
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                Text(blockedText)
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $isDependenciesPopoverOpen) {
+                            DependenciesPopoverView(store: store, task: latestTask)
+                        }
+                    }
+
+                    if let effort = task.resolvedEffort {
+                        let tint = effortColor(effort)
+                        HStack(spacing: 3) {
+                            Image(systemName: effort.sfSymbol)
+                                .font(.system(size: 9.5, weight: .semibold))
+                            Text(effortTitle(effort))
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(tint.opacity(0.12)))
+                    }
+
+                    if let durText = task.formattedTimeblockPill {
+                        HStack(spacing: 3) {
+                            Image(systemName: task.scheduledStartMinutes != nil ? "clock.badge.checkmark" : "timer")
+                                .font(.system(size: 9.5, weight: .semibold))
+                            Text(durText)
+                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
+                    }
+
+                    if let whenText = whenBadgeText {
+                        HStack(spacing: 3) {
+                            Image(systemName: whenBadgeIcon)
+                                .font(.system(size: 9.5, weight: .semibold))
+                            Text(whenText)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(whenBadgeTint)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(whenBadgeTint.opacity(0.12)))
+                    }
+
+                    if let dl = task.deadline {
+                        let dlInfo = deadlineBadgeInfo(dl)
+                        HStack(spacing: 3) {
+                            Image(systemName: "flag")
+                                .font(.system(size: 9.5, weight: .semibold))
+                            Text(dlInfo.label)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(dlInfo.isUrgent ? ThingsMacPalette.deadlineCrimson : .secondary)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(
+                                dlInfo.isUrgent
+                                    ? ThingsMacPalette.deadlineCrimson.opacity(0.13)
+                                    : Color.primary.opacity(0.055)
+                            )
+                        )
+                    }
+
+                    if !task.checklistItems.isEmpty {
+                        let done = task.checklistItems.filter(\.isCompleted).count
+                        HStack(spacing: 3) {
+                            Image(systemName: "checklist")
+                                .font(.system(size: 9.5))
+                            Text("\(done)/\(task.checklistItems.count)")
+                                .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.primary.opacity(0.055)))
+                    }
+
+                    ForEach(task.tags.prefix(3)) { tag in
+                        TagPillBadge(
+                            title: tag.title,
+                            isSelected: store.selectedFilterTagId == tag.id,
+                            showIcon: true
+                        ) {
+                            store.selectedFilterTagId = (store.selectedFilterTagId == tag.id) ? nil : tag.id
+                        }
+                    }
+                }
+            }
+        }
+        .opacity(isBlocked ? 0.68 : 1.0)
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .thingsCardSurface(cornerRadius: 11, isSelected: isSelected)
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                onOpenDetail()
+            }
+        )
+        .onTapGesture {
+            let flags = NSEvent.modifierFlags
+            if flags.contains(.shift) || flags.contains(.command) {
+                store.handleRowClick(taskId: task.id, modifiers: flags)
+            } else {
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+                    store.selectedTaskIds = [task.id]
+                    store.lastSelectedTaskId = task.id
+                }
+            }
+        }
+        .thingsTaskDraggable(store: store, task: task)
+        .thingsDropTarget(cornerRadius: 11) { payloads in
+            store.dropTasksIntoProjectSection(
+                payloads,
+                projectId: project.id,
+                headingId: columnHeadingId,
+                beforeTaskId: task.id
+            )
+        }
+        .contextMenu {
+            kanbanContextMenu
+        }
+    }
+
+    private var hasAnyMetadataBadges: Bool {
+        store.blockedByBadgeText(for: task) != nil
+            || task.resolvedEffort != nil
+            || task.formattedTimeblockPill != nil
+            || whenBadgeText != nil
+            || task.deadline != nil
+            || !task.checklistItems.isEmpty
+            || !task.tags.isEmpty
+    }
+
+    private var whenBadgeText: String? {
+        switch task.scheduleState {
+        case .today:
+            return store.tr("view_today")
+        case .thisEvening:
+            return store.tr("view_this_evening")
+        case .someday:
+            return store.tr("view_someday")
+        case .upcoming:
+            if let w = task.whenDate {
+                let df = DateFormatter()
+                df.locale = store.preferences.language.locale
+                df.setLocalizedDateFormatFromTemplate("dMMM")
+                return df.string(from: DateEpochConverter.date(fromMillis: w))
+            }
+            return store.tr("view_upcoming")
+        default:
+            if let w = task.whenDate {
+                let df = DateFormatter()
+                df.locale = store.preferences.language.locale
+                df.setLocalizedDateFormatFromTemplate("dMMM")
+                return df.string(from: DateEpochConverter.date(fromMillis: w))
+            }
+            return nil
+        }
+    }
+
+    private var whenBadgeIcon: String {
+        switch task.scheduleState {
+        case .today: return "sun.max.fill"
+        case .thisEvening: return "moon.stars.fill"
+        case .someday: return "cloud.fill"
+        default: return "calendar"
+        }
+    }
+
+    private var whenBadgeTint: Color {
+        switch task.scheduleState {
+        case .today: return ThingsMacPalette.todayYellow
+        case .thisEvening: return ThingsMacPalette.eveningPurple
+        case .someday: return ThingsMacPalette.somedayAmber
+        default: return ThingsMacPalette.accentBlue
+        }
+    }
+
+    private func deadlineBadgeInfo(_ millis: Int64) -> (label: String, isUrgent: Bool) {
+        let todayDay = DateEpochConverter.epochDay(for: Date())
+        let dlDay = DateEpochConverter.epochDay(forMillis: millis)
+        let diff = dlDay - todayDay
+        if diff == 0 { return (store.tr("deadline_today"), true) }
+        if diff < 0 { return (store.trf("deadline_days_overdue", abs(diff)), true) }
+        return (store.trf("deadline_days_left", diff), diff <= 1)
+    }
+
+    private func effortTitle(_ effort: TaskEffortLevel) -> String {
+        switch effort {
+        case .quickWin: return store.tr("v30_effort_quick_win")
+        case .medium: return store.tr("v30_effort_medium")
+        case .deepFocus: return store.tr("v30_effort_deep_focus")
+        }
+    }
+
+    private func effortColor(_ effort: TaskEffortLevel) -> Color {
+        switch effort {
+        case .quickWin: return ThingsMacPalette.anytimeTeal
+        case .medium: return ThingsMacPalette.accentBlue
+        case .deepFocus: return ThingsMacPalette.eveningPurple
+        }
+    }
+
+    @ViewBuilder
+    private var kanbanContextMenu: some View {
+        let isBatch = store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(task.id)
+        if isBatch {
+            Button(store.tr("action_complete")) {
+                store.completeSelectedTasks()
+            }
+            Button(store.tr("view_today")) {
+                store.scheduleSelectedTasks(.today)
+            }
+            Button(store.tr("v25_batch_someday")) {
+                store.scheduleSelectedTasks(.someday)
+            }
+            Button(store.tr("v25_batch_pin")) {
+                store.togglePinForSelectedTasks()
+            }
+            Button(store.tr("v25_batch_duplicate")) {
+                store.duplicateSelectedTasks()
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteSelectedTasks()
+            } label: {
+                Text(store.tr("action_delete"))
+            }
+        } else {
+            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                store.toggleTaskCompletion(latestTask)
+            }
+            Button(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task")) {
+                store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+            }
+            Divider()
+            Button(store.tr("view_today")) {
+                var copy = latestTask
+                copy.scheduleState = .today
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
+            Button(store.tr("view_this_evening")) {
+                var copy = latestTask
+                copy.scheduleState = .thisEvening
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
+            Button(store.tr("view_someday")) {
+                var copy = latestTask
+                copy.scheduleState = .someday
+                copy.whenDate = nil
+                store.updateTask(copy)
+            }
+            Menu(store.tr("v30_duration_label")) {
+                ForEach([5, 15, 30, 60, 120, 240], id: \.self) { mins in
+                    Button(TaskItem.formatCompactDuration(mins)) {
+                        store.setTaskStandaloneDuration(latestTask.id, durationMinutes: mins)
+                    }
+                }
+                if (latestTask.durationMinutes ?? 0) > 0 {
+                    Divider()
+                    Button(store.tr("v30_duration_clear"), role: .destructive) {
+                        store.setTaskStandaloneDuration(latestTask.id, durationMinutes: nil)
+                    }
+                }
+            }
+            Menu(store.tr("v30_effort_label")) {
+                ForEach(TaskEffortLevel.allCases, id: \.rawValue) { level in
+                    Button(effortTitle(level)) {
+                        store.setTaskEffort(latestTask.id, effortLevel: level.rawValue)
+                    }
+                }
+                if latestTask.resolvedEffort != nil {
+                    Divider()
+                    Button(store.tr("v30_effort_none")) {
+                        store.setTaskEffort(latestTask.id, effortLevel: nil)
+                    }
+                }
+            }
+            Button(store.tr("v30_blocked_by_action")) {
+                isDependenciesPopoverOpen = true
+            }
+            Button(store.tr("action_duplicate_todo")) {
+                _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            }
+            Button(store.tr("context_select_task")) {
+                store.selectedTaskIds.insert(task.id)
+                store.lastSelectedTaskId = task.id
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteTask(latestTask)
+            } label: {
+                Text(store.tr("action_delete"))
+            }
+        }
+    }
+}
+
+// MARK: - Mode 3: ProjectRoadmapWorkspaceView (Calm Bento Gantt + PDF/PNG Export)
+
+fileprivate enum RoadmapTimelineRow: Identifiable {
+    case generalHeader
+    case phaseHeader(Heading, RoadmapPhaseBar?)
+    case task(RoadmapTaskBar)
+
+    var id: String {
+        switch self {
+        case .generalHeader:
+            return "roadmap_general_header"
+        case .phaseHeader(let h, _):
+            return "roadmap_phase_\(h.id)"
+        case .task(let b):
+            return "roadmap_task_\(b.id)"
+        }
+    }
+}
+
+public struct ProjectRoadmapWorkspaceView: View {
+    @ObservedObject var store: ThingsbookStore
+    public let project: Project
+    public let openTasks: [TaskItem]
+    public let completedTasks: [TaskItem]
+    public let headings: [Heading]
+
+    @State private var dayColumnWidth: CGFloat = 38.0
+    @State private var activePhaseDrag: (id: String, deltaDays: Int)? = nil
+    @State private var activeTaskDrag: (id: String, deltaDays: Int)? = nil
+    @State private var unscheduledStartPopoverTaskId: String? = nil
+    @State private var editingTaskInSheet: TaskItem? = nil
+
+    private let labelColumnWidth: CGFloat = 236
+    private let headerHeight: CGFloat = 50
+    private let rowHeight: CGFloat = 36
+    private let rowSpacing: CGFloat = 5
+
+    public init(
+        store: ThingsbookStore,
+        project: Project,
+        openTasks: [TaskItem],
+        completedTasks: [TaskItem],
+        headings: [Heading]
+    ) {
+        self.store = store
+        self.project = project
+        self.openTasks = openTasks
+        self.completedTasks = completedTasks
+        self.headings = headings
+    }
+
+    private var activeHeadings: [Heading] {
+        headings
+            .filter { !$0.isDeleted && !$0.isArchived }
+            .sorted {
+                if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                return $0.id < $1.id
+            }
+    }
+
+    private var roadmapLayout: ProjectRoadmapLayout {
+        let scheduledCompleted = completedTasks.filter { $0.whenDate != nil || $0.deadline != nil }
+        return ProjectRoadmapEngine.buildLayout(
+            project: project,
+            headings: activeHeadings,
+            tasks: openTasks + scheduledCompleted,
+            todayMillis: DateEpochConverter.startOfDayMillis(for: Date())
+        )
+    }
+
+    private func buildTimelineRows(for layout: ProjectRoadmapLayout) -> [RoadmapTimelineRow] {
+        var rows: [RoadmapTimelineRow] = []
+        if !layout.generalTaskBars.isEmpty {
+            rows.append(.generalHeader)
+            for bar in layout.generalTaskBars {
+                rows.append(.task(bar))
+            }
+        }
+        for heading in activeHeadings {
+            let phaseBar = layout.phaseBar(for: heading.id)
+            let childBars = layout.taskBarsByHeading[heading.id] ?? []
+            rows.append(.phaseHeader(heading, phaseBar))
+            for bar in childBars {
+                rows.append(.task(bar))
+            }
+        }
+        return rows
+    }
+
+    public var body: some View {
+        let layout = roadmapLayout
+        let rows = buildTimelineRows(for: layout)
+        let totalGridWidth = CGFloat(max(21, layout.totalDays)) * dayColumnWidth
+
+        VStack(alignment: .leading, spacing: 14) {
+            ScrollViewReader { scrollProxy in
+                VStack(alignment: .leading, spacing: 12) {
+                    roadmapToolbar(layout: layout) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            scrollProxy.scrollTo("roadmap_day_\(layout.todayEpochDay)", anchor: .center)
+                        }
+                    }
+
+                    if rows.isEmpty {
+                        emptyRoadmapHintCard
+                    } else {
+                        HStack(alignment: .top, spacing: 0) {
+                            // Left Pinned Label Column
+                            roadmapLeftLabelColumn(rows: rows)
+
+                            Divider()
+
+                            // Right Horizontally Scrollable Timeline Grid
+                            ScrollView(.horizontal, showsIndicators: true) {
+                                roadmapTimelineGrid(
+                                    layout: layout,
+                                    rows: rows,
+                                    totalGridWidth: totalGridWidth
+                                )
+                            }
+                        }
+                        .background(ThingsMacPalette.cardSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.085), lineWidth: 0.9)
+                        )
+                        .shadow(color: Color.black.opacity(0.045), radius: 8, y: 2)
+                        .onAppear {
+                            DispatchQueue.main.async {
+                                scrollProxy.scrollTo("roadmap_day_\(layout.todayEpochDay)", anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Unscheduled Tray
+            if !layout.unscheduledTasks.isEmpty || rows.isEmpty {
+                unscheduledSectionCard(unscheduledTasks: layout.unscheduledTasks)
+            }
+        }
+        .sheet(item: $editingTaskInSheet, onDismiss: {
+            if store.expandedTaskId != nil {
+                store.expandedTaskId = nil
+            }
+        }) { task in
+            ScrollView {
+                TaskRowCardView(store: store, task: task, showContextSubtitle: false)
+                    .padding(16)
+            }
+            .frame(minWidth: 560, idealWidth: 600, maxHeight: 580)
+            .background(ThingsMacPalette.canvasBackground)
+        }
+    }
+
+    // MARK: - Roadmap Toolbar
+
+    private func roadmapToolbar(
+        layout: ProjectRoadmapLayout,
+        onJumpToday: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                Text(formattedWindowLabel(for: layout))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                    )
+            )
+
+            ThingsActionChipButton(
+                title: store.tr("v30_roadmap_jump_today"),
+                systemImage: "scope",
+                helpText: store.tr("v30_roadmap_jump_today"),
+                action: onJumpToday
+            )
+
+            if let primarySelectedId = store.selectedTaskIds.first,
+               let selectedTask = (openTasks + completedTasks).first(where: { $0.id == primarySelectedId }) {
+                HStack(spacing: 4) {
+                    Button {
+                        store.shiftTaskRoadmapDates(selectedTask, deltaDays: -1)
+                    } label: {
+                        Text(store.tr("v30_roadmap_shift_earlier"))
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .padding(.horizontal, 8.5)
+                            .padding(.vertical, 4.5)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        store.shiftTaskRoadmapDates(selectedTask, deltaDays: 1)
+                    } label: {
+                        Text(store.tr("v30_roadmap_shift_later"))
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .padding(.horizontal, 8.5)
+                            .padding(.vertical, 4.5)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            Spacer()
+
+            // Day-width zoom controls
+            HStack(spacing: 2) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        dayColumnWidth = max(26.0, dayColumnWidth - 10.0)
+                    }
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_tooltip_zoom_out"))
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        dayColumnWidth = 38.0
+                    }
+                } label: {
+                    Text("\(Int((dayColumnWidth / 38.0 * 100.0).rounded()))%")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_tooltip_zoom_reset"))
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        dayColumnWidth = min(64.0, dayColumnWidth + 10.0)
+                    }
+                } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_tooltip_zoom_in"))
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                    )
+            )
+
+            // 1-Click Export Roadmap Menu (PDF & PNG)
+            Menu {
+                Button {
+                    exportRoadmapInteractively(asPDF: true, layout: layout)
+                } label: {
+                    Label(store.tr("v30_roadmap_export_pdf"), systemImage: "doc.richtext")
+                }
+
+                Button {
+                    exportRoadmapInteractively(asPDF: false, layout: layout)
+                } label: {
+                    Label(store.tr("v30_roadmap_export_png"), systemImage: "photo")
+                }
+            } label: {
+                HStack(spacing: 5.5) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 11.5, weight: .semibold))
+                    Text(store.tr("v30_roadmap_export"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .opacity(0.75)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .thingsTooltip(store.tr("v30_roadmap_export"))
+        }
+    }
+
+    // MARK: - Left Label Column
+
+    private func roadmapLeftLabelColumn(rows: [RoadmapTimelineRow]) -> some View {
+        VStack(alignment: .leading, spacing: rowSpacing) {
+            HStack {
+                Text(project.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(width: labelColumnWidth, height: headerHeight)
+            .background(ThingsMacPalette.subtleContainer.opacity(0.75))
+
+            ForEach(rows) { row in
+                switch row {
+                case .generalHeader:
+                    HStack(spacing: 6) {
+                        Capsule()
+                            .fill(ThingsMacPalette.inboxBlue)
+                            .frame(width: 3.5, height: 15)
+                        Text(store.tr("v30_board_ungrouped_column"))
+                            .font(.system(size: 12.5, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(width: labelColumnWidth, height: rowHeight)
+                    .thingsDropTarget(cornerRadius: 8) { payloads in
+                        store.dropTasksIntoProjectSection(payloads, projectId: project.id, headingId: nil)
+                    }
+
+                case .phaseHeader(let heading, _):
+                    HStack(spacing: 6) {
+                        Capsule()
+                            .fill(ThingsMacPalette.inboxBlue)
+                            .frame(width: 3.5, height: 15)
+                        Text(heading.title)
+                            .font(.system(size: 12.5, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        PhaseStartDatePillButton(store: store, heading: heading)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(width: labelColumnWidth, height: rowHeight)
+                    .thingsDropTarget(cornerRadius: 8) { payloads in
+                        store.dropTasksIntoProjectSection(payloads, projectId: project.id, headingId: heading.id)
+                    }
+
+                case .task(let bar):
+                    let isSelected = store.selectedTaskIds.contains(bar.id)
+                    HStack(spacing: 7) {
+                        ThingsCheckboxButton(
+                            status: bar.task.status,
+                            isSomeday: bar.task.scheduleState == .someday,
+                            helpText: store.tr("macos_checkbox_help"),
+                            onToggleComplete: { store.toggleTaskCompletion(bar.task) },
+                            onCancelTask: { store.cancelTask(bar.task) }
+                        )
+                        Text(bar.task.title.isEmpty ? store.tr("macos_untitled_todo") : bar.task.title)
+                            .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                            .foregroundStyle(bar.task.status == .completed ? .secondary : .primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                    }
+                    .padding(.leading, 18)
+                    .padding(.trailing, 8)
+                    .frame(width: labelColumnWidth, height: rowHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            editingTaskInSheet = bar.task
+                        }
+                    )
+                    .onTapGesture {
+                        let flags = NSEvent.modifierFlags
+                        if flags.contains(.shift) || flags.contains(.command) {
+                            store.handleRowClick(taskId: bar.id, modifiers: flags)
+                        } else {
+                            store.selectedTaskIds = [bar.id]
+                            store.lastSelectedTaskId = bar.id
+                        }
+                    }
+                    .thingsTaskDraggable(store: store, task: bar.task)
+                }
+            }
+        }
+        .padding(.bottom, 10)
+        .frame(width: labelColumnWidth)
+        .background(ThingsMacPalette.subtleContainer.opacity(0.45))
+    }
+
+    // MARK: - Right Timeline Grid, Bars & Dependency Canvas
+
+    private func roadmapTimelineGrid(
+        layout: ProjectRoadmapLayout,
+        rows: [RoadmapTimelineRow],
+        totalGridWidth: CGFloat
+    ) -> some View {
+        let totalHeight = headerHeight
+            + CGFloat(rows.count) * rowHeight
+            + CGFloat(max(0, rows.count - 1)) * rowSpacing
+            + 12
+
+        return ZStack(alignment: .topLeading) {
+            // 1. Background Day Columns + Month/Day Header + Today Vertical Line
+            HStack(spacing: 0) {
+                ForEach(0..<layout.totalDays, id: \.self) { dayOffset in
+                    let epochDay = layout.startEpochDay + dayOffset
+                    let isToday = epochDay == layout.todayEpochDay
+                    let isWeekend = isWeekendDay(epochDay)
+
+                    VStack(spacing: 0) {
+                        VStack(spacing: 2) {
+                            Text(monthHeaderChip(for: epochDay, isFirstColumn: dayOffset == 0))
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(isToday ? ThingsMacPalette.accentBlue : .secondary)
+                                .lineLimit(1)
+                                .frame(height: 15)
+
+                            HStack(spacing: 2) {
+                                Text("\(dayNumber(for: epochDay))")
+                                    .font(.system(size: 11.5, weight: isToday ? .bold : .semibold, design: .rounded))
+                                Text(weekdayInitial(for: epochDay))
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .opacity(0.75)
+                            }
+                            .foregroundStyle(isToday ? .white : (isWeekend ? .secondary : .primary))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(isToday ? ThingsMacPalette.accentBlue : Color.clear)
+                            )
+                        }
+                        .frame(width: dayColumnWidth, height: headerHeight)
+                        .background(ThingsMacPalette.subtleContainer.opacity(0.75))
+                        .id("roadmap_day_\(epochDay)")
+
+                        Rectangle()
+                            .fill(
+                                isToday
+                                    ? ThingsMacPalette.accentBlue.opacity(0.07)
+                                    : (isWeekend ? Color.primary.opacity(0.018) : Color.clear)
+                            )
+                            .frame(width: dayColumnWidth, height: max(40, totalHeight - headerHeight))
+                            .overlay(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.055))
+                                    .frame(width: 0.75)
+                            }
+                            .overlay {
+                                if isToday {
+                                    Rectangle()
+                                        .fill(ThingsMacPalette.accentBlue.opacity(0.65))
+                                        .frame(width: 1.6)
+                                }
+                            }
+                    }
+                }
+            }
+
+            // 2. Cubic-Bézier Dependency Connectors Canvas Overlay
+            Canvas { context, _ in
+                var midYByTaskId: [String: CGFloat] = [:]
+                for (rowIdx, row) in rows.enumerated() {
+                    if case .task(let bar) = row {
+                        let y = headerHeight + CGFloat(rowIdx) * (rowHeight + rowSpacing) + (rowHeight * 0.5)
+                        midYByTaskId[bar.id] = y
+                    }
+                }
+                let barById = Dictionary(uniqueKeysWithValues: layout.allTaskBars.map { ($0.id, $0) })
+
+                for edge in layout.dependencyEdges {
+                    guard let fromBar = barById[edge.fromTaskId],
+                          let toBar = barById[edge.toTaskId],
+                          let y0 = midYByTaskId[edge.fromTaskId],
+                          let y1 = midYByTaskId[edge.toTaskId] else {
+                        continue
+                    }
+
+                    let fromShift = (activeTaskDrag?.id == fromBar.id) ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
+                    let toShift = (activeTaskDrag?.id == toBar.id) ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
+
+                    let x0 = CGFloat(fromBar.endEpochDay - layout.startEpochDay + 1) * dayColumnWidth - 3 + fromShift
+                    let x1 = CGFloat(toBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3 + toShift
+                    let p0 = CGPoint(x: x0, y: y0)
+                    let p3 = CGPoint(x: x1, y: y1)
+
+                    var curve = Path()
+                    curve.move(to: p0)
+                    if p3.x >= p0.x + 12 {
+                        let dx = max(24.0, (p3.x - p0.x) * 0.5)
+                        curve.addCurve(
+                            to: p3,
+                            control1: CGPoint(x: p0.x + dx, y: p0.y),
+                            control2: CGPoint(x: p3.x - dx, y: p3.y)
+                        )
+                    } else {
+                        let vSign: CGFloat = p3.y >= p0.y ? 1.0 : -1.0
+                        curve.addCurve(
+                            to: p3,
+                            control1: CGPoint(x: p0.x + 28.0, y: p0.y + 14.0 * vSign),
+                            control2: CGPoint(x: p3.x - 28.0, y: p3.y - 14.0 * vSign)
+                        )
+                    }
+
+                    let edgeColor = edge.isActivelyBlocking
+                        ? ThingsMacPalette.somedayAmber
+                        : ThingsMacPalette.accentBlue.opacity(0.45)
+
+                    context.stroke(
+                        curve,
+                        with: .color(edgeColor),
+                        style: StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round)
+                    )
+
+                    var arrow = Path()
+                    arrow.move(to: CGPoint(x: p3.x - 6.5, y: p3.y - 3.8))
+                    arrow.addLine(to: p3)
+                    arrow.addLine(to: CGPoint(x: p3.x - 6.5, y: p3.y + 3.8))
+                    context.stroke(
+                        arrow,
+                        with: .color(edgeColor),
+                        style: StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round)
+                    )
+                }
+            }
+            .frame(width: totalGridWidth, height: totalHeight)
+            .allowsHitTesting(false)
+
+            // 3. Draggable Glacier-Blue Phase Bars & Soft Bento Task Bars
+            VStack(alignment: .leading, spacing: rowSpacing) {
+                Color.clear
+                    .frame(width: totalGridWidth, height: headerHeight)
+
+                ForEach(rows) { row in
+                    ZStack(alignment: .leading) {
+                        Color.clear
+                            .frame(width: totalGridWidth, height: rowHeight)
+
+                        switch row {
+                        case .generalHeader:
+                            EmptyView()
+
+                        case .phaseHeader(let heading, let maybeBar):
+                            if let phaseBar = maybeBar {
+                                roadmapPhaseBarView(heading: heading, phaseBar: phaseBar, layout: layout)
+                            }
+
+                        case .task(let taskBar):
+                            roadmapTaskBarView(taskBar: taskBar, layout: layout)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: totalGridWidth, height: totalHeight, alignment: .topLeading)
+    }
+
+    private func roadmapPhaseBarView(
+        heading: Heading,
+        phaseBar: RoadmapPhaseBar,
+        layout: ProjectRoadmapLayout
+    ) -> some View {
+        let delta = (activePhaseDrag?.id == heading.id) ? (activePhaseDrag?.deltaDays ?? 0) : 0
+        let baseX = CGFloat(phaseBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 2
+        let dragX = CGFloat(delta) * dayColumnWidth
+        let barW = max(dayColumnWidth - 4, CGFloat(phaseBar.spanDays) * dayColumnWidth - 4)
+
+        return HStack(spacing: 6) {
+            Image(systemName: "flag.checkered")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.95))
+
+            Text(heading.title)
+                .font(.system(size: 11.5, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(width: barW, height: 26)
+        .background(
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .opacity(phaseBar.hasExplicitDates ? 0.96 : 0.72)
+                .shadow(color: ThingsMacPalette.accentBlue.opacity(0.24), radius: 4, y: 1.5)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    Color.white.opacity(phaseBar.hasExplicitDates ? 0.45 : 0.65),
+                    style: StrokeStyle(lineWidth: 0.9, dash: phaseBar.hasExplicitDates ? [] : [4, 3])
+                )
+        )
+        .offset(x: baseX + dragX)
+        .gesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { value in
+                    let snapped = Int((value.translation.width / dayColumnWidth).rounded())
+                    activePhaseDrag = (heading.id, snapped)
+                }
+                .onEnded { value in
+                    let snapped = Int((value.translation.width / dayColumnWidth).rounded())
+                    activePhaseDrag = nil
+                    if snapped != 0 {
+                        store.shiftHeadingRoadmapDates(heading, deltaDays: snapped)
+                    }
+                }
+        )
+        .contextMenu {
+            Button(store.tr("v30_roadmap_shift_earlier")) {
+                store.shiftHeadingRoadmapDates(heading, deltaDays: -1)
+            }
+            Button(store.tr("v30_roadmap_shift_later")) {
+                store.shiftHeadingRoadmapDates(heading, deltaDays: 1)
+            }
+            if heading.startDate != nil {
+                Divider()
+                Button(store.tr("v30_phase_clear_start_date")) {
+                    store.updateHeadingStartDate(heading.id, startDate: nil)
+                }
+            }
+            if heading.endDate != nil {
+                Button(store.tr("phase_clear_end_date")) {
+                    store.updateHeadingEndDate(heading.id, endDate: nil)
+                }
+            }
+        }
+    }
+
+    private func roadmapTaskBarView(
+        taskBar: RoadmapTaskBar,
+        layout: ProjectRoadmapLayout
+    ) -> some View {
+        let task = taskBar.task
+        let isSelected = store.selectedTaskIds.contains(task.id)
+        let isBlocked = store.isTaskActivelyBlocked(task)
+        let isDraggingThis = (activeTaskDrag?.id == task.id)
+            || (activeTaskDrag != nil && store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
+        let delta = isDraggingThis ? (activeTaskDrag?.deltaDays ?? 0) : 0
+        let baseX = CGFloat(taskBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3
+        let dragX = CGFloat(delta) * dayColumnWidth
+        let barW = max(dayColumnWidth - 6, CGFloat(taskBar.spanDays) * dayColumnWidth - 6)
+
+        let borderTint: Color = {
+            if isSelected { return ThingsMacPalette.accentBlue }
+            if isBlocked { return ThingsMacPalette.somedayAmber }
+            if task.status == .completed { return ThingsMacPalette.logbookGreen.opacity(0.6) }
+            return ThingsMacPalette.accentBlue.opacity(0.45)
+        }()
+
+        return HStack(spacing: 6) {
+            if isBlocked {
+                Image(systemName: "hourglass")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.somedayAmber)
+            } else if task.status == .completed {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.logbookGreen)
+            } else if task.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.todayYellow)
+            }
+
+            Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            if task.deadline != nil {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(width: barW, height: 26)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    isSelected
+                        ? ThingsMacPalette.accentBlue.opacity(0.16)
+                        : ThingsMacPalette.cardSurface
+                )
+                .shadow(color: Color.black.opacity(isDraggingThis ? 0.14 : 0.05), radius: isDraggingThis ? 6 : 2, y: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(borderTint, lineWidth: isSelected ? 1.5 : 1.05)
+        )
+        .offset(x: baseX + dragX)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                editingTaskInSheet = task
+            }
+        )
+        .onTapGesture {
+            let flags = NSEvent.modifierFlags
+            if flags.contains(.shift) || flags.contains(.command) {
+                store.handleRowClick(taskId: task.id, modifiers: flags)
+            } else {
+                store.selectedTaskIds = [task.id]
+                store.lastSelectedTaskId = task.id
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { value in
+                    let snapped = Int((value.translation.width / dayColumnWidth).rounded())
+                    activeTaskDrag = (task.id, snapped)
+                }
+                .onEnded { value in
+                    let snapped = Int((value.translation.width / dayColumnWidth).rounded())
+                    activeTaskDrag = nil
+                    if snapped != 0 {
+                        store.shiftTaskRoadmapDates(task, deltaDays: snapped)
+                    }
+                }
+        )
+        .contextMenu {
+            Button(store.tr("v30_roadmap_shift_earlier")) {
+                store.shiftTaskRoadmapDates(task, deltaDays: -1)
+            }
+            Button(store.tr("v30_roadmap_shift_later")) {
+                store.shiftTaskRoadmapDates(task, deltaDays: 1)
+            }
+            Divider()
+            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
+                store.toggleTaskCompletion(task)
+            }
+            Button(store.tr("view_today")) {
+                var copy = task
+                copy.scheduleState = .today
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
+            Button(store.tr("view_someday")) {
+                var copy = task
+                copy.scheduleState = .someday
+                copy.whenDate = nil
+                copy.deadline = nil
+                store.updateTask(copy)
+            }
+            Divider()
+            Button(role: .destructive) {
+                store.deleteTask(task)
+            } label: {
+                Text(store.tr("action_delete"))
+            }
+        }
+    }
+
+    // MARK: - Unscheduled Section Tray
+
+    private var emptyRoadmapHintCard: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "calendar.day.timeline.left")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(ThingsMacPalette.accentBlue.opacity(0.65))
+            Text(store.tr("v30_roadmap_unscheduled_hint"))
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+        .thingsCardSurface(cornerRadius: 14)
+    }
+
+    private func unscheduledSectionCard(unscheduledTasks: [TaskItem]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "tray.full")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+
+                Text(store.tr("v30_roadmap_unscheduled_section"))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                if !unscheduledTasks.isEmpty {
+                    Text("\(unscheduledTasks.count)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                }
+
+                Text("·")
+                    .foregroundStyle(.tertiary)
+
+                Text(store.tr("v30_roadmap_unscheduled_hint"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Spacer()
+            }
+
+            if !unscheduledTasks.isEmpty {
+                VStack(spacing: 5) {
+                    ForEach(unscheduledTasks) { task in
+                        unscheduledTaskRow(task)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer.opacity(0.75))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.85)
+                )
+        )
+    }
+
+    private func unscheduledTaskRow(_ task: TaskItem) -> some View {
+        let isPopoverOpen = Binding<Bool>(
+            get: { unscheduledStartPopoverTaskId == task.id },
+            set: { open in unscheduledStartPopoverTaskId = open ? task.id : nil }
+        )
+
+        return HStack(spacing: 10) {
+            ThingsCheckboxButton(
+                status: task.status,
+                isSomeday: task.scheduleState == .someday,
+                helpText: store.tr("macos_checkbox_help"),
+                onToggleComplete: { store.toggleTaskCompletion(task) },
+                onCancelTask: { store.cancelTask(task) }
+            )
+
+            Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            if let hid = task.headingId,
+               let heading = activeHeadings.first(where: { $0.id == hid }) {
+                Text(heading.title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.11)))
+            }
+
+            Spacer()
+
+            // 1-click Today scheduling button
+            ThingsActionChipButton(
+                title: store.tr("view_today"),
+                systemImage: "sun.max.fill",
+                activeTint: ThingsMacPalette.todayYellow,
+                helpText: store.tr("view_today")
+            ) {
+                var copy = task
+                copy.scheduleState = .today
+                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                store.updateTask(copy)
+            }
+
+            // 1-click Start Date calendar picker button
+            ThingsActionChipButton(
+                title: store.tr("v30_phase_set_start_date"),
+                systemImage: "calendar.badge.plus",
+                activeTint: ThingsMacPalette.accentBlue,
+                helpText: store.tr("v30_phase_set_start_date")
+            ) {
+                unscheduledStartPopoverTaskId = task.id
+            }
+            .popover(isPresented: isPopoverOpen) {
+                DeadlinePopoverView(
+                    store: store,
+                    currentDeadlineMillis: task.whenDate,
+                    customTitle: store.tr("v30_phase_set_start_date"),
+                    customClearTitle: store.tr("v30_phase_clear_start_date"),
+                    accentTint: ThingsMacPalette.accentBlue
+                ) { pickedMs in
+                    guard let pickedMs else { return }
+                    let todayDay = DateEpochConverter.epochDay(for: Date())
+                    let pickedDay = DateEpochConverter.epochDay(forMillis: pickedMs)
+                    var copy = task
+                    copy.whenDate = pickedMs
+                    copy.scheduleState = pickedDay <= todayDay ? .today : .upcoming
+                    store.updateTask(copy)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
+        .onTapGesture {
+            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+        }
+        .thingsTaskDraggable(store: store, task: task)
+    }
+
+    // MARK: - 1-Click Unclipped Vector PDF & 2x Retina PNG Export
+
+    @MainActor
+    private func exportRoadmapInteractively(asPDF: Bool, layout: ProjectRoadmapLayout) {
+        let panel = NSSavePanel()
+        panel.title = store.tr(asPDF ? "v30_roadmap_export_pdf" : "v30_roadmap_export_png")
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [asPDF ? UTType.pdf : UTType.png]
+
+        let sanitizedTitle = project.title
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseName = sanitizedTitle.isEmpty ? "Roadmap" : sanitizedTitle
+        let ext = asPDF ? "pdf" : "png"
+        panel.nameFieldStringValue = "\(baseName)-Roadmap.\(ext)"
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        let rawSnapshot = RoadmapExportSnapshotView(
+            store: store,
+            project: project,
+            headings: activeHeadings,
+            layout: layout,
+            dayColumnWidth: max(36.0, dayColumnWidth)
+        )
+        let proposed = rawSnapshot.exportCanvasSize
+        let snapshotView = rawSnapshot.environment(\.colorScheme, .light)
+        let exportedData: Data?
+        if asPDF {
+            exportedData = ProjectRoadmapExporter.renderViewToPDFData(snapshotView, proposedSize: proposed)
+                ?? ProjectRoadmapExporter.exportRoadmapPDFData(
+                    project: project,
+                    headings: activeHeadings,
+                    layout: layout,
+                    generalLabel: store.tr("v30_board_ungrouped_column"),
+                    todayLabel: store.tr("view_today"),
+                    locale: store.preferences.language.locale,
+                    dayColumnWidth: max(36.0, dayColumnWidth)
+                )
+        } else {
+            exportedData = ProjectRoadmapExporter.renderViewToPNGData(snapshotView, scale: 2.0, proposedSize: proposed)
+                ?? ProjectRoadmapExporter.exportRoadmapPNGData(
+                    project: project,
+                    headings: activeHeadings,
+                    layout: layout,
+                    generalLabel: store.tr("v30_board_ungrouped_column"),
+                    todayLabel: store.tr("view_today"),
+                    locale: store.preferences.language.locale,
+                    dayColumnWidth: max(36.0, dayColumnWidth),
+                    scale: 2.0
+                )
+        }
+
+        if let data = exportedData {
+            try? data.write(to: destinationURL, options: .atomic)
+        }
+    }
+
+    // MARK: - Date Formatting Helpers
+
+    private func formattedWindowLabel(for layout: ProjectRoadmapLayout) -> String {
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.dateStyle = .medium
+        let start = DateEpochConverter.date(fromEpochDay: layout.startEpochDay)
+        let end = DateEpochConverter.date(fromEpochDay: layout.endEpochDay)
+        return "\(df.string(from: start)) – \(df.string(from: end))"
+    }
+
+    private func dayNumber(for epochDay: Int) -> Int {
+        Calendar.current.component(.day, from: DateEpochConverter.date(fromEpochDay: epochDay))
+    }
+
+    private func weekdayInitial(for epochDay: Int) -> String {
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("EEEEE")
+        return df.string(from: DateEpochConverter.date(fromEpochDay: epochDay))
+    }
+
+    private func monthHeaderChip(for epochDay: Int, isFirstColumn: Bool) -> String {
+        let date = DateEpochConverter.date(fromEpochDay: epochDay)
+        let dom = Calendar.current.component(.day, from: date)
+        guard isFirstColumn || dom == 1 else { return "" }
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("MMM")
+        return df.string(from: date)
+    }
+
+    private func isWeekendDay(_ epochDay: Int) -> Bool {
+        let iso = DateEpochConverter.isoWeekday(for: DateEpochConverter.date(fromEpochDay: epochDay))
+        return iso == 6 || iso == 7
+    }
+}
+
+// MARK: - Unclipped Full-Width Snapshot View for Vector PDF & 2x Retina PNG Export
+
+struct RoadmapExportSnapshotView: View {
+    @ObservedObject var store: ThingsbookStore
+    let project: Project
+    let headings: [Heading]
+    let layout: ProjectRoadmapLayout
+    let dayColumnWidth: CGFloat
+
+    private let labelColumnWidth: CGFloat = 236
+    private let headerHeight: CGFloat = 50
+    private let rowHeight: CGFloat = 34
+    private let rowSpacing: CGFloat = 4
+
+    private var rows: [RoadmapTimelineRow] {
+        var out: [RoadmapTimelineRow] = []
+        if !layout.generalTaskBars.isEmpty {
+            out.append(.generalHeader)
+            for b in layout.generalTaskBars {
+                out.append(.task(b))
+            }
+        }
+        for heading in headings {
+            let phaseBar = layout.phaseBar(for: heading.id)
+            let children = layout.taskBarsByHeading[heading.id] ?? []
+            if phaseBar != nil || !children.isEmpty {
+                out.append(.phaseHeader(heading, phaseBar))
+                for b in children {
+                    out.append(.task(b))
+                }
+            }
+        }
+        return out
+    }
+
+    var exportCanvasSize: CGSize {
+        let rCount = max(1, rows.count)
+        let gridWidth = CGFloat(max(21, layout.totalDays)) * dayColumnWidth
+        let timelineHeight = headerHeight + CGFloat(rCount) * rowHeight + CGFloat(max(0, rCount - 1)) * rowSpacing + 16
+        return CGSize(
+            width: labelColumnWidth + gridWidth + 56,
+            height: 76 + timelineHeight + 28
+        )
+    }
+
+    var body: some View {
+        let displayRows = rows
+        let gridWidth = CGFloat(max(21, layout.totalDays)) * dayColumnWidth
+        let timelineHeight = headerHeight
+            + CGFloat(max(1, displayRows.count)) * rowHeight
+            + CGFloat(max(0, displayRows.count - 1)) * rowSpacing
+            + 12
+
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ProjectProgressRing(
+                    progress: project.progress,
+                    size: 18,
+                    tint: ThingsMacPalette.accentBlue,
+                    isCompleted: project.status == .completed,
+                    showFraction: project.totalTaskCount > 0,
+                    completedCount: project.completedTaskCount,
+                    totalCount: project.totalTaskCount
+                )
+
+                Text(project.title)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.black)
+
+                Spacer()
+
+                Text(formattedWindowRange)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(alignment: .top, spacing: 0) {
+                // Full unclipped left label column
+                VStack(alignment: .leading, spacing: rowSpacing) {
+                    Color.clear
+                        .frame(width: labelColumnWidth, height: headerHeight)
+
+                    ForEach(displayRows) { row in
+                        switch row {
+                        case .generalHeader:
+                            Text(store.tr("v30_board_ungrouped_column"))
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 12)
+                                .frame(width: labelColumnWidth, height: rowHeight, alignment: .leading)
+                        case .phaseHeader(let h, _):
+                            HStack(spacing: 6) {
+                                Capsule()
+                                    .fill(ThingsMacPalette.inboxBlue)
+                                    .frame(width: 3.5, height: 14)
+                                Text(h.title)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.black)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(width: labelColumnWidth, height: rowHeight, alignment: .leading)
+                        case .task(let bar):
+                            Text(bar.task.title.isEmpty ? store.tr("macos_untitled_todo") : bar.task.title)
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.black.opacity(0.85))
+                                .lineLimit(1)
+                                .padding(.leading, 22)
+                                .padding(.trailing, 8)
+                                .frame(width: labelColumnWidth, height: rowHeight, alignment: .leading)
+                        }
+                    }
+                }
+                .frame(width: labelColumnWidth)
+                .background(Color(white: 0.97))
+
+                // Full unclipped multi-week timeline grid
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 0) {
+                        ForEach(0..<layout.totalDays, id: \.self) { offset in
+                            let epochDay = layout.startEpochDay + offset
+                            let isToday = epochDay == layout.todayEpochDay
+                            let date = DateEpochConverter.date(fromEpochDay: epochDay)
+                            let dom = Calendar.current.component(.day, from: date)
+
+                            VStack(spacing: 0) {
+                                VStack(spacing: 1) {
+                                    Text((offset == 0 || dom == 1) ? monthShort(date) : "")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(isToday ? ThingsMacPalette.accentBlue : .secondary)
+                                        .frame(height: 13)
+                                    Text("\(dom)")
+                                        .font(.system(size: 11, weight: isToday ? .bold : .medium, design: .rounded))
+                                        .foregroundStyle(isToday ? ThingsMacPalette.accentBlue : .black.opacity(0.8))
+                                }
+                                .frame(width: dayColumnWidth, height: headerHeight)
+
+                                Rectangle()
+                                    .fill(isToday ? ThingsMacPalette.accentBlue.opacity(0.07) : Color.clear)
+                                    .frame(width: dayColumnWidth, height: max(34, timelineHeight - headerHeight))
+                                    .overlay(alignment: .leading) {
+                                        Rectangle()
+                                            .fill(Color.black.opacity(0.06))
+                                            .frame(width: 0.75)
+                                    }
+                                    .overlay {
+                                        if isToday {
+                                            Rectangle()
+                                                .fill(ThingsMacPalette.accentBlue.opacity(0.65))
+                                                .frame(width: 1.5)
+                                        }
+                                    }
+                            }
+                        }
+                    }
+
+                    Canvas { context, _ in
+                        var midYByTaskId: [String: CGFloat] = [:]
+                        for (idx, row) in displayRows.enumerated() {
+                            if case .task(let tb) = row {
+                                midYByTaskId[tb.id] = headerHeight + CGFloat(idx) * (rowHeight + rowSpacing) + rowHeight * 0.5
+                            }
+                        }
+                        let barById = Dictionary(uniqueKeysWithValues: layout.allTaskBars.map { ($0.id, $0) })
+
+                        for edge in layout.dependencyEdges {
+                            guard let fromBar = barById[edge.fromTaskId],
+                                  let toBar = barById[edge.toTaskId],
+                                  let y0 = midYByTaskId[edge.fromTaskId],
+                                  let y1 = midYByTaskId[edge.toTaskId] else {
+                                continue
+                            }
+                            let p0 = CGPoint(x: CGFloat(fromBar.endEpochDay - layout.startEpochDay + 1) * dayColumnWidth - 3, y: y0)
+                            let p3 = CGPoint(x: CGFloat(toBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3, y: y1)
+                            let dx = max(22.0, abs(p3.x - p0.x) * 0.5)
+
+                            var path = Path()
+                            path.move(to: p0)
+                            path.addCurve(
+                                to: p3,
+                                control1: CGPoint(x: p0.x + dx, y: p0.y),
+                                control2: CGPoint(x: p3.x - dx, y: p3.y)
+                            )
+                            let strokeColor = edge.isActivelyBlocking
+                                ? ThingsMacPalette.somedayAmber
+                                : ThingsMacPalette.accentBlue.opacity(0.45)
+                            context.stroke(path, with: .color(strokeColor), lineWidth: 1.6)
+
+                            var arrow = Path()
+                            arrow.move(to: CGPoint(x: p3.x - 6, y: p3.y - 3.5))
+                            arrow.addLine(to: p3)
+                            arrow.addLine(to: CGPoint(x: p3.x - 6, y: p3.y + 3.5))
+                            context.stroke(arrow, with: .color(strokeColor), lineWidth: 1.6)
+                        }
+                    }
+                    .frame(width: gridWidth, height: timelineHeight)
+
+                    VStack(alignment: .leading, spacing: rowSpacing) {
+                        Color.clear.frame(width: gridWidth, height: headerHeight)
+
+                        ForEach(displayRows) { row in
+                            ZStack(alignment: .leading) {
+                                Color.clear.frame(width: gridWidth, height: rowHeight)
+                                switch row {
+                                case .generalHeader:
+                                    EmptyView()
+                                case .phaseHeader(let h, let maybeBar):
+                                    if let pBar = maybeBar {
+                                        let x = CGFloat(pBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 2
+                                        let w = max(dayColumnWidth - 4, CGFloat(pBar.spanDays) * dayColumnWidth - 4)
+                                        HStack(spacing: 5) {
+                                            Text(h.title)
+                                                .font(.system(size: 11, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .lineLimit(1)
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .frame(width: w, height: 24)
+                                        .background(
+                                            Capsule(style: .continuous)
+                                                .fill(
+                                                    LinearGradient(
+                                                        colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                                        startPoint: .leading,
+                                                        endPoint: .trailing
+                                                    )
+                                                )
+                                        )
+                                        .offset(x: x)
+                                    }
+                                case .task(let tBar):
+                                    let x = CGFloat(tBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3
+                                    let w = max(dayColumnWidth - 6, CGFloat(tBar.spanDays) * dayColumnWidth - 6)
+                                    HStack(spacing: 5) {
+                                        Text(tBar.task.title.isEmpty ? store.tr("macos_untitled_todo") : tBar.task.title)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.black.opacity(0.88))
+                                            .lineLimit(1)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .frame(width: w, height: 24)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .fill(Color.white)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.5), lineWidth: 1.0)
+                                            )
+                                    )
+                                    .offset(x: x)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(width: gridWidth, height: timelineHeight)
+            }
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.9)
+            )
+        }
+        .padding(24)
+        .background(Color.white)
+    }
+
+    private var formattedWindowRange: String {
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.dateStyle = .medium
+        let s = DateEpochConverter.date(fromEpochDay: layout.startEpochDay)
+        let e = DateEpochConverter.date(fromEpochDay: layout.endEpochDay)
+        return "\(df.string(from: s)) – \(df.string(from: e))"
+    }
+
+    private func monthShort(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("MMM")
+        return df.string(from: date)
+    }
+}

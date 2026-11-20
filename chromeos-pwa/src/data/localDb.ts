@@ -196,7 +196,11 @@ export function savePreferences(prefs: AppPreferences): void {
   localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(prefs));
 }
 
-export type UndoEventKind = 'task_completed' | 'task_deleted' | 'project_deleted';
+export type UndoEventKind =
+  | 'task_completed'
+  | 'task_deleted'
+  | 'project_deleted'
+  | 'tasks_updated';
 
 export interface UndoEventPayload {
   kind: UndoEventKind;
@@ -1045,6 +1049,207 @@ export class ThingsLocalDb {
           count: priorOpenTasks.length
         });
       }
+
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
+  async batchMoveOrReorderTasksInContainer(
+    taskIds: string[],
+    target: {
+      projectId?: string | null;
+      headingId?: string | null;
+      areaId?: string | null;
+      beforeSortOrder?: number | null;
+      afterSortOrder?: number | null;
+      scheduleState?: ScheduleState;
+      whenDate?: number | null;
+      scheduledStartMinutes?: number | null;
+    }
+  ): Promise<void> {
+    const uniqueIds = Array.from(new Set(taskIds.map((id) => id.trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) return;
+
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const todayEnd = endOfDayEpoch(new Date(now));
+      const tx = db.transaction(['tasks', 'checklist_items'], 'readwrite');
+      const taskStore = tx.objectStore('tasks');
+      const chkStore = tx.objectStore('checklist_items');
+
+      const allTasks = (await taskStore.getAll()) as TaskRecord[];
+      const taskById = new Map(allTasks.map((t) => [t.id, t]));
+      const validTasks = uniqueIds
+        .map((id) => taskById.get(id))
+        .filter((t): t is TaskRecord => t !== undefined && !t.purgedFromTrash);
+
+      if (validTasks.length === 0) {
+        await tx.done;
+        return;
+      }
+
+      const movedIdSet = new Set(validTasks.map((t) => t.id));
+      const hasExplicitContainer =
+        target.projectId !== undefined ||
+        target.headingId !== undefined ||
+        target.areaId !== undefined;
+
+      const explicitProjectId = hasExplicitContainer ? (target.projectId || null) : undefined;
+      const explicitHeadingId = hasExplicitContainer
+        ? explicitProjectId
+          ? (target.headingId || null)
+          : null
+        : undefined;
+      const explicitAreaId = hasExplicitContainer
+        ? explicitProjectId
+          ? null
+          : (target.areaId || null)
+        : undefined;
+
+      const before =
+        target.beforeSortOrder != null && Number.isFinite(target.beforeSortOrder)
+          ? target.beforeSortOrder
+          : null;
+      const after =
+        target.afterSortOrder != null && Number.isFinite(target.afterSortOrder)
+          ? target.afterSortOrder
+          : null;
+
+      const count = validTasks.length;
+      let sortOrders: number[];
+      if (before != null && after != null) {
+        const low = Math.min(before, after);
+        const high = Math.max(before, after);
+        const span = high - low;
+        const step = span > 1e-6 ? span / (count + 1) : 0.001;
+        sortOrders = validTasks.map((_, idx) => low + step * (idx + 1));
+      } else if (before != null) {
+        sortOrders = validTasks.map((_, idx) => before - (count - idx) * 100);
+      } else if (after != null) {
+        sortOrders = validTasks.map((_, idx) => after + (idx + 1) * 100);
+      } else {
+        const refProjId = explicitProjectId !== undefined ? explicitProjectId : validTasks[0].projectId;
+        const refHeadingId =
+          explicitHeadingId !== undefined ? explicitHeadingId : validTasks[0].headingId;
+        const refAreaId = explicitAreaId !== undefined ? explicitAreaId : validTasks[0].areaId;
+        const siblings = allTasks.filter(
+          (s) =>
+            !s.isDeleted &&
+            !movedIdSet.has(s.id) &&
+            (s.projectId ?? null) === (refProjId ?? null) &&
+            (s.headingId ?? null) === (refHeadingId ?? null) &&
+            (s.areaId ?? null) === (refAreaId ?? null)
+        );
+        const maxOrder =
+          siblings.length > 0
+            ? siblings.reduce((m, s) => Math.max(m, s.sortOrder), -Infinity)
+            : 900;
+        const safeBase = Number.isFinite(maxOrder) ? maxOrder : 900;
+        sortOrders = validTasks.map((_, idx) => safeBase + (idx + 1) * 100);
+      }
+
+      const priorTasks: TaskRecord[] = [];
+      const priorChecklists: ChecklistItemRecord[] = [];
+      const hadDeletedTask = validTasks.some((t) => t.isDeleted);
+      const allChk = hadDeletedTask
+        ? ((await chkStore.getAll()) as ChecklistItemRecord[])
+        : [];
+
+      for (let i = 0; i < validTasks.length; i++) {
+        const existing = validTasks[i];
+        priorTasks.push({ ...existing });
+
+        const nextProjectId =
+          explicitProjectId !== undefined ? explicitProjectId : existing.projectId;
+        const nextHeadingId =
+          explicitHeadingId !== undefined
+            ? explicitHeadingId
+            : nextProjectId
+              ? existing.headingId
+              : null;
+        const nextAreaId =
+          explicitAreaId !== undefined
+            ? explicitAreaId
+            : nextProjectId
+              ? null
+              : existing.areaId;
+
+        let nextSchedule: ScheduleState =
+          target.scheduleState !== undefined ? target.scheduleState : existing.scheduleState;
+        let nextWhen: number | null =
+          target.whenDate !== undefined
+            ? target.whenDate
+            : target.scheduleState !== undefined &&
+                (target.scheduleState === 'INBOX' ||
+                  target.scheduleState === 'ANYTIME' ||
+                  target.scheduleState === 'SOMEDAY')
+              ? null
+              : existing.whenDate;
+
+        if (nextSchedule === 'INBOX' && nextWhen != null) {
+          nextSchedule = nextWhen <= todayEnd ? 'TODAY' : 'UPCOMING';
+        }
+        if (
+          nextSchedule === 'INBOX' &&
+          nextWhen == null &&
+          existing.recurrenceRule == null &&
+          (nextProjectId != null || nextAreaId != null)
+        ) {
+          nextSchedule = 'ANYTIME';
+        }
+
+        const nextScheduledStart =
+          target.scheduledStartMinutes !== undefined
+            ? target.scheduledStartMinutes
+            : existing.scheduledStartMinutes ?? null;
+
+        await taskStore.put({
+          ...existing,
+          projectId: nextProjectId,
+          headingId: nextHeadingId,
+          areaId: nextAreaId,
+          scheduleState: nextSchedule,
+          whenDate: nextWhen,
+          scheduledStartMinutes: nextScheduledStart,
+          sortOrder: sortOrders[i],
+          isDeleted: false,
+          purgedFromTrash: false,
+          updatedAt: Math.max(now + i, existing.updatedAt + 1),
+          isDirty: true
+        } satisfies TaskRecord);
+
+        if (existing.isDeleted) {
+          for (const chk of allChk) {
+            if (chk.taskId === existing.id && chk.isDeleted) {
+              priorChecklists.push({ ...chk });
+              await chkStore.put({
+                ...chk,
+                isDeleted: false,
+                updatedAt: Math.max(now + i, chk.updatedAt + 1),
+                isDirty: true
+              });
+            }
+          }
+        }
+      }
+
+      await tx.done;
+
+      this.lastUndoSnapshot = {
+        tasks: priorTasks,
+        checklistItems: priorChecklists,
+        projects: [],
+        headings: [],
+        attachments: [],
+        spawnedTaskIds: []
+      };
+      this.emitUndoEvent({
+        kind: 'tasks_updated',
+        entityTitle: priorTasks[0].title,
+        count: priorTasks.length
+      });
 
       await this.refreshSnapshot();
       this.triggerSync();
@@ -2116,6 +2321,13 @@ export class ThingsLocalDb {
     });
   }
 
+  async setProjectViewMode(projectId: string, viewMode: ProjectViewMode): Promise<void> {
+    await this.upsertProject({
+      id: projectId,
+      viewMode: normalizeProjectViewMode(viewMode) ?? 'list'
+    });
+  }
+
   async markProjectReviewed(projectId: string, reviewedAt: number = Date.now()): Promise<void> {
     await this.upsertProject({
       id: projectId,
@@ -2826,6 +3038,33 @@ export class ThingsLocalDb {
         ...existing,
         endDate,
         updatedAt: now,
+        isDirty: true
+      });
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
+  async updateHeadingDates(
+    headingId: string,
+    startDate: number | null,
+    endDate: number | null
+  ): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('headings', 'readwrite');
+      const existing = (await tx.store.get(headingId)) as HeadingRecord | undefined;
+      if (!existing || existing.isDeleted) {
+        await tx.done;
+        return;
+      }
+      await tx.store.put({
+        ...existing,
+        startDate,
+        endDate,
+        updatedAt: Math.max(now, existing.updatedAt + 1),
         isDirty: true
       });
       await tx.done;

@@ -1906,6 +1906,442 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         notifyMutation()
     }
 
+    @discardableResult
+    public func reorderMultipleTasks(
+        _ taskIds: [String],
+        prevOrder: Double?,
+        nextOrder: Double?,
+        newHeadingId: String?? = nil
+    ) throws -> [TaskPlacementSnapshot] {
+        let orderedIds = TaskDragPayloadCodec.decode(taskIds)
+        guard !orderedIds.isEmpty else { return [] }
+
+        let snapshots: [TaskPlacementSnapshot] = try queue.sync {
+            let now = nowMillis()
+            let allRawTagIds = (try? fetchAllTaskTagIdsLocked()) ?? [:]
+            return try inTransactionLocked {
+                var validTasks: [(TaskItem, [String])] = []
+                for tid in orderedIds {
+                    guard let existing = try fetchTaskByIdLocked(tid), !existing.isDeleted else { continue }
+                    validTasks.append((existing, allRawTagIds[tid] ?? existing.tagIds))
+                }
+                guard !validTasks.isEmpty else { return [] }
+
+                let orders = Self.computeSequentialOrders(
+                    count: validTasks.count,
+                    prevOrder: prevOrder,
+                    nextOrder: nextOrder
+                )
+                var captured: [TaskPlacementSnapshot] = []
+                for (idx, (existing, rawTags)) in validTasks.enumerated() {
+                    captured.append(TaskPlacementSnapshot(task: existing, tagIds: rawTags, wasDeleted: existing.isDeleted))
+                    var updated = existing
+                    updated.sortOrder = orders[idx]
+                    if let headingOverride = newHeadingId {
+                        updated.headingId = headingOverride
+                    }
+                    updated.updatedAt = max(now + Int64(idx), existing.updatedAt + 1)
+                    try upsertTaskLocked(updated, tagIds: rawTags, isDirty: true)
+                }
+                return captured
+            }
+        }
+        if !snapshots.isEmpty { notifyMutation() }
+        return snapshots
+    }
+
+    private static func computeSequentialOrders(
+        count: Int,
+        prevOrder: Double?,
+        nextOrder: Double?
+    ) -> [Double] {
+        guard count > 0 else { return [] }
+        switch (prevOrder, nextOrder) {
+        case (nil, nil):
+            return (0..<count).map { Double($0 + 1) * 1000.0 }
+        case (nil, let next?):
+            let start = next - Double(count) * 500.0
+            return (0..<count).map { start + Double($0) * 500.0 }
+        case (let prev?, nil):
+            return (0..<count).map { prev + Double($0 + 1) * 1000.0 }
+        case (let prev?, let next?):
+            if next > prev {
+                let step = (next - prev) / Double(count + 1)
+                return (0..<count).map { prev + step * Double($0 + 1) }
+            }
+            return (0..<count).map { prev + Double($0 + 1) * 0.01 }
+        }
+    }
+
+    private func restoreDeletedTaskChecklistAndValidateContainersLocked(task: inout TaskItem, now: Int64) throws {
+        if task.isDeleted {
+            task.isDeleted = false
+            let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 1 AND title != '';")
+            defer { sqlite3_finalize(chkStmt) }
+            bindInt64(chkStmt, 1, now)
+            bindText(chkStmt, 2, task.id)
+            _ = sqlite3_step(chkStmt)
+        }
+        if let pid = task.projectId {
+            let activeProj = try fetchProjectByIdLocked(pid)
+            if activeProj == nil || activeProj?.isDeleted == true {
+                task.projectId = nil
+                task.headingId = nil
+            }
+        }
+        if let hid = task.headingId {
+            let safeHid = hid.replacingOccurrences(of: "'", with: "''")
+            let hdgExists = !(try fetchHeadingsWhereLocked("id = '\(safeHid)' AND is_deleted = 0")).isEmpty
+            if !hdgExists {
+                task.headingId = nil
+            }
+        }
+    }
+
+    @discardableResult
+    public func moveTasksToDestination(
+        _ taskIds: [String],
+        destination: NavigationDestination,
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> (snapshots: [TaskPlacementSnapshot], spawnedRecurringTaskIds: [String]) {
+        let orderedIds = TaskDragPayloadCodec.decode(taskIds)
+        guard !orderedIds.isEmpty else { return ([], []) }
+        if case .perspective = destination {
+            return ([], [])
+        }
+
+        let result: ([TaskPlacementSnapshot], [String]) = try queue.sync {
+            let now = max(nowMillis(), Int64(referenceDate.timeIntervalSince1970 * 1000.0))
+            let sodToday = calendar.startOfDay(for: referenceDate)
+            let todayStartMillis = DateEpochConverter.startOfDayMillis(for: sodToday, calendar: calendar)
+            let tmrDate = calendar.date(byAdding: .day, value: 1, to: sodToday) ?? sodToday.addingTimeInterval(86_400)
+            let tomorrowStartMillis = DateEpochConverter.startOfDayMillis(for: tmrDate, calendar: calendar)
+            let allRawTagIds = (try? fetchAllTaskTagIdsLocked()) ?? [:]
+
+            return try inTransactionLocked {
+                var snapshots: [TaskPlacementSnapshot] = []
+                var spawnedIds: [String] = []
+                var baseMaxOrder = (try? maxSortOrderLocked(table: "tasks")) ?? 0.0
+
+                for (idx, tid) in orderedIds.enumerated() {
+                    guard var existing = try fetchTaskByIdLocked(tid) else { continue }
+                    let rawTags = allRawTagIds[tid] ?? existing.tagIds
+
+                    if case .smartView(.trash) = destination {
+                        guard !existing.isDeleted else { continue }
+                        snapshots.append(TaskPlacementSnapshot(task: existing, tagIds: rawTags, wasDeleted: false))
+                        let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 0;")
+                        defer { sqlite3_finalize(chkStmt) }
+                        bindInt64(chkStmt, 1, now + Int64(idx))
+                        bindText(chkStmt, 2, tid)
+                        _ = sqlite3_step(chkStmt)
+
+                        let delStmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                        defer { sqlite3_finalize(delStmt) }
+                        bindInt64(delStmt, 1, max(now + Int64(idx), existing.updatedAt + 1))
+                        bindText(delStmt, 2, tid)
+                        _ = sqlite3_step(delStmt)
+                        continue
+                    }
+
+                    let wasDeleted = existing.isDeleted
+                    snapshots.append(TaskPlacementSnapshot(task: existing, tagIds: rawTags, wasDeleted: wasDeleted))
+
+                    let stepNow = max(now + Int64(idx), existing.updatedAt + 1)
+                    try restoreDeletedTaskChecklistAndValidateContainersLocked(task: &existing, now: stepNow)
+
+                    switch destination {
+                    case .smartView(let sv):
+                        switch sv {
+                        case .inbox:
+                            existing.status = .open
+                            existing.completedAt = nil
+                            existing.scheduleState = .inbox
+                            existing.whenDate = nil
+                            existing.scheduledStartMinutes = nil
+                            existing.projectId = nil
+                            existing.headingId = nil
+                            existing.areaId = nil
+                            baseMaxOrder += 1000.0
+                            existing.sortOrder = baseMaxOrder
+                            existing.updatedAt = stepNow
+                            try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+
+                        case .today:
+                            existing.status = .open
+                            existing.completedAt = nil
+                            existing.scheduleState = .today
+                            existing.whenDate = todayStartMillis
+                            existing.updatedAt = stepNow
+                            try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+
+                        case .upcoming:
+                            existing.status = .open
+                            existing.completedAt = nil
+                            existing.scheduleState = .upcoming
+                            if let currentWhen = existing.whenDate, currentWhen > todayStartMillis {
+                                // Preserve existing future whenDate
+                            } else {
+                                existing.whenDate = tomorrowStartMillis
+                            }
+                            existing.updatedAt = stepNow
+                            try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+
+                        case .anytime:
+                            existing.status = .open
+                            existing.completedAt = nil
+                            existing.scheduleState = .anytime
+                            existing.whenDate = nil
+                            existing.scheduledStartMinutes = nil
+                            existing.updatedAt = stepNow
+                            try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+
+                        case .someday:
+                            existing.status = .open
+                            existing.completedAt = nil
+                            existing.scheduleState = .someday
+                            existing.whenDate = nil
+                            existing.scheduledStartMinutes = nil
+                            existing.updatedAt = stepNow
+                            try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+
+                        case .logbook:
+                            let prevStatus = existing.status
+                            existing.status = .completed
+                            existing.completedAt = existing.completedAt ?? stepNow
+                            existing.updatedAt = stepNow
+                            try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+                            if prevStatus == .open, let rule = existing.recurrenceRule {
+                                if let spawned = try spawnRecurringOccurrenceLocked(
+                                    from: existing,
+                                    rawTagIds: rawTags,
+                                    rule: rule,
+                                    nowMillis: stepNow,
+                                    referenceDate: referenceDate,
+                                    calendar: calendar
+                                ) {
+                                    spawnedIds.append(spawned)
+                                }
+                            }
+
+                        case .trash:
+                            break
+                        }
+
+                    case .area(let targetAreaId):
+                        let activeAreas = try fetchActiveAreasLocked()
+                        guard activeAreas.contains(where: { $0.id == targetAreaId }) else { continue }
+                        existing.status = .open
+                        existing.completedAt = nil
+                        existing.areaId = targetAreaId
+                        existing.projectId = nil
+                        existing.headingId = nil
+                        if existing.scheduleState == .inbox {
+                            existing.scheduleState = .anytime
+                        }
+                        baseMaxOrder += 1000.0
+                        existing.sortOrder = baseMaxOrder
+                        existing.updatedAt = stepNow
+                        try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+
+                    case .project(let targetProjectId):
+                        guard let targetProject = try fetchProjectByIdLocked(targetProjectId),
+                              !targetProject.isDeleted else { continue }
+                        existing.status = .open
+                        existing.completedAt = nil
+                        existing.projectId = targetProjectId
+                        existing.headingId = nil
+                        existing.areaId = targetProject.areaId
+                        if existing.scheduleState == .inbox {
+                            existing.scheduleState = .anytime
+                        }
+                        baseMaxOrder += 1000.0
+                        existing.sortOrder = baseMaxOrder
+                        existing.updatedAt = stepNow
+                        try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
+
+                    case .perspective:
+                        break
+                    }
+                }
+
+                return (snapshots, spawnedIds)
+            }
+        }
+
+        if !result.0.isEmpty { notifyMutation() }
+        return result
+    }
+
+    @discardableResult
+    public func moveTasksIntoProjectSection(
+        _ taskIds: [String],
+        projectId: String,
+        headingId: String?,
+        beforeTaskId: String? = nil
+    ) throws -> [TaskPlacementSnapshot] {
+        let orderedIds = TaskDragPayloadCodec.decode(taskIds)
+        guard !orderedIds.isEmpty else { return [] }
+        if orderedIds.count == 1, orderedIds[0] == beforeTaskId {
+            return []
+        }
+
+        let snapshots: [TaskPlacementSnapshot] = try queue.sync {
+            let now = nowMillis()
+            guard let targetProject = try fetchProjectByIdLocked(projectId), !targetProject.isDeleted else {
+                return []
+            }
+            let resolvedHeadingId: String? = try {
+                guard let hid = headingId, !hid.isEmpty else { return nil }
+                let safeHid = hid.replacingOccurrences(of: "'", with: "''")
+                let found = try fetchHeadingsWhereLocked("id = '\(safeHid)' AND project_id = '\(projectId.replacingOccurrences(of: "'", with: "''"))' AND is_deleted = 0")
+                return found.first?.id
+            }()
+
+            let allRawTagIds = (try? fetchAllTaskTagIdsLocked()) ?? [:]
+            return try inTransactionLocked {
+                var movingTasks: [(TaskItem, [String])] = []
+                for tid in orderedIds {
+                    guard let existing = try fetchTaskByIdLocked(tid) else { continue }
+                    movingTasks.append((existing, allRawTagIds[tid] ?? existing.tagIds))
+                }
+                guard !movingTasks.isEmpty else { return [] }
+                let movingIdSet = Set(movingTasks.map { $0.0.id })
+
+                // Load existing open non-deleted tasks in the target section to compute clean sequential sortOrders
+                let sectionStmt: OpaquePointer
+                if let resolvedHeadingId {
+                    sectionStmt = try prepareLocked("""
+                        SELECT id, sort_order FROM tasks
+                        WHERE project_id = ? AND heading_id = ? AND is_deleted = 0 AND status = 'OPEN'
+                        ORDER BY sort_order ASC, created_at ASC, id ASC;
+                    """)
+                    bindText(sectionStmt, 1, projectId)
+                    bindText(sectionStmt, 2, resolvedHeadingId)
+                } else {
+                    sectionStmt = try prepareLocked("""
+                        SELECT id, sort_order FROM tasks
+                        WHERE project_id = ? AND heading_id IS NULL AND is_deleted = 0 AND status = 'OPEN'
+                        ORDER BY sort_order ASC, created_at ASC, id ASC;
+                    """)
+                    bindText(sectionStmt, 1, projectId)
+                }
+                defer { sqlite3_finalize(sectionStmt) }
+
+                var allSectionEntries: [(id: String, order: Double)] = []
+                while sqlite3_step(sectionStmt) == SQLITE_ROW {
+                    if let rowId = colString(sectionStmt, 0) {
+                        allSectionEntries.append((rowId, sqlite3_column_double(sectionStmt, 1)))
+                    }
+                }
+                let remainingEntries = allSectionEntries.filter { !movingIdSet.contains($0.id) }
+
+                let resolvedBeforeOrder: (prev: Double?, next: Double?) = {
+                    guard let beforeId = beforeTaskId else {
+                        return (remainingEntries.last?.order, nil)
+                    }
+                    if let remIdx = remainingEntries.firstIndex(where: { $0.id == beforeId }) {
+                        let prev = remIdx > 0 ? remainingEntries[remIdx - 1].order : nil
+                        let next = remainingEntries[remIdx].order
+                        return (prev, next)
+                    }
+                    if let fullIdx = allSectionEntries.firstIndex(where: { $0.id == beforeId }) {
+                        let afterSlice = allSectionEntries[(fullIdx + 1)...]
+                        if let nextRemaining = afterSlice.first(where: { !movingIdSet.contains($0.id) }),
+                           let remIdx = remainingEntries.firstIndex(where: { $0.id == nextRemaining.id }) {
+                            let prev = remIdx > 0 ? remainingEntries[remIdx - 1].order : nil
+                            return (prev, remainingEntries[remIdx].order)
+                        }
+                    }
+                    return (remainingEntries.last?.order, nil)
+                }()
+
+                let computedOrders = Self.computeSequentialOrders(
+                    count: movingTasks.count,
+                    prevOrder: resolvedBeforeOrder.prev,
+                    nextOrder: resolvedBeforeOrder.next
+                )
+
+                var captured: [TaskPlacementSnapshot] = []
+                for (idx, (originalTask, rawTags)) in movingTasks.enumerated() {
+                    var updated = originalTask
+                    let stepNow = max(now + Int64(idx), updated.updatedAt + 1)
+                    captured.append(TaskPlacementSnapshot(task: originalTask, tagIds: rawTags, wasDeleted: originalTask.isDeleted))
+
+                    if updated.isDeleted {
+                        updated.isDeleted = false
+                        let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 1 AND title != '';")
+                        defer { sqlite3_finalize(chkStmt) }
+                        bindInt64(chkStmt, 1, stepNow)
+                        bindText(chkStmt, 2, updated.id)
+                        _ = sqlite3_step(chkStmt)
+                    }
+                    if updated.status != .open {
+                        updated.status = .open
+                        updated.completedAt = nil
+                    }
+                    updated.projectId = projectId
+                    updated.headingId = resolvedHeadingId
+                    updated.areaId = targetProject.areaId
+                    if updated.scheduleState == .inbox {
+                        updated.scheduleState = .anytime
+                    }
+                    updated.sortOrder = computedOrders[idx]
+                    updated.updatedAt = stepNow
+                    try upsertTaskLocked(updated, tagIds: rawTags, isDirty: true)
+                }
+                return captured
+            }
+        }
+
+        if !snapshots.isEmpty { notifyMutation() }
+        return snapshots
+    }
+
+    public func restoreTaskPlacements(
+        _ snapshots: [TaskPlacementSnapshot],
+        spawnedRecurringTaskIds: [String] = []
+    ) throws {
+        guard !snapshots.isEmpty || !spawnedRecurringTaskIds.isEmpty else { return }
+        try queue.sync {
+            let now = nowMillis()
+            try inTransactionLocked {
+                for spawnedId in spawnedRecurringTaskIds {
+                    let delStmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                    defer { sqlite3_finalize(delStmt) }
+                    bindInt64(delStmt, 1, now)
+                    bindText(delStmt, 2, spawnedId)
+                    _ = sqlite3_step(delStmt)
+                }
+
+                for (idx, snap) in snapshots.enumerated() {
+                    let current = try fetchTaskByIdLocked(snap.task.id)
+                    let stepNow = max(now + Int64(idx), (current?.updatedAt ?? snap.task.updatedAt) + 1)
+                    var restored = snap.task
+                    restored.isDeleted = snap.wasDeleted
+                    restored.updatedAt = stepNow
+                    try upsertTaskLocked(restored, tagIds: snap.tagIds, isDirty: true)
+
+                    if snap.wasDeleted {
+                        let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 1, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 0;")
+                        defer { sqlite3_finalize(chkStmt) }
+                        bindInt64(chkStmt, 1, stepNow)
+                        bindText(chkStmt, 2, restored.id)
+                        _ = sqlite3_step(chkStmt)
+                    } else {
+                        let chkStmt = try prepareLocked("UPDATE checklist_items SET is_deleted = 0, updated_at = ?, is_dirty = 1 WHERE task_id = ? AND is_deleted = 1 AND title != '';")
+                        defer { sqlite3_finalize(chkStmt) }
+                        bindInt64(chkStmt, 1, stepNow)
+                        bindText(chkStmt, 2, restored.id)
+                        _ = sqlite3_step(chkStmt)
+                    }
+                }
+            }
+        }
+        notifyMutation()
+    }
+
     // MARK: - Checklist Mutations
 
     @discardableResult
@@ -2225,6 +2661,28 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             }
         }
         notifyMutation()
+    }
+
+    public func setProjectViewMode(projectId: String, viewMode: String?) throws {
+        var didMutate = false
+        try queue.sync {
+            guard var p = try fetchProjectByIdLocked(projectId), !p.isDeleted else { return }
+            let normalized: String?
+            if let raw = viewMode?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+                normalized = ProjectViewMode.normalized(raw).rawValue
+            } else {
+                normalized = nil
+            }
+            guard p.viewMode != normalized else { return }
+            let now = nowMillis()
+            p.viewMode = normalized
+            p.updatedAt = max(now, p.updatedAt + 1)
+            try inTransactionLocked {
+                try upsertProjectLocked(p, isDirty: true)
+            }
+            didMutate = true
+        }
+        if didMutate { notifyMutation() }
     }
 
     public func countNonDeletedTasksInProject(_ projectId: String) throws -> Int {
@@ -3092,6 +3550,30 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             existing.endDate = endDate
             existing.updatedAt = nowMillis()
             try upsertHeadingLocked(existing, isDirty: true)
+            didMutate = true
+        }
+        if didMutate {
+            notifyMutation()
+        }
+    }
+
+    public func updateHeadingDates(_ headingId: String, startDate: Int64?, endDate: Int64?) throws {
+        var didMutate = false
+        try queue.sync {
+            let safeId = headingId.replacingOccurrences(of: "'", with: "''")
+            guard var existing = try fetchHeadingsWhereLocked("id = '\(safeId)' AND is_deleted = 0").first else { return }
+            let resolvedEnd: Int64?
+            if let s = startDate, let e = endDate, e < s {
+                resolvedEnd = s
+            } else {
+                resolvedEnd = endDate
+            }
+            existing.startDate = startDate
+            existing.endDate = resolvedEnd
+            existing.updatedAt = max(nowMillis(), existing.updatedAt + 1)
+            try inTransactionLocked {
+                try upsertHeadingLocked(existing, isDirty: true)
+            }
             didMutate = true
         }
         if didMutate {

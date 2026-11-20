@@ -311,6 +311,9 @@ public struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
+        .thingsDropTarget(cornerRadius: 13) { payloads in
+            store.dropTasks(payloads, onto: dest)
+        }
     }
 
     private func slimMiniCard(_ view: SmartView, count: Int) -> some View {
@@ -359,6 +362,9 @@ public struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
+        .thingsDropTarget(cornerRadius: 12) { payloads in
+            store.dropTasks(payloads, onto: dest)
+        }
     }
 
     private var weeklyReviewMiniCard: some View {
@@ -427,6 +433,9 @@ public struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
+        .thingsDropTarget(cornerRadius: 6) { payloads in
+            store.dropTasks(payloads, onto: dest)
+        }
     }
 
     private func areaSection(_ area: Area) -> some View {
@@ -497,6 +506,9 @@ public struct SidebarView: View {
                 Capsule(style: .continuous)
                     .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
             )
+            .thingsDropTarget(isCapsule: true) { payloads in
+                store.dropTasks(payloads, onto: dest)
+            }
             .contextMenu {
                 Button(store.tr("entity_new_project")) {
                     store.newProjectDefaultAreaId = area.id
@@ -584,6 +596,9 @@ public struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .thingsTooltip(statusHelpText.map { "\(proj.title) — \($0)" } ?? proj.title)
+        .thingsDropTarget(isCapsule: true) { payloads in
+            store.dropTasks(payloads, onto: dest)
+        }
         .contextMenu {
             Button(store.tr("project_edit_title")) {
                 store.editingProject = proj

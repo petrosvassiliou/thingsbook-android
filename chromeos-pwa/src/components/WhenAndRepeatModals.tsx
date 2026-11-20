@@ -471,6 +471,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({
 
 interface DeadlineModalProps {
   titleLabel?: string;
+  clearLabel?: string;
   currentDeadline: number | null;
   lang?: SupportedLang;
   t: TranslationStrings;
@@ -480,6 +481,7 @@ interface DeadlineModalProps {
 
 export const DeadlineModal: React.FC<DeadlineModalProps> = ({
   titleLabel,
+  clearLabel,
   currentDeadline,
   lang = 'en',
   t,
@@ -561,7 +563,7 @@ export const DeadlineModal: React.FC<DeadlineModalProps> = ({
 
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <button type="button" className="btn-danger" onClick={() => pick(null)}>
-            {t.actionClear}
+            {clearLabel || t.actionClear}
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>
             {t.actionCancel}

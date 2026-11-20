@@ -161,6 +161,19 @@ public struct ThingsCommandMenus: Commands {
             .disabled(store.isLocked || store.undoBanner == nil)
         }
 
+        CommandGroup(after: .pasteboard) {
+            Button(store.tr("multiselect_select_all")) {
+                if let responder = NSApp.keyWindow?.firstResponder, responder is NSTextView {
+                    responder.selectAll(nil)
+                    return
+                }
+                guard !store.isLocked, store.activeSheet == nil else { return }
+                store.selectAllVisibleTasks()
+            }
+            .keyboardShortcut("a", modifiers: [.command])
+            .disabled(store.isLocked)
+        }
+
         CommandMenu(store.tr("macos_todo_menu")) {
             Button(store.tr("action_complete")) {
                 guard !store.isLocked, store.activeSheet == nil else { return }
@@ -357,6 +370,28 @@ public struct ThingsCommandMenus: Commands {
             }
             .keyboardShortcut("r", modifiers: [.command, .option])
             .disabled(store.isLocked)
+
+            if case .project(let activeProjectId) = store.selectedDestination {
+                Divider()
+
+                Button(store.tr("v30_project_mode_list")) {
+                    guard !store.isLocked else { return }
+                    store.setProjectViewMode(activeProjectId, mode: .list)
+                }
+                .keyboardShortcut("1", modifiers: [.command, .control])
+
+                Button(store.tr("v30_project_mode_board")) {
+                    guard !store.isLocked else { return }
+                    store.setProjectViewMode(activeProjectId, mode: .board)
+                }
+                .keyboardShortcut("2", modifiers: [.command, .control])
+
+                Button(store.tr("v30_project_mode_roadmap")) {
+                    guard !store.isLocked else { return }
+                    store.setProjectViewMode(activeProjectId, mode: .roadmap)
+                }
+                .keyboardShortcut("3", modifiers: [.command, .control])
+            }
         }
     }
 

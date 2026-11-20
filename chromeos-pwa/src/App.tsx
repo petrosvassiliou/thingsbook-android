@@ -49,7 +49,6 @@ import {
   computeUpcomingTargetDate,
   daysBetweenToday,
   endOfDayEpoch,
-  resolveWhenPreset,
   startOfDayEpoch,
   type ActiveNavigation,
   type AppPreferences,
@@ -59,6 +58,7 @@ import {
   type FocusTimerUiState,
   type HeadingRecord,
   type ProjectRecord,
+  type ProjectViewMode,
   type QuickShareDraft,
   type SavedPerspective,
   type SmartViewType,
@@ -68,6 +68,13 @@ import {
   type TaskRecord,
   type ViewSortMode
 } from './domain/types';
+import {
+  buildProjectRoadmapLayout,
+  extractDraggedTaskIds,
+  hasDraggedTaskMime,
+  normalizeProjectViewMode,
+  orderTaskIdsByVisualOrder
+} from './domain/v30Roadmap';
 import {
   computeTagUsageCounts,
   computeTodayCapacitySummary,
@@ -143,9 +150,17 @@ import {
   TrashViewList,
   UndoSnackbarBanner
 } from './components/PowerFeaturesModals';
+import {
+  ProjectBoardWorkspace,
+  ProjectRoadmapWorkspace
+} from './components/ProjectBoardAndRoadmap';
 import { ProjectProgressRing } from './components/ProjectProgressRing';
 import { AuthSyncModal, SettingsModal } from './components/SettingsAndAuthModals';
-import { Sidebar, SmartViewNavigationStrip } from './components/Sidebar';
+import {
+  Sidebar,
+  SmartViewNavigationStrip,
+  type SidebarDropTarget
+} from './components/Sidebar';
 import { TaskItem } from './components/TaskItem';
 import { ThingsTooltipHost } from './components/ThingsTooltipHost';
 import {
@@ -219,6 +234,7 @@ export const App: React.FC = () => {
   });
   const [selectedFilterTagId, setSelectedFilterTagId] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const lastSelectedAnchorIdRef = useRef<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
 
   // Collapsible Project Headings & Inline Editing
@@ -244,6 +260,7 @@ export const App: React.FC = () => {
     | { kind: 'task'; taskId: string }
     | { kind: 'project'; projectId: string }
     | { kind: 'heading'; headingId: string }
+    | { kind: 'heading-start'; headingId: string }
     | null
   >(null);
   const [repeatModalTaskId, setRepeatModalTaskId] = useState<string | null>(null);
@@ -467,6 +484,7 @@ export const App: React.FC = () => {
     const unsubDb = localDb.subscribe(setSnapshot);
     const unsubSync = cloudSync.subscribe(setSyncState);
     const unsubUndo = localDb.subscribeUndo((ev) => {
+      if (ev.kind === 'tasks_updated') return;
       const tr = tRef.current;
       const fallbackTitle = ev.entityTitle.trim() || tr.entityNewTodo;
       const msg =
@@ -1407,6 +1425,49 @@ export const App: React.FC = () => {
     [viewSortMode]
   );
 
+  const isEffectiveDarkTheme = useMemo(() => {
+    if (prefs.themeMode === 'dark') return true;
+    if (prefs.themeMode === 'light') return false;
+    return typeof window !== 'undefined'
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : false;
+  }, [prefs.themeMode]);
+
+  const activeProjectRecord = useMemo(
+    () =>
+      activeNav.kind === 'project'
+        ? (allNonDeletedProjectsMap.get(activeNav.projectId) ?? null)
+        : null,
+    [activeNav, allNonDeletedProjectsMap]
+  );
+
+  const activeProjectViewMode: ProjectViewMode = useMemo(
+    () =>
+      activeProjectRecord
+        ? normalizeProjectViewMode(activeProjectRecord.viewMode)
+        : 'list',
+    [activeProjectRecord]
+  );
+
+  const activeProjectRoadmapLayout = useMemo(() => {
+    if (!activeProjectRecord || activeProjectViewMode !== 'roadmap') return null;
+    return buildProjectRoadmapLayout(
+      activeProjectRecord,
+      snapshot.headings,
+      filterByTag(currentViewBaseTasks),
+      todayStartMs,
+      t.projectUngroupedColumn
+    );
+  }, [
+    activeProjectRecord,
+    activeProjectViewMode,
+    snapshot.headings,
+    filterByTag,
+    currentViewBaseTasks,
+    todayStartMs,
+    t.projectUngroupedColumn
+  ]);
+
   const orderedVisibleTaskIds = useMemo((): string[] => {
     if (activeNav.kind === 'smart') {
       if (activeNav.view === 'TODAY') {
@@ -1436,6 +1497,12 @@ export const App: React.FC = () => {
       return sortViewList(filterByTag(currentViewBaseTasks)).map((tk) => tk.id);
     }
     if (activeNav.kind === 'project') {
+      if (activeProjectViewMode === 'roadmap' && activeProjectRoadmapLayout) {
+        return [
+          ...activeProjectRoadmapLayout.plottedTasks.map((p) => p.task.id),
+          ...activeProjectRoadmapLayout.unscheduledTasks.map((u) => u.id)
+        ];
+      }
       const projHeadings = snapshot.headings.filter(
         (h) => !h.isDeleted && !h.isArchived && h.projectId === activeNav.projectId
       );
@@ -1452,6 +1519,8 @@ export const App: React.FC = () => {
     return sortViewList(filterByTag(currentViewBaseTasks)).map((tk) => tk.id);
   }, [
     activeNav,
+    activeProjectViewMode,
+    activeProjectRoadmapLayout,
     sortViewList,
     filterByTag,
     todayDaytimeTasks,
@@ -2107,78 +2176,237 @@ export const App: React.FC = () => {
     snapshot.tasks
   ]);
 
-  // Drag-and-drop task onto Sidebar target
-  const handleDropTaskOnSidebarTarget = async (
-    taskId: string,
-    target:
-      | { kind: 'smart'; view: SmartViewType }
-      | { kind: 'area'; areaId: string }
-      | { kind: 'project'; projectId: string }
+  const orderedSelectedDragIds = useMemo(
+    () => orderTaskIdsByVisualOrder(selectedTaskIds, orderedVisibleTaskIds),
+    [selectedTaskIds, orderedVisibleTaskIds]
+  );
+
+  const handleSelectTask = useCallback(
+    (taskId: string, multiToggle: boolean, shiftRange: boolean = false) => {
+      if (shiftRange && orderedVisibleTaskIds.length > 0) {
+        const anchor =
+          lastSelectedAnchorIdRef.current ??
+          selectedTaskIds[selectedTaskIds.length - 1] ??
+          taskId;
+        const i1 = orderedVisibleTaskIds.indexOf(anchor);
+        const i2 = orderedVisibleTaskIds.indexOf(taskId);
+        if (i1 >= 0 && i2 >= 0) {
+          const slice = orderedVisibleTaskIds.slice(
+            Math.min(i1, i2),
+            Math.max(i1, i2) + 1
+          );
+          setSelectedTaskIds((prev) => Array.from(new Set([...prev, ...slice])));
+          return;
+        }
+      }
+      lastSelectedAnchorIdRef.current = taskId;
+      if (multiToggle) {
+        setSelectedTaskIds((prev) =>
+          prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+        );
+      } else {
+        setSelectedTaskIds([taskId]);
+      }
+    },
+    [orderedVisibleTaskIds, selectedTaskIds]
+  );
+
+  // Drag-and-drop 1 or N tasks onto Sidebar or Strip target
+  const handleDropTasksOnSidebarTarget = async (
+    rawTaskIds: string[],
+    target: SidebarDropTarget
   ) => {
-    const tk = snapshot.tasks.find((x) => x.id === taskId);
-    if (!tk) return;
+    const resolvedIds =
+      rawTaskIds.length === 1 &&
+      selectedTaskIds.length > 1 &&
+      selectedTaskIds.includes(rawTaskIds[0])
+        ? orderedSelectedDragIds
+        : orderTaskIdsByVisualOrder(rawTaskIds, orderedVisibleTaskIds);
+
+    const validRecords = resolvedIds
+      .map((id) => snapshot.tasks.find((x) => x.id === id))
+      .filter((x): x is TaskRecord => x !== undefined && !x.purgedFromTrash);
+
+    if (validRecords.length === 0) return;
+    const taskIds = validRecords.map((x) => x.id);
+
+    // Restore from Trash first if dragged out of Trash onto a non-Trash target!
+    const isTargetTrash = target.kind === 'smart' && target.view === 'TRASH';
+    if (!isTargetTrash) {
+      for (const rec of validRecords) {
+        if (rec.isDeleted) {
+          await localDb.restoreDeletedTask(rec.id);
+        }
+      }
+    }
 
     if (target.kind === 'area') {
-      await localDb.upsertTask({
-        id: tk.id,
+      await localDb.batchMoveOrReorderTasksInContainer(taskIds, {
         areaId: target.areaId,
         projectId: null,
         headingId: null
       });
-    } else if (target.kind === 'project') {
-      await localDb.upsertTask({
-        id: tk.id,
+      setSelectedTaskIds([]);
+      if (taskIds.length > 1) showToast(t.dropMovedFeedback(taskIds.length));
+      return;
+    }
+
+    if (target.kind === 'project') {
+      await localDb.batchMoveOrReorderTasksInContainer(taskIds, {
         projectId: target.projectId,
         headingId: null,
         areaId: null
       });
-    } else {
-      if (target.view === 'TRASH') {
-        await localDb.softDeleteTasks([tk.id]);
-      } else if (target.view === 'LOGBOOK') {
-        await localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
-      } else if (target.view === 'INBOX') {
-        await localDb.upsertTask({
-          id: tk.id,
-          scheduleState: 'INBOX',
-          whenDate: null,
+      setSelectedTaskIds([]);
+      if (taskIds.length > 1) showToast(t.dropMovedFeedback(taskIds.length));
+      return;
+    }
+
+    const todayEpoch = startOfDayEpoch();
+    const tomorrowEpoch = addDaysLocal(todayEpoch, 1);
+
+    switch (target.view) {
+      case 'TRASH':
+        await localDb.softDeleteTasks(taskIds);
+        setSelectedTaskIds([]);
+        return;
+
+      case 'LOGBOOK':
+        await localDb.batchUpdateTasks(taskIds, { status: 'COMPLETED' });
+        setSelectedTaskIds([]);
+        return;
+
+      case 'INBOX':
+        await localDb.batchMoveOrReorderTasksInContainer(taskIds, {
           projectId: null,
           headingId: null,
-          areaId: null
+          areaId: null,
+          scheduleState: 'INBOX',
+          whenDate: null,
+          scheduledStartMinutes: null
         });
-      } else {
-        const resolved = resolveWhenPreset(target.view, '');
-        await localDb.upsertTask({
-          id: tk.id,
-          scheduleState: resolved.scheduleState,
-          whenDate: resolved.whenDate
+        break;
+
+      case 'TODAY':
+        await localDb.batchUpdateTasks(taskIds, {
+          scheduleState: 'TODAY',
+          whenDate: todayEpoch
         });
+        break;
+
+      case 'UPCOMING': {
+        const keepFutureIds: string[] = [];
+        const setTomorrowIds: string[] = [];
+        for (const rec of validRecords) {
+          if (
+            rec.whenDate != null &&
+            startOfDayEpoch(new Date(rec.whenDate)) > todayEpoch
+          ) {
+            keepFutureIds.push(rec.id);
+          } else {
+            setTomorrowIds.push(rec.id);
+          }
+        }
+        if (keepFutureIds.length > 0) {
+          await localDb.batchUpdateTasks(keepFutureIds, {
+            scheduleState: 'UPCOMING'
+          });
+        }
+        if (setTomorrowIds.length > 0) {
+          await localDb.batchUpdateTasks(setTomorrowIds, {
+            scheduleState: 'UPCOMING',
+            whenDate: tomorrowEpoch
+          });
+        }
+        break;
       }
+
+      case 'ANYTIME':
+        await localDb.batchUpdateTasks(taskIds, {
+          scheduleState: 'ANYTIME',
+          whenDate: null,
+          scheduledStartMinutes: null
+        });
+        break;
+
+      case 'SOMEDAY':
+        await localDb.batchUpdateTasks(taskIds, {
+          scheduleState: 'SOMEDAY',
+          whenDate: null,
+          scheduledStartMinutes: null
+        });
+        break;
+    }
+
+    setSelectedTaskIds([]);
+    if (taskIds.length > 1) {
+      showToast(t.dropMovedFeedback(taskIds.length));
     }
   };
 
-  // Drag-and-drop reorder between two tasks (including cross-heading in Project view)
-  const handleDropReorderTask = async (
-    draggedId: string,
+  // Drag-and-drop reorder 1 or N tasks between tasks (including cross-heading, Today Evening, & Upcoming date groups)
+  const handleDropReorderTasks = async (
+    rawDraggedIds: string[],
     targetId: string,
-    listContext: TaskRecord[]
+    listContext: TaskRecord[],
+    dropContext?: { evening?: boolean; upcomingDayEpoch?: number }
   ) => {
-    const dragged = snapshot.tasks.find((x) => x.id === draggedId);
+    const draggedIds =
+      rawDraggedIds.length === 1 &&
+      selectedTaskIds.length > 1 &&
+      selectedTaskIds.includes(rawDraggedIds[0])
+        ? orderedSelectedDragIds
+        : orderTaskIdsByVisualOrder(rawDraggedIds, orderedVisibleTaskIds);
+
     const target = snapshot.tasks.find((x) => x.id === targetId);
-    if (!dragged || !target) return;
+    if (!target || draggedIds.length === 0) return;
+    if (draggedIds.length === 1 && draggedIds[0] === targetId) return;
 
     const idx = listContext.findIndex((x) => x.id === targetId);
     const prevOrder = idx > 0 ? listContext[idx - 1].sortOrder : null;
     const nextOrder = target.sortOrder;
-    const newOrder = computeMidpointSortOrder(prevOrder, nextOrder);
 
-    await localDb.upsertTask({
-      id: dragged.id,
-      projectId: target.projectId,
-      headingId: target.headingId,
-      areaId: target.areaId,
-      sortOrder: newOrder
+    const shouldAdoptContainer =
+      activeNav.kind === 'project' || activeNav.kind === 'area';
+
+    let nextSchedule: TaskRecord['scheduleState'] | undefined;
+    let nextWhen: number | null | undefined;
+
+    if (activeNav.kind === 'smart' && activeNav.view === 'TODAY') {
+      if (dropContext?.evening || target.scheduleState === 'THIS_EVENING') {
+        nextSchedule = 'THIS_EVENING';
+        nextWhen = startOfDayEpoch();
+      } else {
+        const anyWasEvening = draggedIds.some(
+          (id) => tasksByIdMap.get(id)?.scheduleState === 'THIS_EVENING'
+        );
+        if (anyWasEvening) {
+          nextSchedule = 'TODAY';
+          nextWhen = startOfDayEpoch();
+        }
+      }
+    } else if (activeNav.kind === 'smart' && activeNav.view === 'UPCOMING') {
+      nextSchedule = 'UPCOMING';
+      nextWhen = dropContext?.upcomingDayEpoch ?? computeUpcomingTargetDate(target);
+    }
+
+    await localDb.batchMoveOrReorderTasksInContainer(draggedIds, {
+      ...(shouldAdoptContainer
+        ? {
+            projectId: target.projectId,
+            headingId: target.headingId,
+            areaId: target.areaId
+          }
+        : {}),
+      afterSortOrder: prevOrder,
+      beforeSortOrder: nextOrder,
+      ...(nextSchedule !== undefined ? { scheduleState: nextSchedule } : {}),
+      ...(nextWhen !== undefined ? { whenDate: nextWhen } : {})
     });
+
+    if (draggedIds.length > 1) {
+      showToast(t.dropMovedFeedback(draggedIds.length));
+    }
   };
 
   const handleTriggerInstallPwa = async () => {
@@ -2197,7 +2425,8 @@ export const App: React.FC = () => {
   const renderTaskRow = (
     tk: TaskRecord,
     listContext: TaskRecord[],
-    showContextSubtitle: boolean
+    showContextSubtitle: boolean,
+    dropContext?: { evening?: boolean; upcomingDayEpoch?: number }
   ) => (
     <TaskItem
       key={tk.id}
@@ -2224,15 +2453,10 @@ export const App: React.FC = () => {
       lang={lang}
       geminiApiKey={prefs.geminiApiKey}
       t={t}
-      onSelect={(multiToggle) => {
-        if (multiToggle) {
-          setSelectedTaskIds((prev) =>
-            prev.includes(tk.id) ? prev.filter((id) => id !== tk.id) : [...prev, tk.id]
-          );
-        } else {
-          setSelectedTaskIds([tk.id]);
-        }
-      }}
+      dragTaskIds={orderedSelectedDragIds}
+      onSelect={(multiToggle, shiftRange) =>
+        handleSelectTask(tk.id, multiToggle, Boolean(shiftRange))
+      }
       onExpand={() => {
         preferBottomForExpandedTaskRef.current = false;
         setSelectedTaskIds([]);
@@ -2249,7 +2473,10 @@ export const App: React.FC = () => {
       onStartFocusTimer={handleStartFocusTimer}
       onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
       onDropReorder={(draggedId, targetId) =>
-        void handleDropReorderTask(draggedId, targetId, listContext)
+        void handleDropReorderTasks([draggedId], targetId, listContext, dropContext)
+      }
+      onDropReorderTasks={(draggedIds, targetId) =>
+        void handleDropReorderTasks(draggedIds, targetId, listContext, dropContext)
       }
       onToast={showToast}
     />
@@ -2476,6 +2703,8 @@ export const App: React.FC = () => {
         areas={snapshot.areas}
         projects={snapshot.projects}
         tasks={snapshot.tasks}
+        selectedTaskIds={selectedTaskIds}
+        orderedVisibleTaskIds={orderedVisibleTaskIds}
         counts={sidebarCounts}
         savedPerspectives={savedPerspectives}
         perspectiveCounts={perspectiveCounts}
@@ -2499,7 +2728,7 @@ export const App: React.FC = () => {
         onEditPerspective={(persp) =>
           setPerspectiveModalState({ open: true, perspective: persp })
         }
-        onDropTaskOnTarget={(taskId, target) => void handleDropTaskOnSidebarTarget(taskId, target)}
+        onDropTasksOnTarget={(ids, target) => void handleDropTasksOnSidebarTarget(ids, target)}
         onTriggerInstallPwa={() => void handleTriggerInstallPwa()}
       />
 
@@ -2767,10 +2996,15 @@ export const App: React.FC = () => {
             areas={snapshot.areas}
             projects={snapshot.projects}
             tasks={snapshot.tasks}
+            selectedTaskIds={selectedTaskIds}
+            orderedVisibleTaskIds={orderedVisibleTaskIds}
             counts={sidebarCounts}
             t={t}
             isSoftKeyboardOpen={isSoftKeyboardOpen}
             onSelectNav={(nav) => handleSelectNav(nav)}
+            onDropTasksOnTarget={(ids, target) =>
+              void handleDropTasksOnSidebarTarget(ids, target)
+            }
             onCreateProject={() =>
               setProjectModalState({
                 open: true,
@@ -2815,7 +3049,14 @@ export const App: React.FC = () => {
               : undefined
           }
         >
-          <div className="workspace-container">
+          <div
+            className={`workspace-container ${
+              activeNav.kind === 'project' &&
+              (activeProjectViewMode === 'board' || activeProjectViewMode === 'roadmap')
+                ? 'wide-project-canvas'
+                : ''
+            }`}
+          >
             {/* Welcome Setup Banner (only when sample tasks exist & not dismissed & not signed in) */}
             {snapshot.hasSampleTasks &&
               !prefs.setupBannerDismissed &&
@@ -3252,14 +3493,40 @@ export const App: React.FC = () => {
                       {dayFiltered.length > 0 && renderGroupedDaytime()}
                       {eveFiltered.length > 0 && (
                         <div className="group-section" data-magic-evening="true">
-                          <div className="group-header">
+                          <div
+                            className="group-header"
+                            onDragOver={(e) => {
+                              if (hasDraggedTaskMime(e.dataTransfer)) {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = 'move';
+                              }
+                            }}
+                            onDrop={async (e) => {
+                              e.preventDefault();
+                              const ids = extractDraggedTaskIds(
+                                e.dataTransfer,
+                                selectedTaskIds,
+                                orderedVisibleTaskIds
+                              );
+                              if (ids.length === 0) return;
+                              await localDb.batchMoveOrReorderTasksInContainer(ids, {
+                                scheduleState: 'THIS_EVENING',
+                                whenDate: startOfDayEpoch()
+                              });
+                              if (ids.length > 1) {
+                                showToast(t.dropMovedFeedback(ids.length));
+                              }
+                            }}
+                          >
                             <div className="group-header-title evening">
                               <Moon size={15} />
                               <span>{t.viewThisEvening}</span>
                             </div>
                           </div>
                           <div className="task-list">
-                            {eveFiltered.map((tk) => renderTaskRow(tk, eveFiltered, true))}
+                            {eveFiltered.map((tk) =>
+                              renderTaskRow(tk, eveFiltered, true, { evening: true })
+                            )}
                           </div>
                         </div>
                       )}
@@ -3293,7 +3560,31 @@ export const App: React.FC = () => {
                             className="group-section"
                             data-magic-when-date={dayEpoch}
                           >
-                            <div className="upcoming-day-header">
+                            <div
+                              className="upcoming-day-header"
+                              onDragOver={(e) => {
+                                if (hasDraggedTaskMime(e.dataTransfer)) {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'move';
+                                }
+                              }}
+                              onDrop={async (e) => {
+                                e.preventDefault();
+                                const ids = extractDraggedTaskIds(
+                                  e.dataTransfer,
+                                  selectedTaskIds,
+                                  orderedVisibleTaskIds
+                                );
+                                if (ids.length === 0) return;
+                                await localDb.batchMoveOrReorderTasksInContainer(ids, {
+                                  scheduleState: 'UPCOMING',
+                                  whenDate: dayEpoch
+                                });
+                                if (ids.length > 1) {
+                                  showToast(t.dropMovedFeedback(ids.length));
+                                }
+                              }}
+                            >
                               <span className="upcoming-day-num">{hdr.numPart}</span>
                               <span className="upcoming-day-sub">{hdr.subPart}</span>
                             </div>
@@ -3338,7 +3629,9 @@ export const App: React.FC = () => {
                             {sortedGroupTasks.length > 0 && (
                               <div className="task-list">
                                 {sortedGroupTasks.map((tk) =>
-                                  renderTaskRow(tk, sortedGroupTasks, true)
+                                  renderTaskRow(tk, sortedGroupTasks, true, {
+                                    upcomingDayEpoch: dayEpoch
+                                  })
                                 )}
                               </div>
                             )}
@@ -3662,6 +3955,7 @@ export const App: React.FC = () => {
               if (!project) {
                 return <div className="empty-state">{t.emptyView}</div>;
               }
+              const currentProjectMode = normalizeProjectViewMode(project.viewMode);
               const siblingProjects = activeProjects.filter(
                 (p) => p.areaId === project.areaId
               );
@@ -3698,7 +3992,7 @@ export const App: React.FC = () => {
                 <>
                   {/* Project Header */}
                   <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + Sort + Up/Down + Edit + Complete + Delete */}
+                    {/* Row 1: ProgressRing(26) + Title + Attention/Review Badge + 3-Mode Switcher + Sort + Up/Down + Edit + Complete + Delete */}
                     <div className="view-title-row">
                       <div className="view-title-left" style={{ flexWrap: 'wrap' }}>
                         <ProjectProgressRing
@@ -3729,8 +4023,74 @@ export const App: React.FC = () => {
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        {renderViewSortDropdown()}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          flexWrap: 'wrap'
+                        }}
+                      >
+                        {/* 3-Mode Soft Bento Segmented Control: List | Board | Roadmap */}
+                        <div
+                          className="v2-segmented-toggle project-mode-switcher"
+                          data-testid="project-view-mode-switcher"
+                        >
+                          <button
+                            type="button"
+                            className={`v2-segmented-btn ${
+                              currentProjectMode === 'list' ? 'active' : ''
+                            }`}
+                            data-testid="project-view-mode-list"
+                            title={t.projectViewList}
+                            onClick={() =>
+                              void localDb.upsertProject({
+                                id: project.id,
+                                viewMode: 'list'
+                              })
+                            }
+                          >
+                            <List size={13.5} />
+                            <span>{t.projectViewList}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`v2-segmented-btn ${
+                              currentProjectMode === 'board' ? 'active' : ''
+                            }`}
+                            data-testid="project-view-mode-board"
+                            title={t.projectViewBoard}
+                            onClick={() =>
+                              void localDb.upsertProject({
+                                id: project.id,
+                                viewMode: 'board'
+                              })
+                            }
+                          >
+                            <LayoutGrid size={13.5} />
+                            <span>{t.projectViewBoard}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`v2-segmented-btn ${
+                              currentProjectMode === 'roadmap' ? 'active' : ''
+                            }`}
+                            data-testid="project-view-mode-roadmap"
+                            title={t.projectViewRoadmap}
+                            onClick={() =>
+                              void localDb.upsertProject({
+                                id: project.id,
+                                viewMode: 'roadmap'
+                              })
+                            }
+                          >
+                            <CalendarDays size={13.5} />
+                            <span>{t.projectViewRoadmap}</span>
+                          </button>
+                        </div>
+
+                        {currentProjectMode !== 'roadmap' && renderViewSortDropdown()}
+
                         <button
                           type="button"
                           className="icon-btn"
@@ -3977,199 +4337,251 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Ungrouped Tasks at Top */}
-                  {ungroupedTasks.length > 0 && (
-                    <div className="group-section">
-                      <div className="task-list">
-                        {ungroupedTasks.map((tk) =>
-                          renderTaskRow(tk, ungroupedTasks, false)
-                        )}
-                      </div>
-                    </div>
+                  {/* ==================== MODE 2: BOARD VIEW ==================== */}
+                  {currentProjectMode === 'board' && (
+                    <ProjectBoardWorkspace
+                      project={project}
+                      headings={projHeadings}
+                      visibleTasks={visibleOpenProjTasks}
+                      allProjectTasks={allProjTasks}
+                      checklistItems={snapshot.checklistItems}
+                      tagsMap={tagsMap}
+                      openTaskIdSet={openTaskIdSet}
+                      tasksByIdMap={tasksByIdMap}
+                      selectedTaskIds={selectedTaskIds}
+                      orderedVisibleTaskIds={orderedVisibleTaskIds}
+                      viewSortMode={viewSortMode}
+                      lang={lang}
+                      t={t}
+                      onSelectTask={handleSelectTask}
+                      onOpenTaskEditor={(taskId) => {
+                        setSelectedTaskIds([]);
+                        setExpandedTaskId(taskId);
+                      }}
+                      onCreateTodoInPhase={(headingId) =>
+                        void createNewTodoInCurrentContext(headingId)
+                      }
+                      onCreatePhase={() => void createNewHeadingInActiveProject()}
+                      onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
+                      onOpenDeadlineModal={(taskId) =>
+                        setDeadlineModalTarget({ kind: 'task', taskId })
+                      }
+                      onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
+                      onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
+                      onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+                      onOpenDependenciesModal={(taskId) => setDependencyModalTaskId(taskId)}
+                      onOpenHeadingStartModal={(headingId) =>
+                        setDeadlineModalTarget({ kind: 'heading-start', headingId })
+                      }
+                      onOpenHeadingEndModal={(headingId) =>
+                        setDeadlineModalTarget({ kind: 'heading', headingId })
+                      }
+                      onStartFocusTimer={handleStartFocusTimer}
+                      onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
+                      onToast={showToast}
+                    />
                   )}
 
-                  {/* Collapsible Project Phases with Progress, End Date Capsule & Drop Target */}
-                  {projHeadings.map((hd) => {
-                    const hdTasks = sortViewList(
-                      visibleOpenProjTasks.filter((tk) => tk.headingId === hd.id)
-                    );
-                    const allHdTasks = allProjTasks.filter((tk) => tk.headingId === hd.id);
-                    const doneHdTasks = allHdTasks.filter(
-                      (tk) => tk.status === 'COMPLETED'
-                    ).length;
-                    const hdEndDiff =
-                      hd.endDate != null ? daysBetweenToday(hd.endDate) : null;
-                    const isPhaseOverdue =
-                      hdEndDiff != null &&
-                      hdEndDiff < 0 &&
-                      doneHdTasks < allHdTasks.length;
-                    const formattedPhaseEnd =
-                      hd.endDate != null
-                        ? new Intl.DateTimeFormat(lang, {
-                            month: 'short',
-                            day: 'numeric'
-                          }).format(new Date(hd.endDate))
-                        : null;
-                    const isCollapsed = collapsedHeadingIds.has(hd.id);
-                    const isEditing = editingHeadingId === hd.id;
-
-                    const toggleCollapse = () => {
-                      setCollapsedHeadingIds((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(hd.id)) next.delete(hd.id);
-                        else next.add(hd.id);
-                        return next;
-                      });
-                    };
-
-                    const commitHeadingEdit = async () => {
-                      if (cancelingHeadingEditRef.current) {
-                        cancelingHeadingEditRef.current = false;
-                        return;
+                  {/* ==================== MODE 3: ROADMAP VIEW ==================== */}
+                  {currentProjectMode === 'roadmap' && activeProjectRoadmapLayout && (
+                    <ProjectRoadmapWorkspace
+                      project={project}
+                      layout={activeProjectRoadmapLayout}
+                      selectedTaskIds={selectedTaskIds}
+                      orderedVisibleTaskIds={orderedVisibleTaskIds}
+                      lang={lang}
+                      isDark={isEffectiveDarkTheme}
+                      t={t}
+                      onSelectTask={handleSelectTask}
+                      onOpenTaskEditor={(taskId) => {
+                        setSelectedTaskIds([]);
+                        setExpandedTaskId(taskId);
+                      }}
+                      onCreateTodoInPhase={(headingId) =>
+                        void createNewTodoInCurrentContext(headingId)
                       }
-                      const clean = editingHeadingTitle.trim();
-                      if (!clean) {
-                        if (!hd.title.trim()) {
-                          await localDb.deleteHeading(hd.id);
-                        }
-                      } else {
-                        await localDb.upsertHeading({
-                          id: hd.id,
-                          projectId: project.id,
-                          title: clean
-                        });
+                      onCreatePhase={() => void createNewHeadingInActiveProject()}
+                      onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
+                      onOpenHeadingStartModal={(headingId) =>
+                        setDeadlineModalTarget({ kind: 'heading-start', headingId })
                       }
-                      setEditingHeadingId(null);
-                    };
+                      onOpenHeadingEndModal={(headingId) =>
+                        setDeadlineModalTarget({ kind: 'heading', headingId })
+                      }
+                      onToast={showToast}
+                    />
+                  )}
 
-                    return (
-                      <div
-                        key={hd.id}
-                        className="group-section"
-                        data-magic-heading-id={hd.id}
-                      >
-                        <div
-                          className={`project-heading-header ${
-                            dragOverHeadingId === hd.id ? 'drag-over' : ''
-                          }`}
-                          data-heading-id={hd.id}
-                          onClick={(e) => e.stopPropagation()}
-                          onDragOver={(e) => {
-                            if (
-                              e.dataTransfer.types.includes(
-                                'application/x-thingsbook-task'
-                              )
-                            ) {
-                              e.preventDefault();
-                              setDragOverHeadingId(hd.id);
-                            }
-                          }}
-                          onDragLeave={() => {
-                            if (dragOverHeadingId === hd.id) setDragOverHeadingId(null);
-                          }}
-                          onDrop={async (e) => {
-                            e.preventDefault();
-                            setDragOverHeadingId(null);
-                            const draggedId = e.dataTransfer.getData(
-                              'application/x-thingsbook-task'
-                            );
-                            const tk = snapshot.tasks.find((x) => x.id === draggedId);
-                            if (tk) {
-                              await localDb.upsertTask({
-                                id: tk.id,
-                                projectId: project.id,
-                                headingId: hd.id,
-                                areaId: null
-                              });
-                              if (isCollapsed) {
-                                setCollapsedHeadingIds((prev) => {
-                                  const next = new Set(prev);
-                                  next.delete(hd.id);
-                                  return next;
-                                });
-                              }
-                            }
-                          }}
-                        >
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              className="text-field"
-                              style={{ padding: '4px 8px', flex: 1, fontWeight: 700 }}
-                              autoFocus
-                              value={editingHeadingTitle}
-                              placeholder={t.entityNewHeading}
-                              onChange={(e) => setEditingHeadingTitle(e.target.value)}
-                              onBlur={() => void commitHeadingEdit()}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  void commitHeadingEdit();
-                                } else if (e.key === 'Escape') {
-                                  e.stopPropagation();
-                                  cancelingHeadingEditRef.current = true;
-                                  window.setTimeout(() => {
-                                    cancelingHeadingEditRef.current = false;
-                                  }, 0);
-                                  if (!hd.title.trim()) {
-                                    void localDb.deleteHeading(hd.id);
+                  {/* ==================== MODE 1: LIST VIEW ==================== */}
+                  {currentProjectMode === 'list' && (
+                    <>
+                      {/* Ungrouped (General) Tasks at Top + Drop Target when Phases exist */}
+                      {(ungroupedTasks.length > 0 || projHeadings.length > 0) && (
+                        <div className="group-section">
+                          {projHeadings.length > 0 &&
+                            (ungroupedTasks.length > 0 || dragOverHeadingId === '__ungrouped__') && (
+                              <div
+                                className={`project-heading-header ungrouped-drop-header ${
+                                  dragOverHeadingId === '__ungrouped__' ? 'drag-over' : ''
+                                }`}
+                                data-testid="project-ungrouped-drop-header"
+                                onClick={(e) => e.stopPropagation()}
+                                onDragOver={(e) => {
+                                  if (hasDraggedTaskMime(e.dataTransfer)) {
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = 'move';
+                                    setDragOverHeadingId('__ungrouped__');
                                   }
-                                  setEditingHeadingId(null);
+                                }}
+                                onDragLeave={() => {
+                                  if (dragOverHeadingId === '__ungrouped__') {
+                                    setDragOverHeadingId(null);
+                                  }
+                                }}
+                                onDrop={async (e) => {
+                                  e.preventDefault();
+                                  setDragOverHeadingId(null);
+                                  const draggedIds = extractDraggedTaskIds(
+                                    e.dataTransfer,
+                                    selectedTaskIds,
+                                    orderedVisibleTaskIds
+                                  );
+                                  if (draggedIds.length === 0) return;
+                                  await localDb.batchMoveOrReorderTasksInContainer(draggedIds, {
+                                    projectId: project.id,
+                                    headingId: null,
+                                    areaId: null
+                                  });
+                                  if (draggedIds.length > 1) {
+                                    showToast(t.dropMovedFeedback(draggedIds.length));
+                                  }
+                                }}
+                              >
+                                <span className="project-heading-title-btn" style={{ cursor: 'default' }}>
+                                  <span className="project-phase-accent general" />
+                                  <span>{t.projectUngroupedColumn}</span>
+                                </span>
+                                <div className="project-heading-actions">
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    style={{ height: 26, minWidth: 26, padding: 0 }}
+                                    title={t.entityNewTodo}
+                                    onClick={() => void createNewTodoInCurrentContext(null)}
+                                  >
+                                    <Plus size={14.5} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                          {ungroupedTasks.length > 0 && (
+                            <div className="task-list">
+                              {ungroupedTasks.map((tk) =>
+                                renderTaskRow(tk, ungroupedTasks, false)
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Collapsible Project Phases with Progress, Start/End Date Capsules & Multi-Task Drop Target */}
+                      {projHeadings.map((hd) => {
+                        const hdTasks = sortViewList(
+                          visibleOpenProjTasks.filter((tk) => tk.headingId === hd.id)
+                        );
+                        const allHdTasks = allProjTasks.filter((tk) => tk.headingId === hd.id);
+                        const doneHdTasks = allHdTasks.filter(
+                          (tk) => tk.status === 'COMPLETED'
+                        ).length;
+                        const hdEndDiff =
+                          hd.endDate != null ? daysBetweenToday(hd.endDate) : null;
+                        const isPhaseOverdue =
+                          hdEndDiff != null &&
+                          hdEndDiff < 0 &&
+                          doneHdTasks < allHdTasks.length;
+                        const formattedPhaseStart =
+                          hd.startDate != null
+                            ? new Intl.DateTimeFormat(lang, {
+                                month: 'short',
+                                day: 'numeric'
+                              }).format(new Date(hd.startDate))
+                            : null;
+                        const formattedPhaseEnd =
+                          hd.endDate != null
+                            ? new Intl.DateTimeFormat(lang, {
+                                month: 'short',
+                                day: 'numeric'
+                              }).format(new Date(hd.endDate))
+                            : null;
+                        const isCollapsed = collapsedHeadingIds.has(hd.id);
+                        const isEditing = editingHeadingId === hd.id;
+
+                        const toggleCollapse = () => {
+                          setCollapsedHeadingIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(hd.id)) next.delete(hd.id);
+                            else next.add(hd.id);
+                            return next;
+                          });
+                        };
+
+                        const commitHeadingEdit = async () => {
+                          if (cancelingHeadingEditRef.current) {
+                            cancelingHeadingEditRef.current = false;
+                            return;
+                          }
+                          const clean = editingHeadingTitle.trim();
+                          if (!clean) {
+                            if (!hd.title.trim()) {
+                              await localDb.deleteHeading(hd.id);
+                            }
+                          } else {
+                            await localDb.upsertHeading({
+                              id: hd.id,
+                              projectId: project.id,
+                              title: clean
+                            });
+                          }
+                          setEditingHeadingId(null);
+                        };
+
+                        return (
+                          <div
+                            key={hd.id}
+                            className="group-section"
+                            data-magic-heading-id={hd.id}
+                          >
+                            <div
+                              className={`project-heading-header ${
+                                dragOverHeadingId === hd.id ? 'drag-over' : ''
+                              }`}
+                              data-heading-id={hd.id}
+                              onClick={(e) => e.stopPropagation()}
+                              onDragOver={(e) => {
+                                if (hasDraggedTaskMime(e.dataTransfer)) {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'move';
+                                  setDragOverHeadingId(hd.id);
                                 }
                               }}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="project-heading-title-btn"
-                              onClick={toggleCollapse}
-                            >
-                              <span className="project-phase-accent" />
-                              <span>{hd.title || t.entityHeading}</span>
-                              {allHdTasks.length > 0 && (
-                                <ProjectProgressRing
-                                  completed={doneHdTasks}
-                                  total={allHdTasks.length}
-                                  size={14}
-                                  showCount
-                                />
-                              )}
-                            </button>
-                          )}
-
-                          {/* Phase End Date Capsule + 4 Trailing Icon Buttons */}
-                          <div className="project-heading-actions">
-                            <button
-                              type="button"
-                              className={`phase-end-pill ${
-                                isPhaseOverdue
-                                  ? 'overdue'
-                                  : hd.endDate != null
-                                    ? 'has-date'
-                                    : ''
-                              }`}
-                              title={t.phaseSetEndDate}
-                              onClick={() =>
-                                setDeadlineModalTarget({
-                                  kind: 'heading',
-                                  headingId: hd.id
-                                })
-                              }
-                            >
-                              <CalendarDays size={12} />
-                              <span>
-                                {formattedPhaseEnd != null
-                                  ? t.phaseEndsOn(formattedPhaseEnd)
-                                  : `+ ${t.phaseSetEndDate}`}
-                              </span>
-                            </button>
-
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              style={{ height: 26, minWidth: 26, padding: 0 }}
-                              title={t.entityNewTodo}
-                              onClick={() => {
+                              onDragLeave={() => {
+                                if (dragOverHeadingId === hd.id) setDragOverHeadingId(null);
+                              }}
+                              onDrop={async (e) => {
+                                e.preventDefault();
+                                setDragOverHeadingId(null);
+                                const draggedIds = extractDraggedTaskIds(
+                                  e.dataTransfer,
+                                  selectedTaskIds,
+                                  orderedVisibleTaskIds
+                                );
+                                if (draggedIds.length === 0) return;
+                                await localDb.batchMoveOrReorderTasksInContainer(draggedIds, {
+                                  projectId: project.id,
+                                  headingId: hd.id,
+                                  areaId: null
+                                });
                                 if (isCollapsed) {
                                   setCollapsedHeadingIds((prev) => {
                                     const next = new Set(prev);
@@ -4177,64 +4589,208 @@ export const App: React.FC = () => {
                                     return next;
                                   });
                                 }
-                                void createNewTodoInCurrentContext(hd.id);
+                                if (draggedIds.length > 1) {
+                                  showToast(t.dropMovedFeedback(draggedIds.length));
+                                }
                               }}
                             >
-                              <Plus size={14.5} />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              style={{ height: 26, minWidth: 26, padding: 0 }}
-                              title={t.actionRename}
-                              onClick={() => {
-                                setEditingHeadingId(hd.id);
-                                setEditingHeadingTitle(hd.title);
-                              }}
-                            >
-                              <Edit3 size={13.5} />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              style={{
-                                height: 26,
-                                minWidth: 26,
-                                padding: 0,
-                                color: 'var(--deadline-red)'
-                              }}
-                              title={t.actionDelete}
-                              onClick={() => localDb.deleteHeading(hd.id)}
-                            >
-                              <Trash2 size={13.5} />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              style={{ height: 26, minWidth: 26, padding: 0 }}
-                              title={isCollapsed ? t.sidebarShow : t.sidebarHide}
-                              onClick={toggleCollapse}
-                            >
-                              {isCollapsed ? (
-                                <ChevronDown size={15} />
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  className="text-field"
+                                  style={{ padding: '4px 8px', flex: 1, fontWeight: 700 }}
+                                  autoFocus
+                                  value={editingHeadingTitle}
+                                  placeholder={t.entityNewHeading}
+                                  onChange={(e) => setEditingHeadingTitle(e.target.value)}
+                                  onBlur={() => void commitHeadingEdit()}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      void commitHeadingEdit();
+                                    } else if (e.key === 'Escape') {
+                                      e.stopPropagation();
+                                      cancelingHeadingEditRef.current = true;
+                                      window.setTimeout(() => {
+                                        cancelingHeadingEditRef.current = false;
+                                      }, 0);
+                                      if (!hd.title.trim()) {
+                                        void localDb.deleteHeading(hd.id);
+                                      }
+                                      setEditingHeadingId(null);
+                                    }
+                                  }}
+                                />
                               ) : (
-                                <ChevronUp size={15} />
+                                <button
+                                  type="button"
+                                  className="project-heading-title-btn"
+                                  onClick={toggleCollapse}
+                                >
+                                  <span className="project-phase-accent" />
+                                  <span>{hd.title || t.entityHeading}</span>
+                                  {allHdTasks.length > 0 && (
+                                    <ProjectProgressRing
+                                      completed={doneHdTasks}
+                                      total={allHdTasks.length}
+                                      size={14}
+                                      showCount
+                                    />
+                                  )}
+                                </button>
                               )}
-                            </button>
-                          </div>
-                        </div>
 
-                        {!isCollapsed && (
-                          <div className="task-list">
-                            {hdTasks.map((tk) => renderTaskRow(tk, hdTasks, false))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                              {/* Phase Start Date & End Date Capsules + 4 Trailing Icon Buttons */}
+                              <div className="project-heading-actions">
+                                <span className="phase-date-chip-group">
+                                  <button
+                                    type="button"
+                                    className={`phase-end-pill ${
+                                      hd.startDate != null ? 'has-date' : ''
+                                    }`}
+                                    title={t.phaseSetStartDate}
+                                    onClick={() =>
+                                      setDeadlineModalTarget({
+                                        kind: 'heading-start',
+                                        headingId: hd.id
+                                      })
+                                    }
+                                  >
+                                    <CalendarDays size={12} />
+                                    <span>
+                                      {formattedPhaseStart != null
+                                        ? t.phaseStartsOn(formattedPhaseStart)
+                                        : `+ ${t.phaseSetStartDate}`}
+                                    </span>
+                                  </button>
+                                  {hd.startDate != null && (
+                                    <button
+                                      type="button"
+                                      className="phase-date-clear-btn"
+                                      title={t.phaseClearStartDate}
+                                      aria-label={t.phaseClearStartDate}
+                                      onClick={() =>
+                                        void localDb.updateHeadingStartDate(hd.id, null)
+                                      }
+                                    >
+                                      <X size={10.5} />
+                                    </button>
+                                  )}
+                                </span>
 
-                  {ungroupedTasks.length === 0 && projHeadings.length === 0 && (
-                    <div className="empty-state">{t.emptyView}</div>
+                                <span className="phase-date-chip-group">
+                                  <button
+                                    type="button"
+                                    className={`phase-end-pill ${
+                                      isPhaseOverdue
+                                        ? 'overdue'
+                                        : hd.endDate != null
+                                          ? 'has-date'
+                                          : ''
+                                    }`}
+                                    title={t.phaseSetEndDate}
+                                    onClick={() =>
+                                      setDeadlineModalTarget({
+                                        kind: 'heading',
+                                        headingId: hd.id
+                                      })
+                                    }
+                                  >
+                                    <CalendarDays size={12} />
+                                    <span>
+                                      {formattedPhaseEnd != null
+                                        ? t.phaseEndsOn(formattedPhaseEnd)
+                                        : `+ ${t.phaseSetEndDate}`}
+                                    </span>
+                                  </button>
+                                  {hd.endDate != null && (
+                                    <button
+                                      type="button"
+                                      className="phase-date-clear-btn"
+                                      title={t.phaseClearEndDate}
+                                      aria-label={t.phaseClearEndDate}
+                                      onClick={() =>
+                                        void localDb.updateHeadingEndDate(hd.id, null)
+                                      }
+                                    >
+                                      <X size={10.5} />
+                                    </button>
+                                  )}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  style={{ height: 26, minWidth: 26, padding: 0 }}
+                                  title={t.entityNewTodo}
+                                  onClick={() => {
+                                    if (isCollapsed) {
+                                      setCollapsedHeadingIds((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(hd.id);
+                                        return next;
+                                      });
+                                    }
+                                    void createNewTodoInCurrentContext(hd.id);
+                                  }}
+                                >
+                                  <Plus size={14.5} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  style={{ height: 26, minWidth: 26, padding: 0 }}
+                                  title={t.actionRename}
+                                  onClick={() => {
+                                    setEditingHeadingId(hd.id);
+                                    setEditingHeadingTitle(hd.title);
+                                  }}
+                                >
+                                  <Edit3 size={13.5} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  style={{
+                                    height: 26,
+                                    minWidth: 26,
+                                    padding: 0,
+                                    color: 'var(--deadline-red)'
+                                  }}
+                                  title={t.actionDelete}
+                                  onClick={() => localDb.deleteHeading(hd.id)}
+                                >
+                                  <Trash2 size={13.5} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  style={{ height: 26, minWidth: 26, padding: 0 }}
+                                  title={isCollapsed ? t.sidebarShow : t.sidebarHide}
+                                  onClick={toggleCollapse}
+                                >
+                                  {isCollapsed ? (
+                                    <ChevronDown size={15} />
+                                  ) : (
+                                    <ChevronUp size={15} />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+
+                            {!isCollapsed && (
+                              <div className="task-list">
+                                {hdTasks.map((tk) => renderTaskRow(tk, hdTasks, false))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {ungroupedTasks.length === 0 && projHeadings.length === 0 && (
+                        <div className="empty-state">{t.emptyView}</div>
+                      )}
+                    </>
                   )}
                 </>
               );
@@ -4582,6 +5138,65 @@ export const App: React.FC = () => {
       </main>
 
       {/* ==================== MODALS ==================== */}
+      {expandedTaskId &&
+        activeNav.kind === 'project' &&
+        activeProjectViewMode !== 'list' && (() => {
+          const liveExpanded = snapshot.tasks.find(
+            (x) => x.id === expandedTaskId && !x.isDeleted
+          );
+          if (!liveExpanded) return null;
+          return (
+            <div
+              className="modal-backdrop"
+              onClick={() => setExpandedTaskId(null)}
+            >
+              <div
+                className="board-roadmap-task-editor-shell"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <TaskItem
+                  task={liveExpanded}
+                  isExpanded
+                  isTodayView={false}
+                  isSelected={false}
+                  isMultiSelectMode={false}
+                  showContextSubtitle={false}
+                  showScheduleBadgeInCollapsed
+                  quickFindOpen={quickFindOpen}
+                  currentDayMarker={endOfToday}
+                  areasMap={areasMap}
+                  projectsMap={allNonDeletedProjectsMap}
+                  tagsMap={tagsMap}
+                  checklistItems={snapshot.checklistItems}
+                  attachments={snapshot.attachments}
+                  openTaskIdSet={openTaskIdSet}
+                  tasksByIdMap={tasksByIdMap}
+                  lang={lang}
+                  geminiApiKey={prefs.geminiApiKey}
+                  t={t}
+                  onSelect={(multiToggle, shiftRange) =>
+                    handleSelectTask(liveExpanded.id, multiToggle, shiftRange)
+                  }
+                  onExpand={() => {}}
+                  onCollapse={() => setExpandedTaskId(null)}
+                  onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
+                  onOpenDeadlineModal={(taskId) =>
+                    setDeadlineModalTarget({ kind: 'task', taskId })
+                  }
+                  onOpenRepeatModal={(taskId) => setRepeatModalTaskId(taskId)}
+                  onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
+                  onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+                  onOpenDependenciesModal={(taskId) => setDependencyModalTaskId(taskId)}
+                  onStartFocusTimer={handleStartFocusTimer}
+                  onDuplicateTask={(taskId) => void handleDuplicateTask(taskId)}
+                  onDropReorder={() => {}}
+                  onToast={showToast}
+                />
+              </div>
+            </div>
+          );
+        })()}
+
       {whenModalTaskId && (() => {
         const liveWhenTask = snapshot.tasks.find((x) => x.id === whenModalTaskId);
         if (!liveWhenTask) return null;
@@ -4614,28 +5229,46 @@ export const App: React.FC = () => {
             ? snapshot.tasks.find((x) => x.id === deadlineModalTarget.taskId)
             : undefined;
         const liveHeading =
-          deadlineModalTarget.kind === 'heading'
+          deadlineModalTarget.kind === 'heading' ||
+          deadlineModalTarget.kind === 'heading-start'
             ? snapshot.headings.find((h) => h.id === deadlineModalTarget.headingId)
             : undefined;
         if (deadlineModalTarget.kind === 'project' && !liveProject) return null;
         if (deadlineModalTarget.kind === 'task' && !liveTask) return null;
-        if (deadlineModalTarget.kind === 'heading' && !liveHeading) return null;
+        if (
+          (deadlineModalTarget.kind === 'heading' ||
+            deadlineModalTarget.kind === 'heading-start') &&
+          !liveHeading
+        ) {
+          return null;
+        }
 
         return (
           <DeadlineModal
             titleLabel={
               deadlineModalTarget.kind === 'project'
                 ? t.targetDate
+                : deadlineModalTarget.kind === 'heading-start'
+                  ? `${liveHeading!.title || t.entityHeading} — ${t.phaseSetStartDate}`
+                  : deadlineModalTarget.kind === 'heading'
+                    ? `${liveHeading!.title || t.entityHeading} — ${t.phaseSetEndDate}`
+                    : t.actionDeadline
+            }
+            clearLabel={
+              deadlineModalTarget.kind === 'heading-start'
+                ? t.phaseClearStartDate
                 : deadlineModalTarget.kind === 'heading'
-                  ? `${liveHeading!.title || t.entityHeading} — ${t.phaseSetEndDate}`
-                  : t.actionDeadline
+                  ? t.phaseClearEndDate
+                  : undefined
             }
             currentDeadline={
               deadlineModalTarget.kind === 'project'
                 ? liveProject!.deadline
-                : deadlineModalTarget.kind === 'heading'
-                  ? (liveHeading!.endDate ?? null)
-                  : liveTask!.deadline
+                : deadlineModalTarget.kind === 'heading-start'
+                  ? (liveHeading!.startDate ?? null)
+                  : deadlineModalTarget.kind === 'heading'
+                    ? (liveHeading!.endDate ?? null)
+                    : liveTask!.deadline
             }
             lang={lang}
             t={t}
@@ -4645,6 +5278,8 @@ export const App: React.FC = () => {
                   id: deadlineModalTarget.projectId,
                   deadline: dl
                 });
+              } else if (deadlineModalTarget.kind === 'heading-start') {
+                void localDb.updateHeadingStartDate(deadlineModalTarget.headingId, dl);
               } else if (deadlineModalTarget.kind === 'heading') {
                 void localDb.updateHeadingEndDate(deadlineModalTarget.headingId, dl);
               } else {

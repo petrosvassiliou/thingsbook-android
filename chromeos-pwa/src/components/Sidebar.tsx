@@ -32,8 +32,17 @@ import {
   type TaskRecord
 } from '../domain/types';
 import { isPrereleaseVersion } from '../data/versionUtils';
+import {
+  extractDraggedTaskIds,
+  hasDraggedTaskMime
+} from '../domain/v30Roadmap';
 import type { TranslationStrings } from '../i18n/translations';
 import { ProjectProgressRing } from './ProjectProgressRing';
+
+export type SidebarDropTarget =
+  | { kind: 'smart'; view: SmartViewType }
+  | { kind: 'area'; areaId: string }
+  | { kind: 'project'; projectId: string };
 
 interface SidebarProps {
   visible: boolean;
@@ -43,6 +52,8 @@ interface SidebarProps {
   tasks: TaskRecord[];
   savedPerspectives?: SavedPerspective[];
   perspectiveCounts?: ReadonlyMap<string, number>;
+  selectedTaskIds?: string[];
+  orderedVisibleTaskIds?: string[];
   counts: {
     inbox: number;
     today: number;
@@ -63,13 +74,8 @@ interface SidebarProps {
   onOpenManageAreas: () => void;
   onCreatePerspective?: () => void;
   onEditPerspective?: (perspective: SavedPerspective) => void;
-  onDropTaskOnTarget: (
-    taskId: string,
-    target:
-      | { kind: 'smart'; view: SmartViewType }
-      | { kind: 'area'; areaId: string }
-      | { kind: 'project'; projectId: string }
-  ) => void;
+  onDropTaskOnTarget?: (taskId: string, target: SidebarDropTarget) => void;
+  onDropTasksOnTarget?: (taskIds: string[], target: SidebarDropTarget) => void;
   onTriggerInstallPwa: () => void;
 }
 
@@ -101,6 +107,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   tasks,
   savedPerspectives = [],
   perspectiveCounts,
+  selectedTaskIds = [],
+  orderedVisibleTaskIds = [],
   counts,
   stalledProjectsCount = 0,
   canInstallPwa,
@@ -115,6 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCreatePerspective,
   onEditPerspective,
   onDropTaskOnTarget,
+  onDropTasksOnTarget,
   onTriggerInstallPwa
 }) => {
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
@@ -144,15 +153,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ? (projects.find((p) => p.id === activeNav.projectId)?.areaId ?? activeAreas[0]?.id ?? null)
         : (activeAreas[0]?.id ?? null);
 
-  const makeDropHandlers = (
-    key: string,
-    target:
-      | { kind: 'smart'; view: SmartViewType }
-      | { kind: 'area'; areaId: string }
-      | { kind: 'project'; projectId: string }
-  ) => ({
+  const makeDropHandlers = (key: string, target: SidebarDropTarget) => ({
     onDragOver: (e: React.DragEvent) => {
-      if (e.dataTransfer.types.includes('application/x-thingsbook-task')) {
+      if (hasDraggedTaskMime(e.dataTransfer)) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         if (dragTargetKey !== key) setDragTargetKey(key);
@@ -164,9 +167,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onDrop: (e: React.DragEvent) => {
       e.preventDefault();
       setDragTargetKey(null);
-      const taskId = e.dataTransfer.getData('application/x-thingsbook-task');
-      if (taskId) {
-        onDropTaskOnTarget(taskId, target);
+      const taskIds = extractDraggedTaskIds(
+        e.dataTransfer,
+        selectedTaskIds,
+        orderedVisibleTaskIds
+      );
+      if (taskIds.length === 0) return;
+      if (onDropTasksOnTarget) {
+        onDropTasksOnTarget(taskIds, target);
+      } else if (onDropTaskOnTarget) {
+        for (const tid of taskIds) {
+          onDropTaskOnTarget(tid, target);
+        }
       }
     }
   });
@@ -620,10 +632,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="sidebar-footer-utilities">
             <button
               type="button"
-              className={`sidebar-footer-icon-btn ${isLogbookActive ? 'active' : ''}`}
+              className={`sidebar-footer-icon-btn ${isLogbookActive ? 'active' : ''} ${
+                dragTargetKey === 'smart-LOGBOOK' ? 'drag-over' : ''
+              }`}
               title={`${t.viewLogbook} (Ctrl+6)`}
               aria-label={t.viewLogbook}
               onClick={() => onSelectNav({ kind: 'smart', view: 'LOGBOOK' })}
+              {...makeDropHandlers('smart-LOGBOOK', { kind: 'smart', view: 'LOGBOOK' })}
             >
               <History size={14.5} />
             </button>
@@ -669,6 +684,8 @@ interface SmartViewNavigationStripProps {
   areas: AreaRecord[];
   projects: ProjectRecord[];
   tasks: TaskRecord[];
+  selectedTaskIds?: string[];
+  orderedVisibleTaskIds?: string[];
   counts: {
     inbox: number;
     today: number;
@@ -680,6 +697,7 @@ interface SmartViewNavigationStripProps {
   t: TranslationStrings;
   isSoftKeyboardOpen?: boolean;
   onSelectNav: (nav: ActiveNavigation) => void;
+  onDropTasksOnTarget?: (taskIds: string[], target: SidebarDropTarget) => void;
   onCreateProject: () => void;
   onOpenTemplates: () => void;
   onOpenWeeklyReview: () => void;
@@ -691,15 +709,19 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
   areas,
   projects,
   tasks,
+  selectedTaskIds = [],
+  orderedVisibleTaskIds = [],
   counts,
   t,
   isSoftKeyboardOpen = false,
   onSelectNav,
+  onDropTasksOnTarget,
   onCreateProject,
   onOpenTemplates,
   onOpenWeeklyReview,
   onOpenManageAreas
 }) => {
+  const [dragStripKey, setDragStripKey] = useState<string | null>(null);
   const activeAreas = areas.filter((a) => !a.isDeleted);
   const activeProjects = projects.filter((p) => !p.isDeleted && p.status === 'ACTIVE');
   const unassignedProjects = activeProjects.filter(
@@ -713,6 +735,31 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
     const done = projTasks.filter((tk) => tk.status === 'COMPLETED').length;
     return { done, total: projTasks.length };
   };
+
+  const makeStripDropHandlers = (key: string, target: SidebarDropTarget) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (hasDraggedTaskMime(e.dataTransfer)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragStripKey !== key) setDragStripKey(key);
+      }
+    },
+    onDragLeave: () => {
+      if (dragStripKey === key) setDragStripKey(null);
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragStripKey(null);
+      const ids = extractDraggedTaskIds(
+        e.dataTransfer,
+        selectedTaskIds,
+        orderedVisibleTaskIds
+      );
+      if (ids.length > 0 && onDropTasksOnTarget) {
+        onDropTasksOnTarget(ids, target);
+      }
+    }
+  });
 
   const smartViews: Array<{
     view: SmartViewType;
@@ -733,13 +780,17 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
       <div className="smart-nav-strip" role="navigation" aria-label="Smart View Strip">
         {smartViews.map((sv, idx) => {
           const isActive = activeNav.kind === 'smart' && activeNav.view === sv.view;
+          const dKey = `strip-smart-${sv.view}`;
           return (
             <button
               key={sv.view}
               type="button"
-              className={`strip-pill ${isActive ? 'active' : ''}`}
+              className={`strip-pill ${isActive ? 'active' : ''} ${
+                dragStripKey === dKey ? 'drag-over' : ''
+              }`}
               title={`${sv.label} (Ctrl+${idx + 1})`}
               onClick={() => onSelectNav({ kind: 'smart', view: sv.view })}
+              {...makeStripDropHandlers(dKey, { kind: 'smart', view: sv.view })}
             >
               {renderMonochromeSmartIcon(sv.view, 13.5, isActive)}
               <span>{sv.label}</span>
@@ -774,13 +825,17 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
         {activeAreas.map((area) => {
           const isActive = activeNav.kind === 'area' && activeNav.areaId === area.id;
           const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
+          const areaKey = `strip-area-${area.id}`;
           return (
             <React.Fragment key={area.id}>
               <button
                 type="button"
-                className={`strip-pill ${isActive ? 'active' : ''}`}
+                className={`strip-pill ${isActive ? 'active' : ''} ${
+                  dragStripKey === areaKey ? 'drag-over' : ''
+                }`}
                 title={`${t.entityArea}: ${area.title}`}
                 onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
+                {...makeStripDropHandlers(areaKey, { kind: 'area', areaId: area.id })}
               >
                 <Folder
                   size={13}
@@ -792,13 +847,20 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
                 const isProjActive =
                   activeNav.kind === 'project' && activeNav.projectId === proj.id;
                 const prog = projectProgress(proj.id);
+                const projKey = `strip-proj-${proj.id}`;
                 return (
                   <button
                     key={proj.id}
                     type="button"
-                    className={`strip-pill ${isProjActive ? 'active' : ''}`}
+                    className={`strip-pill ${isProjActive ? 'active' : ''} ${
+                      dragStripKey === projKey ? 'drag-over' : ''
+                    }`}
                     title={`${area.title} › ${proj.title} (${prog.done}/${prog.total})`}
                     onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
+                    {...makeStripDropHandlers(projKey, {
+                      kind: 'project',
+                      projectId: proj.id
+                    })}
                   >
                     <span>{proj.title}</span>
                     <ProjectProgressRing completed={prog.done} total={prog.total} size={13} />
@@ -816,13 +878,17 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
         {unassignedProjects.map((proj) => {
           const isActive = activeNav.kind === 'project' && activeNav.projectId === proj.id;
           const prog = projectProgress(proj.id);
+          const projKey = `strip-proj-${proj.id}`;
           return (
             <button
               key={proj.id}
               type="button"
-              className={`strip-pill ${isActive ? 'active' : ''}`}
+              className={`strip-pill ${isActive ? 'active' : ''} ${
+                dragStripKey === projKey ? 'drag-over' : ''
+              }`}
               title={`${proj.title} (${prog.done}/${prog.total})`}
               onClick={() => onSelectNav({ kind: 'project', projectId: proj.id })}
+              {...makeStripDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
             >
               <span>{proj.title}</span>
               <ProjectProgressRing completed={prog.done} total={prog.total} size={13} />

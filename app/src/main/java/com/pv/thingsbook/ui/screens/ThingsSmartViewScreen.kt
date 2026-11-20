@@ -6,16 +6,28 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.geometry.Offset
+import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
+import com.pv.thingsbook.domain.model.ProjectWorkspaceMode
+import com.pv.thingsbook.ui.components.CompactMobileDragDropDock
 import com.pv.thingsbook.ui.components.MagicPlusDropMode
 import com.pv.thingsbook.ui.components.MagicPlusPositionalDropHandler
+import com.pv.thingsbook.ui.components.ProjectBoardWorkspace
 import com.pv.thingsbook.ui.components.ProjectDragDropController
 import com.pv.thingsbook.ui.components.ProjectDragKind
 import com.pv.thingsbook.ui.components.ProjectDragSession
 import com.pv.thingsbook.ui.components.ProjectListEntry
+import com.pv.thingsbook.ui.components.ProjectRoadmapWorkspace
 import com.pv.thingsbook.ui.components.ProjectTaskDragHandle
+import com.pv.thingsbook.ui.components.ProjectWorkspaceSegmentedSwitcher
 import com.pv.thingsbook.ui.components.ProjectDropIndicatorOverlay
 import com.pv.thingsbook.ui.components.ProjectDragAutoScrollEffect
+import com.pv.thingsbook.ui.components.RoadmapExportMenuPill
+import com.pv.thingsbook.ui.components.RoadmapExporter
+import com.pv.thingsbook.ui.components.WorkspaceDragDropDestination
+import com.pv.thingsbook.ui.components.WorkspaceDragFloatingOverlay
 import com.pv.thingsbook.ui.components.projectDropSurface
+import com.pv.thingsbook.ui.components.workspaceDragRootSurface
+import com.pv.thingsbook.ui.components.workspaceDropTarget
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -380,6 +392,12 @@ fun ThingsSmartViewScreen(
     val currentProject: Project? = (navTarget as? ActiveNavigationTarget.ProjectDetail)?.let { detail ->
         activeProjects.find { it.id == detail.projectId }
     }
+    val currentProjectWorkspaceMode: ProjectWorkspaceMode = remember(currentProject?.viewMode) {
+        ProjectWorkspaceMode.fromRaw(currentProject?.viewMode)
+    }
+    val headingTaskCountsTop by viewModel.headingTaskCounts.collectAsState()
+    val topCoroutineScope = rememberCoroutineScope()
+    val exportRoadmapChooserTitle = stringResource(R.string.v30_roadmap_export)
     val currentArea: Area? = (navTarget as? ActiveNavigationTarget.AreaDetail)?.let { detail ->
         areas.find { it.id == detail.areaId }
     }
@@ -787,6 +805,10 @@ fun ThingsSmartViewScreen(
                 detectVerticalDragGestures(
                     onDragStart = { accumulatedPull = 0f },
                     onVerticalDrag = { _, dragAmount ->
+                        if (projectDragController.session != null) {
+                            accumulatedPull = 0f
+                            return@detectVerticalDragGestures
+                        }
                         if (dragAmount > 0) {
                             accumulatedPull += dragAmount
                             if (accumulatedPull > 110f && !isQuickFindOpen) {
@@ -798,7 +820,19 @@ fun ThingsSmartViewScreen(
                     }
                 )
             }
+            .workspaceDragRootSurface(projectDragController) { finishedSession ->
+                applyWorkspaceSessionDrop(
+                    viewModel = viewModel,
+                    session = finishedSession,
+                    controller = projectDragController,
+                    currentViewTasks = primaryTasks
+                )
+            }
     ) {
+        val isExpandedProjectWorkspace = isProjectView && !isQuickFindOpen &&
+            (currentProjectWorkspaceMode == ProjectWorkspaceMode.BOARD ||
+                currentProjectWorkspaceMode == ProjectWorkspaceMode.ROADMAP)
+
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -815,6 +849,7 @@ fun ThingsSmartViewScreen(
                     allOpenTasks = allOpenTasks,
                     openTaskIds = openTaskIds,
                     todayDayStartMillis = todayDayStartMillis,
+                    dragController = projectDragController,
                     onSelectSmartView = { viewModel.selectSmartView(it) },
                     onSelectArea = { viewModel.selectArea(it) },
                     onSelectProject = { viewModel.selectProject(it) },
@@ -860,7 +895,13 @@ fun ThingsSmartViewScreen(
                             start = if (showSidebar) 12.dp else 0.dp,
                             end = if (showSidebar) 20.dp else 0.dp
                         )
-                        .widthIn(max = if (isWideScreen) 1040.dp else 2000.dp)
+                        .widthIn(
+                            max = when {
+                                isExpandedProjectWorkspace -> 2400.dp
+                                isWideScreen -> 1040.dp
+                                else -> 2000.dp
+                            }
+                        )
                         .fillMaxSize()
                 ) {
                     ThingsTopHeaderAndQuickFindSection(
@@ -893,6 +934,7 @@ fun ThingsSmartViewScreen(
                             areas = areas,
                             projects = activeProjects,
                             savedPerspectives = savedPerspectives,
+                            dragController = projectDragController,
                             onSelectSmartView = { viewModel.selectSmartView(it) },
                             onSelectArea = { viewModel.selectArea(it) },
                             onSelectProject = { viewModel.selectProject(it) },
@@ -917,10 +959,39 @@ fun ThingsSmartViewScreen(
                         )
                     }
 
-                    // View Title Header (Smart View, Project with Target Date / Deadline, Area, or Custom Perspective)
+                    // View Title Header (Smart View, Project with 3-Mode Workspace Switcher & Target Date, Area, or Custom Perspective)
                     ViewTitleHeader(
                         navTarget = navTarget,
                         currentProject = currentProject,
+                        projectWorkspaceMode = currentProjectWorkspaceMode,
+                        onSelectProjectWorkspaceMode = { nextMode ->
+                            currentProject?.let { proj -> viewModel.updateProjectViewMode(proj.id, nextMode) }
+                        },
+                        onExportProjectRoadmap = { asPdf ->
+                            val proj = currentProject ?: return@ViewTitleHeader
+                            topCoroutineScope.launch {
+                                runCatching {
+                                    val roadmapLayout = ProjectRoadmapEngine.buildRoadmapLayout(
+                                        project = proj,
+                                        headings = projectHeadings,
+                                        tasks = primaryTasks,
+                                        todayEpochDay = currentEpochDayTop,
+                                        zoneId = zoneTop
+                                    )
+                                    RoadmapExporter.exportAndShareRoadmap(
+                                        context = appCtx,
+                                        layout = roadmapLayout,
+                                        headingCounts = headingTaskCountsTop,
+                                        locale = activeLocale,
+                                        isDark = colors.isDark,
+                                        asPdf = asPdf,
+                                        exportChooserTitle = exportRoadmapChooserTitle
+                                    )
+                                }.onFailure { err ->
+                                    viewModel.showUiMessage(err.localizedMessage ?: err.message ?: "Export failed")
+                                }
+                            }
+                        },
                         currentArea = currentArea,
                         currentPerspective = currentPerspective,
                         areas = areas,
@@ -994,6 +1065,8 @@ fun ThingsSmartViewScreen(
                         isProjectView = isProjectView,
                         isAreaView = isAreaView,
                         isQuickFindOpen = isQuickFindOpen,
+                        currentProject = currentProject,
+                        projectWorkspaceMode = currentProjectWorkspaceMode,
                         currentArea = currentArea,
                         primaryTasks = primaryTasks,
                         filteredEveningTasks = filteredEveningTasks,
@@ -1169,6 +1242,7 @@ fun ThingsSmartViewScreen(
                         allOpenTasks = allOpenTasks,
                         openTaskIds = openTaskIds,
                         todayDayStartMillis = todayDayStartMillis,
+                        dragController = projectDragController,
                         onSelectSmartView = {
                             isMobileDrawerOpen = false
                             viewModel.selectSmartView(it)
@@ -1223,6 +1297,74 @@ fun ThingsSmartViewScreen(
                         thickness = 1.dp,
                         modifier = Modifier.fillMaxHeight()
                     )
+                }
+            }
+        }
+
+        // Compact Top Drop Dock on narrower screens (< 700dp) while dragging To-Dos
+        if (!isWideScreen && projectDragController.session?.kind == ProjectDragKind.MOVE_TASK) {
+            CompactMobileDragDropDock(
+                controller = projectDragController,
+                areas = areas,
+                projects = activeProjects,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+            )
+        }
+
+        // Full-window Soft Bento Floating Drag Ghost Card (with "%1$d To-Dos" multi-select badge)
+        WorkspaceDragFloatingOverlay(controller = projectDragController)
+
+        // Expanded Task Editor Modal when opening a To-Do from Project Board or Roadmap mode
+        if (!(biometricAppLockEnabled && !isAppUnlocked) &&
+            isExpandedProjectWorkspace &&
+            expandedTaskId != null
+        ) {
+            val modalTask = remember(expandedTaskId, primaryTasks, allOpenTasks) {
+                primaryTasks.firstOrNull { it.id == expandedTaskId }
+                    ?: allOpenTasks.firstOrNull { it.id == expandedTaskId }
+            }
+            if (modalTask != null) {
+                val magicBreakdownTaskIdTop by viewModel.magicBreakdownTaskId.collectAsState()
+                Dialog(
+                    onDismissRequest = { viewModel.collapseExpandedTask() },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .widthIn(max = 640.dp)
+                            .fillMaxWidth(0.94f)
+                            .clip(RoundedCornerShape(20.dp)),
+                        shape = RoundedCornerShape(20.dp),
+                        color = colors.cardSurface,
+                        tonalElevation = 8.dp,
+                        shadowElevation = 12.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 6.dp)
+                        ) {
+                            ThingsTaskRowItem(
+                                task = modalTask,
+                                viewModel = viewModel,
+                                allTags = allTags,
+                                areas = areas,
+                                activeProjects = activeProjects,
+                                allHeadings = allHeadingsTop,
+                                expandedTaskId = expandedTaskId,
+                                isQuickFindOpen = isQuickFindOpen,
+                                selectedTaskIds = selectedTaskIds,
+                                allVisibleTaskIds = allVisibleTaskIds,
+                                magicBreakdownTaskId = magicBreakdownTaskIdTop,
+                                activeLocale = activeLocale,
+                                externalDialogTriggerToken = externalDialogTriggerToken,
+                                externalDialogTriggerType = externalDialogTriggerType
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1377,6 +1519,41 @@ private fun MagicPlusOverlaySection(
     }
 }
 
+/** Applies a finished 2D Workspace drag session (external container, Kanban column, intra-list reorder, or Project section). */
+private fun applyWorkspaceSessionDrop(
+    viewModel: ThingsbookViewModel,
+    session: ProjectDragSession,
+    controller: ProjectDragDropController,
+    currentViewTasks: List<TaskItem>
+) {
+    if (session.kind != ProjectDragKind.MOVE_TASK) {
+        applyProjectDrop(viewModel, session, controller)
+        return
+    }
+    val draggedIds = session.effectiveTaskIds
+    if (draggedIds.isEmpty()) return
+
+    val externalDest = session.externalDestination
+    if (externalDest != null) {
+        val boardOrProjSections = if (controller.isBoardActive) {
+            controller.boardSectionTasks
+        } else {
+            controller.sectionTasks
+        }
+        viewModel.handleWorkspaceDrop(
+            taskIds = draggedIds,
+            destination = externalDest,
+            currentViewTasks = currentViewTasks,
+            projectSectionTasks = boardOrProjSections
+        )
+        return
+    }
+
+    if (session.target != null) {
+        applyProjectDrop(viewModel, session, controller)
+    }
+}
+
 /** Applies a finished Project drag session (Magic Plus or task handle) to the data layer. */
 private fun applyProjectDrop(
     viewModel: ThingsbookViewModel,
@@ -1391,8 +1568,17 @@ private fun applyProjectDrop(
         ProjectDragKind.NEW_HEADING ->
             viewModel.createHeadingInCurrentProject(target.headingInsertIndex, "")
         ProjectDragKind.MOVE_TASK -> {
-            val taskId = session.draggedTaskId ?: return
-            viewModel.moveTaskWithinProject(taskId, target.headingId, section, target.indexInSection)
+            val ids = session.effectiveTaskIds
+            val projectId = (viewModel.navigationTarget.value as? ActiveNavigationTarget.ProjectDetail)?.projectId
+            if (ids.isNotEmpty() && !projectId.isNullOrBlank()) {
+                viewModel.moveTasksWithinProjectSection(
+                    taskIds = ids,
+                    projectId = projectId,
+                    headingId = target.headingId,
+                    sectionTasks = section,
+                    indexInSection = target.indexInSection
+                )
+            }
         }
     }
 }
@@ -1898,6 +2084,8 @@ private fun ThingsMainTaskLazyList(
     isProjectView: Boolean,
     isAreaView: Boolean,
     isQuickFindOpen: Boolean,
+    currentProject: Project? = null,
+    projectWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
     currentArea: Area?,
     primaryTasks: List<TaskItem>,
     filteredEveningTasks: List<TaskItem>,
@@ -1928,6 +2116,7 @@ private fun ThingsMainTaskLazyList(
     val headingTaskCounts by viewModel.headingTaskCounts.collectAsState()
     val selectedFilterTagId by viewModel.selectedFilterTagId.collectAsState()
     val viewSortMode by viewModel.viewSortMode.collectAsState()
+    val allOpenTasks by viewModel.allOpenTasks.collectAsState()
     val openTaskIds by viewModel.openTaskIds.collectAsState()
     val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
     val logbookAiReview by viewModel.logbookAiReview.collectAsState()
@@ -1954,57 +2143,6 @@ private fun ThingsMainTaskLazyList(
     val deletedProjects by viewModel.deletedProjects.collectAsState()
     val groupTodayByProjectOrArea by viewModel.groupTodayByProjectOrArea.collectAsState()
     val isTodayTimelineMode by viewModel.isTodayTimelineMode.collectAsState()
-
-    if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
-        isTodayTimelineMode &&
-        !isQuickFindOpen
-    ) {
-        val combinedTodayTasks = remember(primaryTasks, filteredEveningTasks) {
-            (primaryTasks + filteredEveningTasks).distinctBy { it.id }
-        }
-        ThingsTodayTimelineSection(
-            todayTasks = combinedTodayTasks,
-            todayCalendarEvents = if (calendarEventsEnabled) todayCalendarEvents else emptyList(),
-            onCompleteTask = { taskId -> viewModel.updateTaskStatus(taskId, TaskStatus.COMPLETED) },
-            onUpdateTimeblock = { taskId, startMins, durMins ->
-                viewModel.updateTaskTimeblock(taskId, startMins, durMins)
-            },
-            onShiftTimeblock = { taskId, deltaMins ->
-                viewModel.shiftTaskTimeblock(taskId, deltaMins)
-            },
-            onStartFocusTimer = { targetTask ->
-                viewModel.startFocusTimer(targetTask.id, targetTask.title, targetTask.durationMinutes)
-            },
-            onOpenTask = { taskId ->
-                viewModel.setTodayTimelineMode(false)
-                viewModel.toggleTaskExpansion(taskId)
-            },
-            modifier = modifier.imePadding()
-        )
-        return
-    }
-
-    val navScopeKey = navTarget.scrollScopeKey()
-    val listState = remember(navScopeKey) {
-        LazyListState(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0)
-    }
-    var focusScrollRequestTick by remember { mutableIntStateOf(0) }
-    var preferBottomForExpandedTask by remember(expandedTaskId) { mutableStateOf(false) }
-    val lastKnownTaskIndices = remember(navScopeKey) { HashMap<String, Int>() }
-    val lastKnownTaskBounds = remember(navScopeKey) { HashMap<String, Pair<Int, Int>>() }
-
-    LaunchedEffect(navScopeKey) {
-        if (navTarget.shouldResetScrollToTop(expandedTaskId)) {
-            runCatching { listState.scrollToItem(0, 0) }
-        }
-    }
-
-    val handleEnsureVisibleRequest: (Boolean) -> Unit = remember {
-        { preferBottom ->
-            preferBottomForExpandedTask = preferBottom
-            focusScrollRequestTick++
-        }
-    }
 
     // Project sections as displayed: tasks without (valid) heading first, then one section per heading
     val projectSections: Map<String?, List<TaskItem>> = remember(
@@ -2035,6 +2173,168 @@ private fun ThingsMainTaskLazyList(
         }
     }
 
+    if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
+        isTodayTimelineMode &&
+        !isQuickFindOpen
+    ) {
+        SideEffect {
+            projectDragController.isProjectListActive = false
+            projectDragController.isGeneralListReorderActive = false
+        }
+        val combinedTodayTasks = remember(primaryTasks, filteredEveningTasks) {
+            (primaryTasks + filteredEveningTasks).distinctBy { it.id }
+        }
+        ThingsTodayTimelineSection(
+            todayTasks = combinedTodayTasks,
+            todayCalendarEvents = if (calendarEventsEnabled) todayCalendarEvents else emptyList(),
+            onCompleteTask = { taskId -> viewModel.updateTaskStatus(taskId, TaskStatus.COMPLETED) },
+            onUpdateTimeblock = { taskId, startMins, durMins ->
+                viewModel.updateTaskTimeblock(taskId, startMins, durMins)
+            },
+            onShiftTimeblock = { taskId, deltaMins ->
+                viewModel.shiftTaskTimeblock(taskId, deltaMins)
+            },
+            onStartFocusTimer = { targetTask ->
+                viewModel.startFocusTimer(targetTask.id, targetTask.title, targetTask.durationMinutes)
+            },
+            onOpenTask = { taskId ->
+                viewModel.setTodayTimelineMode(false)
+                viewModel.toggleTaskExpansion(taskId)
+            },
+            modifier = modifier.imePadding()
+        )
+        return
+    }
+
+    // Milestone 3: Project Board (Kanban) & Project Roadmap (Gantt) Workspaces
+    if (isProjectView && currentProject != null && !isQuickFindOpen) {
+        if (projectWorkspaceMode == ProjectWorkspaceMode.BOARD) {
+            SideEffect {
+                projectDragController.isProjectListActive = false
+                projectDragController.isGeneralListReorderActive = false
+            }
+            ProjectBoardWorkspace(
+                project = currentProject,
+                projectHeadings = projectHeadings,
+                projectSections = projectSections,
+                headingTaskCounts = headingTaskCounts,
+                allOpenTasks = allOpenTasks,
+                openTaskIds = openTaskIds,
+                selectedTaskIds = selectedTaskIds,
+                allVisibleTaskIds = allVisibleTaskIds,
+                controller = projectDragController,
+                locale = activeLocale,
+                onCreateTaskInSection = { headingId, sectionTasks, indexInSection ->
+                    viewModel.createTaskInProjectSection(headingId, sectionTasks, indexInSection)
+                },
+                onCreatePhase = { title ->
+                    viewModel.createHeadingInCurrentProject(projectHeadings.size, title)
+                },
+                onRenameHeading = { headingId, newTitle ->
+                    viewModel.renameHeading(headingId, newTitle)
+                },
+                onUpdateHeadingStartDate = { headingId, startDate ->
+                    viewModel.updateHeadingStartDate(headingId, startDate)
+                },
+                onUpdateHeadingEndDate = { headingId, endDate ->
+                    viewModel.updateHeadingEndDate(headingId, endDate)
+                },
+                onDeleteHeading = { headingId ->
+                    viewModel.deleteHeading(headingId)
+                },
+                onUpdateTaskStatus = { taskId, status ->
+                    viewModel.updateTaskStatus(taskId, status)
+                },
+                onToggleTaskPin = { taskId ->
+                    viewModel.toggleTaskPinned(taskId)
+                },
+                onOpenTaskEditor = { taskId ->
+                    viewModel.toggleTaskExpansion(taskId)
+                },
+                onToggleTaskSelection = { taskId ->
+                    viewModel.toggleTaskSelection(taskId)
+                },
+                onRangeSelectTask = { taskId ->
+                    viewModel.selectTaskRange(allVisibleTaskIds, taskId)
+                },
+                modifier = modifier.imePadding()
+            )
+            return
+        } else if (projectWorkspaceMode == ProjectWorkspaceMode.ROADMAP) {
+            SideEffect {
+                projectDragController.isProjectListActive = false
+                projectDragController.isGeneralListReorderActive = false
+            }
+            ProjectRoadmapWorkspace(
+                project = currentProject,
+                projectHeadings = projectHeadings,
+                primaryTasks = primaryTasks,
+                headingTaskCounts = headingTaskCounts,
+                currentEpochDay = currentEpochDay,
+                locale = activeLocale,
+                onShiftHeadingDates = { heading, deltaDays, fallbackRange ->
+                    viewModel.shiftHeadingRoadmapDates(heading, deltaDays, fallbackRange)
+                },
+                onShiftTaskDates = { task, deltaDays ->
+                    viewModel.shiftTaskRoadmapDates(task, deltaDays)
+                },
+                onUpdateHeadingStartDate = { headingId, startDate ->
+                    viewModel.updateHeadingStartDate(headingId, startDate)
+                },
+                onUpdateTaskDeadline = { task, deadline ->
+                    viewModel.updateTaskDeadline(task, deadline)
+                },
+                onScheduleTaskToday = { task ->
+                    val todayStartMillis = LocalDate.now()
+                        .atStartOfDay(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli()
+                    viewModel.updateTaskSchedule(task, ScheduleState.TODAY, todayStartMillis)
+                },
+                onUpdateTaskStatus = { taskId, status ->
+                    viewModel.updateTaskStatus(taskId, status)
+                },
+                onOpenTaskEditor = { taskId ->
+                    viewModel.toggleTaskExpansion(taskId)
+                },
+                onShowError = { msg ->
+                    viewModel.showUiMessage(msg)
+                },
+                modifier = modifier.imePadding()
+            )
+            return
+        }
+    }
+
+    val navScopeKey = navTarget.scrollScopeKey()
+    val listState = remember(navScopeKey) {
+        LazyListState(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0)
+    }
+    var focusScrollRequestTick by remember { mutableIntStateOf(0) }
+    var preferBottomForExpandedTask by remember(expandedTaskId) { mutableStateOf(false) }
+    val lastKnownTaskIndices = remember(navScopeKey) { HashMap<String, Int>() }
+    val lastKnownTaskBounds = remember(navScopeKey) { HashMap<String, Pair<Int, Int>>() }
+
+    LaunchedEffect(navScopeKey) {
+        if (navTarget.shouldResetScrollToTop(expandedTaskId)) {
+            runCatching { listState.scrollToItem(0, 0) }
+        }
+    }
+
+    val handleEnsureVisibleRequest: (Boolean) -> Unit = remember {
+        { preferBottom ->
+            preferBottomForExpandedTask = preferBottom
+            focusScrollRequestTick++
+        }
+    }
+
+    val isGeneralManualFlatList = !isProjectView &&
+        viewSortMode == "manual" &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING) &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK) &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.TRASH) &&
+        !(navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && groupTodayByProjectOrArea)
+
     // Register list geometry semantics for position-based Drag & Drop (Magic Plus + task handles)
     // and track latest visible task item indices/bounds for keyboard-aware auto-scrolling
     SideEffect {
@@ -2057,6 +2357,8 @@ private fun ThingsMainTaskLazyList(
             lastKnownTaskBounds[resolvedId] = info.offset to (info.offset + info.size)
         }
         projectDragController.isProjectListActive = isProjectView
+        projectDragController.isGeneralListReorderActive = isGeneralManualFlatList
+        projectDragController.generalListTasks = if (isGeneralManualFlatList) primaryTasks else emptyList()
         projectDragController.listState = listState
         projectDragController.headings = if (isProjectView) projectHeadings else emptyList()
         projectDragController.sectionTasks = projectSections
@@ -2080,12 +2382,15 @@ private fun ThingsMainTaskLazyList(
     }
     DisposableEffect(projectDragController) {
         onDispose {
-            projectDragController.cancel()
             projectDragController.isProjectListActive = false
+            projectDragController.isGeneralListReorderActive = false
+            projectDragController.generalListTasks = emptyList()
         }
     }
     LaunchedEffect(isProjectView) {
-        if (!isProjectView) projectDragController.cancel()
+        if (!isProjectView && projectDragController.session?.kind != ProjectDragKind.MOVE_TASK) {
+            projectDragController.cancel()
+        }
     }
 
     suspend fun ensureExpandedTaskVisibleAboveKeyboard(targetId: String, animate: Boolean) {
@@ -2212,10 +2517,22 @@ private fun ThingsMainTaskLazyList(
 
     ProjectDragAutoScrollEffect(controller = projectDragController, listState = listState)
 
-    val draggedTaskId = projectDragController.session?.draggedTaskId
+    val activeSession = projectDragController.session
+    val draggedIdsSet = remember(activeSession?.draggedTaskIds, activeSession?.draggedTaskId) {
+        activeSession?.effectiveTaskIds?.toHashSet().orEmpty()
+    }
+    val supportsCrossContainerTaskDrag = navTarget != ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK) &&
+        navTarget != ActiveNavigationTarget.SmartView(SmartViewType.TRASH)
     val taskDragHandleFor: (TaskItem) -> (@Composable () -> Unit)? = { task ->
-        if (isProjectView && viewSortMode == "manual" && task.status == TaskStatus.OPEN && selectedTaskIds.isEmpty()) {
-            { ProjectTaskDragHandle(task = task, controller = projectDragController) }
+        if (supportsCrossContainerTaskDrag && task.status == TaskStatus.OPEN) {
+            {
+                ProjectTaskDragHandle(
+                    task = task,
+                    controller = projectDragController,
+                    selectedTaskIds = selectedTaskIds,
+                    orderedVisibleTaskIds = allVisibleTaskIds
+                )
+            }
         } else {
             null
         }
@@ -2223,10 +2540,8 @@ private fun ThingsMainTaskLazyList(
 
     Box(
         modifier = modifier.then(
-            if (isProjectView) {
-                Modifier.projectDropSurface(projectDragController) { session ->
-                    applyProjectDrop(viewModel, session, projectDragController)
-                }
+            if (isProjectView || isGeneralManualFlatList) {
+                Modifier.projectDropSurface(projectDragController)
             } else {
                 Modifier
             }
@@ -2410,6 +2725,75 @@ private fun ThingsMainTaskLazyList(
             }
         } else if (isProjectView) {
             val ungroupedTasks = projectSections[null].orEmpty()
+            val showUngroupedDropHeader = projectHeadings.isNotEmpty() &&
+                (ungroupedTasks.isNotEmpty() || activeSession?.kind == ProjectDragKind.MOVE_TASK)
+            if (showUngroupedDropHeader && currentProject != null) {
+                item(key = "proj_ungrouped_drop_header_${currentProject.id}") {
+                    val generalTitle = stringResource(R.string.v30_board_ungrouped_column)
+                    val isGeneralHighlighted = activeSession?.kind == ProjectDragKind.MOVE_TASK &&
+                        (activeSession.hoveredZoneKey == "proj_section_general" ||
+                            activeSession.hoveredZoneKey == "proj_ungrouped_drop_${currentProject.id}")
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 5.dp)
+                            .workspaceDropTarget(
+                                controller = projectDragController,
+                                key = "proj_ungrouped_drop_${currentProject.id}",
+                                destination = WorkspaceDragDropDestination.BoardColumn(
+                                    projectId = currentProject.id,
+                                    headingId = null,
+                                    headingTitle = generalTitle,
+                                    indexInColumn = ungroupedTasks.size
+                                ),
+                                cornerRadius = 12.dp,
+                                priority = 15
+                            ),
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isGeneralHighlighted) {
+                            colors.thingsBlueSoft.copy(alpha = 0.65f)
+                        } else {
+                            colors.tagPillBg.copy(alpha = 0.42f)
+                        },
+                        border = BorderStroke(
+                            width = if (isGeneralHighlighted) 1.5.dp else 0.75.dp,
+                            color = if (isGeneralHighlighted) colors.thingsBlue else colors.hairlineDivider
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.5.dp)
+                                        .height(15.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(colors.thingsBlue.copy(alpha = 0.75f))
+                                )
+                                Text(
+                                    text = generalTitle,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    color = if (isGeneralHighlighted) colors.thingsBlue else colors.secondaryText
+                                )
+                            }
+                            Text(
+                                text = ungroupedTasks.size.toString(),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = if (isGeneralHighlighted) colors.thingsBlue else colors.secondaryText
+                            )
+                        }
+                    }
+                }
+            }
+
             items(
                 items = ungroupedTasks,
                 key = { task -> "ungrouped_${task.id}" }
@@ -2431,7 +2815,7 @@ private fun ThingsMainTaskLazyList(
                     externalDialogTriggerType = externalDialogTriggerType,
                     onRequestEnsureVisible = handleEnsureVisibleRequest,
                     dragHandle = taskDragHandleFor(task),
-                    modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
+                    modifier = Modifier.alpha(if (task.id in draggedIdsSet) 0.35f else 1f)
                 )
             }
 
@@ -2440,6 +2824,9 @@ private fun ThingsMainTaskLazyList(
                 val counts = headingTaskCounts[heading.id]
                 val completedInPhase = counts?.first ?: 0
                 val totalInPhase = counts?.second ?: tasksInHeading.size
+                val isSectionHighlighted = activeSession?.kind == ProjectDragKind.MOVE_TASK &&
+                    (activeSession.hoveredZoneKey == "proj_section_${heading.id}" ||
+                        activeSession.hoveredZoneKey == "proj_heading_drop_${heading.id}")
                 item(key = "heading_${heading.id}") {
                     ProjectHeadingSectionHeader(
                         heading = heading,
@@ -2447,8 +2834,13 @@ private fun ThingsMainTaskLazyList(
                         completedTaskCount = completedInPhase,
                         totalTaskCount = totalInPhase,
                         locale = activeLocale,
+                        isDropHighlighted = isSectionHighlighted,
+                        dragController = projectDragController,
+                        projectIdForDrop = currentProject?.id,
+                        dropIndexInSection = tasksInHeading.size,
                         onToggleCollapse = { viewModel.toggleHeadingCollapsed(heading.id) },
                         onRenameHeading = { newTitle -> viewModel.renameHeading(heading.id, newTitle) },
+                        onUpdateStartDate = { newStartDate -> viewModel.updateHeadingStartDate(heading.id, newStartDate) },
                         onUpdateEndDate = { newEndDate -> viewModel.updateHeadingEndDate(heading.id, newEndDate) },
                         onDeleteHeading = { viewModel.deleteHeading(heading.id) },
                         onAddTaskUnderHeading = {
@@ -2479,7 +2871,7 @@ private fun ThingsMainTaskLazyList(
                             externalDialogTriggerType = externalDialogTriggerType,
                             onRequestEnsureVisible = handleEnsureVisibleRequest,
                             dragHandle = taskDragHandleFor(task),
-                            modifier = Modifier.alpha(if (task.id == draggedTaskId) 0.35f else 1f)
+                            modifier = Modifier.alpha(if (task.id in draggedIdsSet) 0.35f else 1f)
                         )
                     }
                 }
@@ -2581,7 +2973,9 @@ private fun ThingsMainTaskLazyList(
                         activeLocale = activeLocale,
                         externalDialogTriggerToken = externalDialogTriggerToken,
                         externalDialogTriggerType = externalDialogTriggerType,
-                        onRequestEnsureVisible = handleEnsureVisibleRequest
+                        onRequestEnsureVisible = handleEnsureVisibleRequest,
+                        dragHandle = taskDragHandleFor(task),
+                        modifier = Modifier.alpha(if (task.id in draggedIdsSet) 0.35f else 1f)
                     )
                 }
             }
@@ -2624,7 +3018,9 @@ private fun ThingsMainTaskLazyList(
                     activeLocale = activeLocale,
                     externalDialogTriggerToken = externalDialogTriggerToken,
                     externalDialogTriggerType = externalDialogTriggerType,
-                    onRequestEnsureVisible = handleEnsureVisibleRequest
+                    onRequestEnsureVisible = handleEnsureVisibleRequest,
+                    dragHandle = taskDragHandleFor(task),
+                    modifier = Modifier.alpha(if (task.id in draggedIdsSet) 0.35f else 1f)
                 )
             }
 
@@ -2671,7 +3067,9 @@ private fun ThingsMainTaskLazyList(
                             activeLocale = activeLocale,
                             externalDialogTriggerToken = externalDialogTriggerToken,
                             externalDialogTriggerType = externalDialogTriggerType,
-                            onRequestEnsureVisible = handleEnsureVisibleRequest
+                            onRequestEnsureVisible = handleEnsureVisibleRequest,
+                            dragHandle = taskDragHandleFor(task),
+                            modifier = Modifier.alpha(if (task.id in draggedIdsSet) 0.35f else 1f)
                         )
                     }
                 }
@@ -2727,7 +3125,9 @@ private fun ThingsMainTaskLazyList(
                             activeLocale = activeLocale,
                             externalDialogTriggerToken = externalDialogTriggerToken,
                             externalDialogTriggerType = externalDialogTriggerType,
-                            onRequestEnsureVisible = handleEnsureVisibleRequest
+                            onRequestEnsureVisible = handleEnsureVisibleRequest,
+                            dragHandle = taskDragHandleFor(task),
+                            modifier = Modifier.alpha(if (task.id in draggedIdsSet) 0.35f else 1f)
                         )
                     }
                 }
@@ -2764,7 +3164,9 @@ private fun ThingsMainTaskLazyList(
                     activeLocale = activeLocale,
                     externalDialogTriggerToken = externalDialogTriggerToken,
                     externalDialogTriggerType = externalDialogTriggerType,
-                    onRequestEnsureVisible = handleEnsureVisibleRequest
+                    onRequestEnsureVisible = handleEnsureVisibleRequest,
+                    dragHandle = taskDragHandleFor(task),
+                    modifier = Modifier.alpha(if (task.id in draggedIdsSet) 0.35f else 1f)
                 )
             }
 
@@ -2816,12 +3218,14 @@ private fun ThingsMainTaskLazyList(
                     activeLocale = activeLocale,
                     externalDialogTriggerToken = externalDialogTriggerToken,
                     externalDialogTriggerType = externalDialogTriggerType,
-                    onRequestEnsureVisible = handleEnsureVisibleRequest
+                    onRequestEnsureVisible = handleEnsureVisibleRequest,
+                    dragHandle = taskDragHandleFor(eveningTask),
+                    modifier = Modifier.alpha(if (eveningTask.id in draggedIdsSet) 0.35f else 1f)
                 )
             }
         }
     }
-    if (isProjectView) {
+    if (isProjectView || isGeneralManualFlatList) {
         ProjectDropIndicatorOverlay(controller = projectDragController)
     }
     }
@@ -4291,6 +4695,7 @@ private fun SmartViewNavigationStrip(
     areas: List<Area>,
     projects: List<Project>,
     savedPerspectives: List<SavedPerspective> = emptyList(),
+    dragController: ProjectDragDropController? = null,
     onSelectSmartView: (SmartViewType) -> Unit,
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
@@ -4320,6 +4725,19 @@ private fun SmartViewNavigationStrip(
             ThingsHoverTooltip(text = viewTitle) {
                 Row(
                     modifier = Modifier
+                        .then(
+                            if (dragController != null) {
+                                Modifier.workspaceDropTarget(
+                                    controller = dragController,
+                                    key = "strip_smart_${viewType.name}",
+                                    destination = WorkspaceDragDropDestination.SmartView(viewType, viewTitle),
+                                    cornerRadius = 50.dp,
+                                    priority = 22
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
                         .clip(RoundedCornerShape(50))
                         .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
@@ -4473,6 +4891,19 @@ private fun SmartViewNavigationStrip(
                 ThingsHoverTooltip(text = "${stringResource(R.string.entity_area)}: ${area.title}") {
                     Row(
                         modifier = Modifier
+                            .then(
+                                if (dragController != null) {
+                                    Modifier.workspaceDropTarget(
+                                        controller = dragController,
+                                        key = "strip_area_${area.id}",
+                                        destination = WorkspaceDragDropDestination.AreaTarget(area.id, area.title),
+                                        cornerRadius = 50.dp,
+                                        priority = 22
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .clip(RoundedCornerShape(50))
                             .background(if (selected) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.75f))
                             .clickable {
@@ -4506,6 +4937,19 @@ private fun SmartViewNavigationStrip(
                 ThingsHoverTooltip(text = "${area.title} › $projectLabel: ${project.title}") {
                     Row(
                         modifier = Modifier
+                            .then(
+                                if (dragController != null) {
+                                    Modifier.workspaceDropTarget(
+                                        controller = dragController,
+                                        key = "strip_proj_${project.id}",
+                                        destination = WorkspaceDragDropDestination.ProjectTarget(project.id, project.title),
+                                        cornerRadius = 50.dp,
+                                        priority = 22
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .clip(RoundedCornerShape(50))
                             .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                             .clickable {
@@ -4546,6 +4990,19 @@ private fun SmartViewNavigationStrip(
             ThingsHoverTooltip(text = "$projectLabel: ${project.title}") {
                 Row(
                     modifier = Modifier
+                        .then(
+                            if (dragController != null) {
+                                Modifier.workspaceDropTarget(
+                                    controller = dragController,
+                                    key = "strip_proj_unassigned_${project.id}",
+                                    destination = WorkspaceDragDropDestination.ProjectTarget(project.id, project.title),
+                                    cornerRadius = 50.dp,
+                                    priority = 22
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
                         .clip(RoundedCornerShape(50))
                         .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
@@ -4747,6 +5204,9 @@ private fun ViewSortMenuPill(
 private fun ViewTitleHeader(
     navTarget: ActiveNavigationTarget,
     currentProject: Project?,
+    projectWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
+    onSelectProjectWorkspaceMode: (ProjectWorkspaceMode) -> Unit = {},
+    onExportProjectRoadmap: (Boolean) -> Unit = {},
     currentArea: Area?,
     currentPerspective: SavedPerspective? = null,
     areas: List<Area>,
@@ -5348,7 +5808,7 @@ private fun ViewTitleHeader(
             }
         }
 
-        // Project Notes, Target Date (Zieldatum / Deadline), Area Assignment, Attachments & Quick Buttons
+        // Project Notes, 3-Mode Workspace Switcher, Target Date (Zieldatum / Deadline), Area Assignment, Attachments & Quick Buttons
         if (currentProject != null) {
             if (currentProject.notes.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -5370,6 +5830,25 @@ private fun ViewTitleHeader(
                     },
                     onTakePhotoClick = launchProjectCamera
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ProjectWorkspaceSegmentedSwitcher(
+                    currentMode = projectWorkspaceMode,
+                    onSelectMode = onSelectProjectWorkspaceMode
+                )
+                if (projectWorkspaceMode == ProjectWorkspaceMode.ROADMAP) {
+                    RoadmapExportMenuPill(
+                        onExportPdf = { onExportProjectRoadmap(true) },
+                        onExportPng = { onExportProjectRoadmap(false) }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -5558,8 +6037,13 @@ private fun ProjectHeadingSectionHeader(
     completedTaskCount: Int = 0,
     totalTaskCount: Int = 0,
     locale: Locale = Locale.getDefault(),
+    isDropHighlighted: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") dragController: ProjectDragDropController? = null,
+    @Suppress("UNUSED_PARAMETER") projectIdForDrop: String? = null,
+    @Suppress("UNUSED_PARAMETER") dropIndexInSection: Int = 0,
     onToggleCollapse: () -> Unit,
     onRenameHeading: (String) -> Unit,
+    onUpdateStartDate: (Long?) -> Unit = {},
     onUpdateEndDate: (Long?) -> Unit = {},
     onDeleteHeading: () -> Unit,
     onAddTaskUnderHeading: () -> Unit
@@ -5567,6 +6051,7 @@ private fun ProjectHeadingSectionHeader(
     val colors = ThingsTheme.colors
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now(zone)
+    var showStartDatePicker by remember(heading.id) { mutableStateOf(false) }
     var showEndDatePicker by remember(heading.id) { mutableStateOf(false) }
     var isEditing by remember(heading.id) { mutableStateOf(heading.title.isEmpty()) }
     var editedTitleField by remember(heading.id) {
@@ -5586,6 +6071,17 @@ private fun ProjectHeadingSectionHeader(
         }
     }
 
+    val startLocalDate = remember(heading.startDate, zone) {
+        heading.startDate?.let { ms ->
+            runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull()
+        }
+    }
+    val formattedStartDate = remember(startLocalDate, locale) {
+        startLocalDate?.let { d ->
+            val pattern = if (locale.language == "de") "d. MMM" else "MMM d"
+            runCatching { d.format(DateTimeFormatter.ofPattern(pattern, locale)) }.getOrNull()
+        }
+    }
     val endLocalDate = remember(heading.endDate, zone) {
         heading.endDate?.let { ms ->
             runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull()
@@ -5606,8 +6102,15 @@ private fun ProjectHeadingSectionHeader(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 7.dp),
         shape = RoundedCornerShape(14.dp),
-        color = colors.tagPillBg.copy(alpha = 0.55f),
-        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.20f))
+        color = if (isDropHighlighted) {
+            colors.thingsBlueSoft.copy(alpha = 0.65f)
+        } else {
+            colors.tagPillBg.copy(alpha = 0.55f)
+        },
+        border = BorderStroke(
+            width = if (isDropHighlighted) 1.6.dp else 0.75.dp,
+            color = if (isDropHighlighted) colors.thingsBlue else colors.thingsBlue.copy(alpha = 0.20f)
+        )
     ) {
         Column(
             modifier = Modifier
@@ -5795,6 +6298,48 @@ private fun ProjectHeadingSectionHeader(
                         )
                     }
 
+                    // Phase Start Date Pill
+                    val startPillLabel = if (formattedStartDate != null) {
+                        stringResource(R.string.v30_phase_starts_on, formattedStartDate)
+                    } else {
+                        "+ ${stringResource(R.string.v30_phase_set_start_date)}"
+                    }
+                    val startPillBg = if (formattedStartDate != null) {
+                        colors.thingsBlueSoft
+                    } else {
+                        colors.cardSurface.copy(alpha = 0.72f)
+                    }
+                    val startPillFg = if (formattedStartDate != null) {
+                        colors.thingsBlue
+                    } else {
+                        colors.secondaryText
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(startPillBg)
+                            .clickable { showStartDatePicker = true }
+                            .padding(horizontal = 9.dp, vertical = 3.5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarToday,
+                            contentDescription = null,
+                            tint = startPillFg,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = startPillLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (formattedStartDate != null) FontWeight.SemiBold else FontWeight.Medium
+                            ),
+                            color = startPillFg
+                        )
+                    }
+
+                    // Phase End Date Pill
                     val pillLabel = if (formattedEndDate != null) {
                         stringResource(R.string.phase_ends_on, formattedEndDate)
                     } else {
@@ -5821,7 +6366,7 @@ private fun ProjectHeadingSectionHeader(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.CalendarToday,
+                            imageVector = Icons.Outlined.Flag,
                             contentDescription = null,
                             tint = pillFg,
                             modifier = Modifier.size(12.dp)
@@ -5837,6 +6382,17 @@ private fun ProjectHeadingSectionHeader(
                 }
             }
         }
+    }
+
+    if (showStartDatePicker) {
+        DeadlineDatePickerDialog(
+            currentDeadline = heading.startDate,
+            locale = locale,
+            onApplyDeadline = onUpdateStartDate,
+            onDismiss = { showStartDatePicker = false },
+            titleText = stringResource(R.string.v30_phase_set_start_date),
+            clearButtonText = stringResource(R.string.v30_phase_clear_start_date)
+        )
     }
 
     if (showEndDatePicker) {
@@ -6584,6 +7140,7 @@ private fun ThingsChromebookSidebar(
     allOpenTasks: List<TaskItem> = emptyList(),
     openTaskIds: Set<String> = emptySet(),
     todayDayStartMillis: Long = 0L,
+    dragController: ProjectDragDropController? = null,
     onSelectSmartView: (SmartViewType) -> Unit,
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
@@ -6599,6 +7156,7 @@ private fun ThingsChromebookSidebar(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val areasLabel = stringResource(R.string.entity_areas)
+    val sidebarKeyPrefix = if (onCloseDrawer != null) "drawer" else "sidebar"
     val stalledStatuses = remember(projects) {
         StalledProjectDetector.detectStalledProjects(projects)
     }
@@ -6689,6 +7247,19 @@ private fun ThingsChromebookSidebar(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .then(
+                                        if (dragController != null) {
+                                            Modifier.workspaceDropTarget(
+                                                controller = dragController,
+                                                key = "${sidebarKeyPrefix}_bento_${viewType.name}",
+                                                destination = WorkspaceDragDropDestination.SmartView(viewType, viewLabel),
+                                                cornerRadius = 14.dp,
+                                                priority = 24
+                                            )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
                                     .clip(RoundedCornerShape(14.dp))
                                     .clickable {
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -6759,6 +7330,19 @@ private fun ThingsChromebookSidebar(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .then(
+                            if (dragController != null) {
+                                Modifier.workspaceDropTarget(
+                                    controller = dragController,
+                                    key = "${sidebarKeyPrefix}_bento_SOMEDAY",
+                                    destination = WorkspaceDragDropDestination.SmartView(SmartViewType.SOMEDAY, somedayLabel),
+                                    cornerRadius = 12.dp,
+                                    priority = 24
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
                         .clip(RoundedCornerShape(12.dp))
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -7007,6 +7591,19 @@ private fun ThingsChromebookSidebar(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .then(
+                                if (dragController != null) {
+                                    Modifier.workspaceDropTarget(
+                                        controller = dragController,
+                                        key = "${sidebarKeyPrefix}_area_${area.id}",
+                                        destination = WorkspaceDragDropDestination.AreaTarget(area.id, area.title),
+                                        cornerRadius = 50.dp,
+                                        priority = 24
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .clip(RoundedCornerShape(50))
                             .background(if (isAreaSelected) colors.thingsBlueSoft else Color.Transparent)
                             .clickable {
@@ -7075,6 +7672,19 @@ private fun ThingsChromebookSidebar(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 18.dp)
+                                    .then(
+                                        if (dragController != null) {
+                                            Modifier.workspaceDropTarget(
+                                                controller = dragController,
+                                                key = "${sidebarKeyPrefix}_proj_${project.id}",
+                                                destination = WorkspaceDragDropDestination.ProjectTarget(project.id, project.title),
+                                                cornerRadius = 50.dp,
+                                                priority = 24
+                                            )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
                                     .clip(RoundedCornerShape(50))
                                     .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                                     .clickable {
@@ -7140,6 +7750,19 @@ private fun ThingsChromebookSidebar(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .then(
+                            if (dragController != null) {
+                                Modifier.workspaceDropTarget(
+                                    controller = dragController,
+                                    key = "${sidebarKeyPrefix}_proj_unassigned_${project.id}",
+                                    destination = WorkspaceDragDropDestination.ProjectTarget(project.id, project.title),
+                                    cornerRadius = 50.dp,
+                                    priority = 24
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
                         .clip(RoundedCornerShape(50))
                         .background(if (selected) colors.thingsBlueSoft else Color.Transparent)
                         .clickable {
@@ -7288,6 +7911,19 @@ private fun ThingsChromebookSidebar(
                         },
                         modifier = Modifier
                             .size(28.dp)
+                            .then(
+                                if (dragController != null) {
+                                    Modifier.workspaceDropTarget(
+                                        controller = dragController,
+                                        key = "${sidebarKeyPrefix}_dock_LOGBOOK",
+                                        destination = WorkspaceDragDropDestination.SmartView(SmartViewType.LOGBOOK, logbookLabel),
+                                        cornerRadius = 8.dp,
+                                        priority = 24
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (logbookSelected) colors.thingsBlueSoft else Color.Transparent)
                     ) {
@@ -7309,6 +7945,19 @@ private fun ThingsChromebookSidebar(
                         },
                         modifier = Modifier
                             .size(28.dp)
+                            .then(
+                                if (dragController != null) {
+                                    Modifier.workspaceDropTarget(
+                                        controller = dragController,
+                                        key = "${sidebarKeyPrefix}_dock_TRASH",
+                                        destination = WorkspaceDragDropDestination.SmartView(SmartViewType.TRASH, trashLabel),
+                                        cornerRadius = 8.dp,
+                                        priority = 24
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (trashSelected) colors.thingsBlueSoft else Color.Transparent)
                     ) {

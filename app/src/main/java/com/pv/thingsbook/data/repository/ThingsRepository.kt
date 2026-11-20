@@ -55,6 +55,7 @@ import com.pv.thingsbook.domain.model.TemplateHeadingBlueprint
 import com.pv.thingsbook.domain.model.TemplateTaskBlueprint
 import com.pv.thingsbook.domain.model.wouldCreateDependencyCycle
 import com.pv.thingsbook.domain.util.runCatchingCancellable
+import com.pv.thingsbook.ui.components.SmartViewType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1241,6 +1242,556 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    fun computeSequentialSortOrders(
+        count: Int,
+        beforeSortOrder: Double?,
+        afterSortOrder: Double?,
+        fallbackMaxSortOrder: Double? = null
+    ): List<Double> {
+        val safeCount = count.coerceAtLeast(0)
+        if (safeCount == 0) return emptyList()
+        val prev = beforeSortOrder?.takeIf { it.isFinite() }
+        val next = afterSortOrder?.takeIf { it.isFinite() }
+        return when {
+            prev == null && next == null -> {
+                val base = fallbackMaxSortOrder?.takeIf { it.isFinite() } ?: 0.0
+                (0 until safeCount).map { idx -> base + (idx + 1) * 1000.0 }
+            }
+            prev == null && next != null -> {
+                (0 until safeCount).map { idx -> next - (safeCount - idx) * 500.0 }
+            }
+            prev != null && next == null -> {
+                (0 until safeCount).map { idx -> prev + (idx + 1) * 1000.0 }
+            }
+            else -> {
+                val p = prev!!
+                val n = next!!
+                val low = minOf(p, n)
+                val high = maxOf(p, n)
+                val span = high - low
+                if (span < 1e-5 * (safeCount + 1)) {
+                    (0 until safeCount).map { idx -> low + (idx + 1) * 0.0001 }
+                } else {
+                    val step = span / (safeCount + 1).toDouble()
+                    (0 until safeCount).map { idx -> low + step * (idx + 1) }
+                }
+            }
+        }
+    }
+
+    suspend fun captureTaskDropSnapshots(taskIds: List<String>): List<TaskEntity> {
+        val cleanIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (cleanIds.isEmpty()) return emptyList()
+        return runCatchingCancellable {
+            val byId = cleanIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }.associateBy { it.id }
+            cleanIds.mapNotNull { byId[it] }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun restoreTaskDropSnapshots(snapshots: List<TaskEntity>) {
+        if (snapshots.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val remindersToSchedule = mutableListOf<TaskEntity>()
+        val remindersToCancel = mutableListOf<String>()
+        database.withTransaction {
+            for (snap in snapshots) {
+                val current = database.taskDao().getById(snap.id)
+                val restoredUpdatedAt = maxOf(now, (current?.updatedAt ?: snap.updatedAt) + 1L)
+                val restoredEntity = snap.copy(
+                    updatedAt = restoredUpdatedAt,
+                    isDirty = true
+                )
+                if (current != null && current.isDeleted && !snap.isDeleted) {
+                    removeTaskFromDeletedProjectTracking(snap.id)
+                    val checklistIds = cascadeDeletedChecklistsByTaskId.remove(snap.id)
+                    if (checklistIds != null) {
+                        if (checklistIds.isNotEmpty()) {
+                            database.checklistDao().restoreChecklistItemsByIds(checklistIds, restoredUpdatedAt)
+                        }
+                    } else {
+                        database.checklistDao().restoreNonPurgedByTaskId(snap.id, restoredUpdatedAt)
+                    }
+                    database.attachmentDao().getAllByTaskId(snap.id)
+                        .filter { it.isDeleted && it.fileName.isNotEmpty() }
+                        .forEach { att ->
+                            database.attachmentDao().upsert(
+                                att.copy(isDeleted = false, updatedAt = restoredUpdatedAt, isDirty = true)
+                            )
+                        }
+                } else if (current != null && !current.isDeleted && snap.isDeleted) {
+                    database.checklistDao().softDeleteByTaskId(snap.id, restoredUpdatedAt)
+                    database.attachmentDao().softDeleteByTaskId(snap.id, restoredUpdatedAt)
+                }
+                if (current != null && current.status != TaskStatus.OPEN && snap.status == TaskStatus.OPEN) {
+                    softDeleteSpawnedRecurrenceIfAny(snap.id, restoredEntity, restoredUpdatedAt)
+                }
+                database.taskDao().upsert(restoredEntity)
+                if (!restoredEntity.isDeleted &&
+                    restoredEntity.status == TaskStatus.OPEN &&
+                    restoredEntity.reminderTime != null &&
+                    restoredEntity.reminderTime > now
+                ) {
+                    remindersToSchedule += restoredEntity
+                } else {
+                    remindersToCancel += restoredEntity.id
+                }
+            }
+        }
+        remindersToCancel.forEach { reminderScheduler.cancelReminder(it) }
+        remindersToSchedule.forEach { t ->
+            t.reminderTime?.let { rt -> reminderScheduler.scheduleExactReminder(t.id, t.title, rt) }
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    private suspend fun restoreTaskFromTrashInTx(task: TaskEntity, now: Long): TaskEntity {
+        if (!task.isDeleted) return task
+        removeTaskFromDeletedProjectTracking(task.id)
+        val activeProject = task.projectId?.let { pId ->
+            database.projectDao().getById(pId)?.takeIf { !it.isDeleted }
+        }
+        val activeArea = task.areaId?.let { aId ->
+            database.areaDao().getById(aId)?.takeIf { !it.isDeleted }
+        }
+        val activeHeading = task.headingId?.let { hId ->
+            if (activeProject != null) {
+                database.headingDao().getById(hId)?.takeIf { !it.isDeleted && it.projectId == activeProject.id }
+            } else null
+        }
+        val checklistIdsToRestore = cascadeDeletedChecklistsByTaskId.remove(task.id)
+        if (checklistIdsToRestore != null) {
+            if (checklistIdsToRestore.isNotEmpty()) {
+                database.checklistDao().restoreChecklistItemsByIds(checklistIdsToRestore, now)
+            }
+        } else {
+            database.checklistDao().restoreNonPurgedByTaskId(task.id, now)
+        }
+        database.attachmentDao().getAllByTaskId(task.id)
+            .filter { it.isDeleted && it.fileName.isNotEmpty() }
+            .forEach { att ->
+                database.attachmentDao().upsert(
+                    att.copy(isDeleted = false, updatedAt = now, isDirty = true)
+                )
+            }
+        return task.copy(
+            projectId = activeProject?.id,
+            headingId = activeHeading?.id,
+            areaId = activeArea?.id,
+            isDeleted = false,
+            updatedAt = maxOf(now, task.updatedAt + 1L),
+            isDirty = true
+        )
+    }
+
+    suspend fun dropTasksOntoSmartView(
+        taskIds: List<String>,
+        targetView: SmartViewType,
+        todayMillis: Long,
+        tomorrowMillis: Long
+    ) {
+        val orderedIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (orderedIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val remindersToCancel = mutableListOf<String>()
+        val remindersToSchedule = mutableListOf<TaskEntity>()
+        var mutated = false
+
+        statusMutationMutex.withLock {
+            database.withTransaction {
+                val existingById = orderedIds.chunked(500).flatMap { chunk ->
+                    database.taskDao().getByIds(chunk)
+                }.associateBy { it.id }
+
+                val tasksInOrder = orderedIds.mapNotNull { existingById[it] }
+                if (tasksInOrder.isEmpty()) return@withTransaction
+
+                for (rawTask in tasksInOrder) {
+                    val stamp = maxOf(now, rawTask.updatedAt + 1L)
+                    when (targetView) {
+                        SmartViewType.TRASH -> {
+                            if (!rawTask.isDeleted) {
+                                cascadeDeletedChecklistsByTaskId[rawTask.id] =
+                                    database.checklistDao().getActiveChecklistIdsByTaskId(rawTask.id)
+                                database.checklistDao().softDeleteByTaskId(rawTask.id, stamp)
+                                database.attachmentDao().softDeleteByTaskId(rawTask.id, stamp)
+                                database.taskDao().upsert(
+                                    rawTask.copy(
+                                        isDeleted = true,
+                                        updatedAt = stamp,
+                                        isDirty = true
+                                    )
+                                )
+                                remindersToCancel += rawTask.id
+                                mutated = true
+                            }
+                        }
+
+                        SmartViewType.LOGBOOK -> {
+                            val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                            if (base.status != TaskStatus.COMPLETED) {
+                                val updated = base.copy(
+                                    status = TaskStatus.COMPLETED,
+                                    completedAt = now,
+                                    isDeleted = false,
+                                    updatedAt = stamp,
+                                    isDirty = true
+                                )
+                                database.taskDao().upsert(updated)
+                                remindersToCancel += updated.id
+                                if (base.status == TaskStatus.OPEN && base.recurrenceRuleJson != null) {
+                                    val rule = runCatching {
+                                        json.decodeFromString<RecurrenceRule>(base.recurrenceRuleJson)
+                                    }.getOrNull()
+                                    if (rule != null) {
+                                        val tagIds = decodeStringList(base.tagIdsJson)
+                                        spawnNextRecurrenceInstance(updated, rule, tagIds, now)?.let { nextId ->
+                                            lastSpawnedRecurringTaskByCompletedId[updated.id] = nextId
+                                        }
+                                    }
+                                }
+                                mutated = true
+                            } else if (rawTask.isDeleted) {
+                                database.taskDao().upsert(base)
+                                mutated = true
+                            }
+                        }
+
+                        SmartViewType.INBOX -> {
+                            val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                            val wasClosed = base.status != TaskStatus.OPEN
+                            val updated = base.copy(
+                                status = TaskStatus.OPEN,
+                                completedAt = null,
+                                scheduleState = ScheduleState.INBOX,
+                                whenDate = null,
+                                scheduledStartMinutes = null,
+                                projectId = null,
+                                headingId = null,
+                                areaId = null,
+                                isDeleted = false,
+                                updatedAt = stamp,
+                                isDirty = true
+                            )
+                            database.taskDao().upsert(updated)
+                            if (wasClosed) {
+                                softDeleteSpawnedRecurrenceIfAny(updated.id, updated, stamp)
+                            }
+                            if (updated.reminderTime != null && updated.reminderTime > now) {
+                                remindersToSchedule += updated
+                            }
+                            mutated = true
+                        }
+
+                        SmartViewType.TODAY -> {
+                            val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                            val wasClosed = base.status != TaskStatus.OPEN
+                            val nextSchedule = if (base.scheduleState == ScheduleState.THIS_EVENING) {
+                                ScheduleState.THIS_EVENING
+                            } else {
+                                ScheduleState.TODAY
+                            }
+                            val updated = base.copy(
+                                status = TaskStatus.OPEN,
+                                completedAt = null,
+                                scheduleState = nextSchedule,
+                                whenDate = todayMillis,
+                                isDeleted = false,
+                                updatedAt = stamp,
+                                isDirty = true
+                            )
+                            database.taskDao().upsert(updated)
+                            if (wasClosed) {
+                                softDeleteSpawnedRecurrenceIfAny(updated.id, updated, stamp)
+                            }
+                            if (updated.reminderTime != null && updated.reminderTime > now) {
+                                remindersToSchedule += updated
+                            }
+                            mutated = true
+                        }
+
+                        SmartViewType.UPCOMING -> {
+                            val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                            val wasClosed = base.status != TaskStatus.OPEN
+                            val resolvedWhen = if (base.whenDate != null && base.whenDate >= tomorrowMillis) {
+                                base.whenDate
+                            } else {
+                                tomorrowMillis
+                            }
+                            val updated = base.copy(
+                                status = TaskStatus.OPEN,
+                                completedAt = null,
+                                scheduleState = ScheduleState.UPCOMING,
+                                whenDate = resolvedWhen,
+                                isDeleted = false,
+                                updatedAt = stamp,
+                                isDirty = true
+                            )
+                            database.taskDao().upsert(updated)
+                            if (wasClosed) {
+                                softDeleteSpawnedRecurrenceIfAny(updated.id, updated, stamp)
+                            }
+                            if (updated.reminderTime != null && updated.reminderTime > now) {
+                                remindersToSchedule += updated
+                            }
+                            mutated = true
+                        }
+
+                        SmartViewType.ANYTIME -> {
+                            val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                            val wasClosed = base.status != TaskStatus.OPEN
+                            val updated = base.copy(
+                                status = TaskStatus.OPEN,
+                                completedAt = null,
+                                scheduleState = ScheduleState.ANYTIME,
+                                whenDate = null,
+                                scheduledStartMinutes = null,
+                                isDeleted = false,
+                                updatedAt = stamp,
+                                isDirty = true
+                            )
+                            database.taskDao().upsert(updated)
+                            if (wasClosed) {
+                                softDeleteSpawnedRecurrenceIfAny(updated.id, updated, stamp)
+                            }
+                            if (updated.reminderTime != null && updated.reminderTime > now) {
+                                remindersToSchedule += updated
+                            }
+                            mutated = true
+                        }
+
+                        SmartViewType.SOMEDAY -> {
+                            val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                            val wasClosed = base.status != TaskStatus.OPEN
+                            val updated = base.copy(
+                                status = TaskStatus.OPEN,
+                                completedAt = null,
+                                scheduleState = ScheduleState.SOMEDAY,
+                                whenDate = null,
+                                scheduledStartMinutes = null,
+                                isDeleted = false,
+                                updatedAt = stamp,
+                                isDirty = true
+                            )
+                            database.taskDao().upsert(updated)
+                            if (wasClosed) {
+                                softDeleteSpawnedRecurrenceIfAny(updated.id, updated, stamp)
+                            }
+                            if (updated.reminderTime != null && updated.reminderTime > now) {
+                                remindersToSchedule += updated
+                            }
+                            mutated = true
+                        }
+                    }
+                }
+            }
+        }
+
+        remindersToCancel.forEach { reminderScheduler.cancelReminder(it) }
+        remindersToSchedule.forEach { t ->
+            t.reminderTime?.let { rt -> reminderScheduler.scheduleExactReminder(t.id, t.title, rt) }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+    }
+
+    suspend fun dropTasksOntoArea(taskIds: List<String>, areaId: String) {
+        val orderedIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (orderedIds.isEmpty() || areaId.isBlank()) return
+        val now = System.currentTimeMillis()
+        val remindersToSchedule = mutableListOf<TaskEntity>()
+        var mutated = false
+
+        database.withTransaction {
+            val targetArea = database.areaDao().getById(areaId)?.takeIf { !it.isDeleted } ?: return@withTransaction
+            val existingById = orderedIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }.associateBy { it.id }
+            val tasksInOrder = orderedIds.mapNotNull { existingById[it] }
+            if (tasksInOrder.isEmpty()) return@withTransaction
+
+            val draggedSet = orderedIds.toHashSet()
+            val maxExistingSort = database.taskDao().getAllNonDeletedTasksList()
+                .asSequence()
+                .filter { it.areaId == targetArea.id && it.projectId == null && it.id !in draggedSet }
+                .maxOfOrNull { it.sortOrder.takeIf(Double::isFinite) ?: 0.0 }
+            val nextSorts = computeSequentialSortOrders(
+                count = tasksInOrder.size,
+                beforeSortOrder = null,
+                afterSortOrder = null,
+                fallbackMaxSortOrder = maxExistingSort
+            )
+
+            tasksInOrder.forEachIndexed { idx, rawTask ->
+                val stamp = maxOf(now, rawTask.updatedAt + 1L)
+                val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                val wasClosed = base.status != TaskStatus.OPEN
+                val resolvedSchedule = if (
+                    base.scheduleState == ScheduleState.INBOX &&
+                    base.whenDate == null &&
+                    base.recurrenceRuleJson == null
+                ) {
+                    ScheduleState.ANYTIME
+                } else {
+                    base.scheduleState
+                }
+                val updated = base.copy(
+                    status = TaskStatus.OPEN,
+                    completedAt = null,
+                    projectId = null,
+                    headingId = null,
+                    areaId = targetArea.id,
+                    scheduleState = resolvedSchedule,
+                    sortOrder = nextSorts[idx],
+                    isDeleted = false,
+                    updatedAt = stamp,
+                    isDirty = true
+                )
+                database.taskDao().upsert(updated)
+                if (wasClosed) {
+                    softDeleteSpawnedRecurrenceIfAny(updated.id, updated, stamp)
+                }
+                if (updated.reminderTime != null && updated.reminderTime > now) {
+                    remindersToSchedule += updated
+                }
+                mutated = true
+            }
+        }
+
+        remindersToSchedule.forEach { t ->
+            t.reminderTime?.let { rt -> reminderScheduler.scheduleExactReminder(t.id, t.title, rt) }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+    }
+
+    suspend fun dropTasksOntoProject(
+        taskIds: List<String>,
+        projectId: String,
+        headingId: String? = null,
+        beforeSortOrder: Double? = null,
+        afterSortOrder: Double? = null
+    ) {
+        val orderedIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (orderedIds.isEmpty() || projectId.isBlank()) return
+        val now = System.currentTimeMillis()
+        val remindersToSchedule = mutableListOf<TaskEntity>()
+        var mutated = false
+
+        database.withTransaction {
+            val targetProject = database.projectDao().getById(projectId)?.takeIf { !it.isDeleted } ?: return@withTransaction
+            val resolvedHeadingId = headingId?.takeIf { it.isNotBlank() }?.let { hId ->
+                database.headingDao().getById(hId)?.takeIf { !it.isDeleted && it.projectId == projectId }?.id
+            }
+            val existingById = orderedIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }.associateBy { it.id }
+            val tasksInOrder = orderedIds.mapNotNull { existingById[it] }
+            if (tasksInOrder.isEmpty()) return@withTransaction
+
+            val draggedSet = orderedIds.toHashSet()
+            val fallbackMax = if (beforeSortOrder == null && afterSortOrder == null) {
+                database.taskDao().getOpenTasksByProject(projectId)
+                    .asSequence()
+                    .filter { it.headingId == resolvedHeadingId && it.id !in draggedSet }
+                    .maxOfOrNull { it.sortOrder.takeIf(Double::isFinite) ?: 0.0 }
+            } else {
+                null
+            }
+            val sequentialOrders = computeSequentialSortOrders(
+                count = tasksInOrder.size,
+                beforeSortOrder = beforeSortOrder,
+                afterSortOrder = afterSortOrder,
+                fallbackMaxSortOrder = fallbackMax
+            )
+
+            tasksInOrder.forEachIndexed { idx, rawTask ->
+                val stamp = maxOf(now, rawTask.updatedAt + 1L)
+                val base = restoreTaskFromTrashInTx(rawTask, stamp)
+                val wasClosed = base.status != TaskStatus.OPEN
+                val resolvedSchedule = if (
+                    base.scheduleState == ScheduleState.INBOX &&
+                    base.whenDate == null &&
+                    base.recurrenceRuleJson == null
+                ) {
+                    ScheduleState.ANYTIME
+                } else {
+                    base.scheduleState
+                }
+                val updated = base.copy(
+                    status = TaskStatus.OPEN,
+                    completedAt = null,
+                    projectId = projectId,
+                    headingId = resolvedHeadingId,
+                    areaId = targetProject.areaId,
+                    scheduleState = resolvedSchedule,
+                    sortOrder = sequentialOrders[idx],
+                    isDeleted = false,
+                    updatedAt = stamp,
+                    isDirty = true
+                )
+                database.taskDao().upsert(updated)
+                if (wasClosed) {
+                    softDeleteSpawnedRecurrenceIfAny(updated.id, updated, stamp)
+                }
+                if (updated.reminderTime != null && updated.reminderTime > now) {
+                    remindersToSchedule += updated
+                }
+                mutated = true
+            }
+        }
+
+        remindersToSchedule.forEach { t ->
+            t.reminderTime?.let { rt -> reminderScheduler.scheduleExactReminder(t.id, t.title, rt) }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+    }
+
+    suspend fun reorderTasksInList(
+        taskIds: List<String>,
+        beforeSortOrder: Double?,
+        afterSortOrder: Double?
+    ) {
+        val orderedIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (orderedIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        var mutated = false
+
+        database.withTransaction {
+            val existingById = orderedIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }.associateBy { it.id }
+            val tasksInOrder = orderedIds.mapNotNull { existingById[it]?.takeIf { e -> !e.isDeleted } }
+            if (tasksInOrder.isEmpty()) return@withTransaction
+
+            val sequentialOrders = computeSequentialSortOrders(
+                count = tasksInOrder.size,
+                beforeSortOrder = beforeSortOrder,
+                afterSortOrder = afterSortOrder
+            )
+            val updatedEntities = tasksInOrder.mapIndexed { idx, existing ->
+                existing.copy(
+                    sortOrder = sequentialOrders[idx],
+                    updatedAt = maxOf(now, existing.updatedAt + 1L),
+                    isDirty = true
+                )
+            }
+            if (updatedEntities.isNotEmpty()) {
+                database.taskDao().upsertAll(updatedEntities)
+                mutated = true
+            }
+        }
+
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+    }
+
     suspend fun ensureDefaultWorkAndHomeAreas() {
         val activeAreas = database.areaDao().getActiveAreasList()
         val existingWork = database.areaDao().getById("area-work-001")
@@ -1577,6 +2128,21 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    suspend fun updateProjectViewMode(projectId: String, viewMode: String?) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val normalized = viewMode?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }
+        if (existing.viewMode == normalized) return
+        val now = System.currentTimeMillis()
+        database.projectDao().upsert(
+            existing.copy(
+                viewMode = normalized,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
     suspend fun moveProject(projectId: String, moveUp: Boolean) {
         val projects = database.projectDao().getActiveProjectsList().sortedBy { it.sortOrder }
         val index = projects.indexOfFirst { it.id == projectId }
@@ -1727,11 +2293,17 @@ class ThingsRepository @Inject constructor(
 
     suspend fun updateHeadingStartDate(headingId: String, startDate: Long?) {
         val existing = database.headingDao().getById(headingId) ?: return
+        val adjustedEnd = if (startDate != null && existing.endDate != null && existing.endDate < startDate) {
+            startDate
+        } else {
+            existing.endDate
+        }
         val now = System.currentTimeMillis()
         database.headingDao().upsert(
             existing.copy(
                 startDate = startDate,
-                updatedAt = now,
+                endDate = adjustedEnd,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
                 isDirty = true
             )
         )
@@ -1740,11 +2312,37 @@ class ThingsRepository @Inject constructor(
 
     suspend fun updateHeadingEndDate(headingId: String, endDate: Long?) {
         val existing = database.headingDao().getById(headingId) ?: return
+        val adjustedStart = if (endDate != null && existing.startDate != null && endDate < existing.startDate) {
+            endDate
+        } else {
+            existing.startDate
+        }
         val now = System.currentTimeMillis()
         database.headingDao().upsert(
             existing.copy(
+                startDate = adjustedStart,
                 endDate = endDate,
-                updatedAt = now,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun updateHeadingDates(headingId: String, startDate: Long?, endDate: Long?) {
+        val existing = database.headingDao().getById(headingId) ?: return
+        val clampedEnd = if (startDate != null && endDate != null && endDate < startDate) {
+            startDate
+        } else {
+            endDate
+        }
+        if (existing.startDate == startDate && existing.endDate == clampedEnd) return
+        val now = System.currentTimeMillis()
+        database.headingDao().upsert(
+            existing.copy(
+                startDate = startDate,
+                endDate = clampedEnd,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
                 isDirty = true
             )
         )

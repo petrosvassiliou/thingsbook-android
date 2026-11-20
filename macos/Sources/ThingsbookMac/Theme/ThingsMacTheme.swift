@@ -524,9 +524,66 @@ public struct GlassSurfaceModifier: ViewModifier {
     }
 }
 
+public struct ThingsDropTargetModifier: ViewModifier {
+    public let cornerRadius: CGFloat
+    public let isCapsule: Bool
+    public let onDropPayloads: ([String]) -> Bool
+
+    @State private var isDropTargeted = false
+
+    public init(
+        cornerRadius: CGFloat = 12,
+        isCapsule: Bool = false,
+        onDropPayloads: @escaping ([String]) -> Bool
+    ) {
+        self.cornerRadius = cornerRadius
+        self.isCapsule = isCapsule
+        self.onDropPayloads = onDropPayloads
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .overlay {
+                if isDropTargeted {
+                    if isCapsule {
+                        Capsule(style: .continuous)
+                            .strokeBorder(ThingsMacPalette.accentBlue, lineWidth: 2.0)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.accentBlue.opacity(0.13))
+                            )
+                            .allowsHitTesting(false)
+                    } else {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(ThingsMacPalette.accentBlue, lineWidth: 2.0)
+                            .background(
+                                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                    .fill(ThingsMacPalette.accentBlue.opacity(0.10))
+                            )
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+            .animation(.easeOut(duration: 0.12), value: isDropTargeted)
+            .dropDestination(for: String.self) { payloads, _ in
+                onDropPayloads(payloads)
+            } isTargeted: { targeted in
+                isDropTargeted = targeted
+            }
+    }
+}
+
 public extension View {
     func thingsCardSurface(cornerRadius: CGFloat = 12, isSelected: Bool = false) -> some View {
         modifier(GlassSurfaceModifier(cornerRadius: cornerRadius, isSelected: isSelected))
+    }
+
+    func thingsDropTarget(
+        cornerRadius: CGFloat = 12,
+        isCapsule: Bool = false,
+        onDropPayloads: @escaping ([String]) -> Bool
+    ) -> some View {
+        modifier(ThingsDropTargetModifier(cornerRadius: cornerRadius, isCapsule: isCapsule, onDropPayloads: onDropPayloads))
     }
 
     /// Preserves VoiceOver accessibility hint without rendering a visual tooltip outside the top bar.

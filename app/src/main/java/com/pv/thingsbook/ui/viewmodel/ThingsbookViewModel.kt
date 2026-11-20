@@ -39,8 +39,10 @@ import com.pv.thingsbook.domain.model.DeviceCalendarInfo
 import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
+import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
 import com.pv.thingsbook.domain.model.ProjectStatus
 import com.pv.thingsbook.domain.model.ProjectTemplate
+import com.pv.thingsbook.domain.model.ProjectWorkspaceMode
 import com.pv.thingsbook.domain.model.QuickFindFilter
 import com.pv.thingsbook.domain.model.RecurrenceRule
 import com.pv.thingsbook.domain.model.SavedPerspective
@@ -55,6 +57,7 @@ import com.pv.thingsbook.domain.util.runCatchingCancellable
 import com.pv.thingsbook.ui.components.FocusTimerUiState
 import com.pv.thingsbook.ui.components.QuickShareDraft
 import com.pv.thingsbook.ui.components.SmartViewType
+import com.pv.thingsbook.ui.components.WorkspaceDragDropDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -1185,22 +1188,282 @@ class ThingsbookViewModel @Inject constructor(
         sectionTasks: List<TaskItem>,
         indexInSection: Int
     ) {
-        val currentIdx = sectionTasks.indexOfFirst { it.id == taskId }
-        var idx = indexInSection.coerceIn(0, sectionTasks.size)
-        if (currentIdx >= 0) {
-            // Dropped onto its own position → nothing to do
-            if (idx == currentIdx || idx == currentIdx + 1) return
-            if (currentIdx < idx) idx -= 1
+        val target = _navigationTarget.value as? ActiveNavigationTarget.ProjectDetail ?: return
+        moveTasksWithinProjectSection(
+            taskIds = listOf(taskId),
+            projectId = target.projectId,
+            headingId = headingId,
+            sectionTasks = sectionTasks,
+            indexInSection = indexInSection
+        )
+    }
+
+    fun moveTasksWithinProjectSection(
+        taskIds: List<String>,
+        projectId: String,
+        headingId: String?,
+        sectionTasks: List<TaskItem>,
+        indexInSection: Int
+    ) {
+        val orderedIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (orderedIds.isEmpty() || projectId.isBlank()) return
+        val draggedSet = orderedIds.toHashSet()
+        val boundedRawIdx = indexInSection.coerceIn(0, sectionTasks.size)
+
+        if (orderedIds.size == 1) {
+            val singleId = orderedIds.first()
+            val currentIdx = sectionTasks.indexOfFirst { it.id == singleId }
+            if (currentIdx >= 0 && (boundedRawIdx == currentIdx || boundedRawIdx == currentIdx + 1)) {
+                return
+            }
         }
-        val others = sectionTasks.filter { it.id != taskId }
-        idx = idx.coerceIn(0, others.size)
+
+        val removedBeforeTarget = sectionTasks.take(boundedRawIdx).count { it.id in draggedSet }
+        val others = sectionTasks.filterNot { it.id in draggedSet }
+        val adjustedIdx = (boundedRawIdx - removedBeforeTarget).coerceIn(0, others.size)
+        val beforeSort = others.getOrNull(adjustedIdx - 1)?.sortOrder
+        val afterSort = others.getOrNull(adjustedIdx)?.sortOrder
+
         if (headingId != null) expandHeading(headingId)
         safeVmScope.launch {
-            val order = repository.computeMidpointSortOrder(
-                others.getOrNull(idx - 1)?.sortOrder,
-                others.getOrNull(idx)?.sortOrder
+            val beforeSnapshots = repository.captureTaskDropSnapshots(orderedIds)
+            repository.dropTasksOntoProject(
+                taskIds = orderedIds,
+                projectId = projectId,
+                headingId = headingId,
+                beforeSortOrder = beforeSort,
+                afterSortOrder = afterSort
             )
-            repository.repositionTaskInProject(taskId, headingId, order)
+            if (beforeSnapshots.isNotEmpty()) {
+                val feedbackMsg = getLocalizedString(R.string.v30_drop_moved_feedback, orderedIds.size)
+                registerUndoAction(message = feedbackMsg) {
+                    repository.restoreTaskDropSnapshots(beforeSnapshots)
+                }
+            }
+        }
+    }
+
+    fun handleWorkspaceDrop(
+        taskIds: List<String>,
+        destination: WorkspaceDragDropDestination,
+        currentViewTasks: List<TaskItem> = emptyList(),
+        projectSectionTasks: Map<String?, List<TaskItem>> = emptyMap()
+    ) {
+        val orderedIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (orderedIds.isEmpty()) return
+        val draggedSet = orderedIds.toHashSet()
+
+        if (destination is WorkspaceDragDropDestination.CurrentListReorder) {
+            val boundedIdx = destination.dropIndex.coerceIn(0, currentViewTasks.size)
+            if (orderedIds.size == 1) {
+                val currentIdx = currentViewTasks.indexOfFirst { it.id == orderedIds.first() }
+                if (currentIdx >= 0 && (boundedIdx == currentIdx || boundedIdx == currentIdx + 1)) {
+                    return
+                }
+            }
+            val removedBefore = currentViewTasks.take(boundedIdx).count { it.id in draggedSet }
+            val others = currentViewTasks.filterNot { it.id in draggedSet }
+            val adjustedIdx = (boundedIdx - removedBefore).coerceIn(0, others.size)
+            val beforeSort = others.getOrNull(adjustedIdx - 1)?.sortOrder
+            val afterSort = others.getOrNull(adjustedIdx)?.sortOrder
+            safeVmScope.launch {
+                val beforeSnapshots = repository.captureTaskDropSnapshots(orderedIds)
+                repository.reorderTasksInList(orderedIds, beforeSort, afterSort)
+                if (beforeSnapshots.isNotEmpty()) {
+                    registerUndoAction(
+                        message = getLocalizedString(R.string.v30_drop_moved_feedback, orderedIds.size)
+                    ) {
+                        repository.restoreTaskDropSnapshots(beforeSnapshots)
+                    }
+                }
+            }
+            return
+        }
+
+        if (destination is WorkspaceDragDropDestination.BoardColumn) {
+            val section = projectSectionTasks[destination.headingId].orEmpty()
+            moveTasksWithinProjectSection(
+                taskIds = orderedIds,
+                projectId = destination.projectId,
+                headingId = destination.headingId,
+                sectionTasks = section,
+                indexInSection = destination.indexInColumn
+            )
+            return
+        }
+
+        val currentNav = _navigationTarget.value
+        val movesOutOfCurrentView = when (destination) {
+            is WorkspaceDragDropDestination.SmartView -> when (destination.viewType) {
+                SmartViewType.LOGBOOK, SmartViewType.TRASH ->
+                    currentNav != ActiveNavigationTarget.SmartView(destination.viewType)
+                SmartViewType.INBOX ->
+                    currentNav != ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
+                SmartViewType.SOMEDAY ->
+                    currentNav != ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY) &&
+                        currentNav !is ActiveNavigationTarget.ProjectDetail &&
+                        currentNav !is ActiveNavigationTarget.AreaDetail
+                SmartViewType.TODAY ->
+                    currentNav == ActiveNavigationTarget.SmartView(SmartViewType.INBOX) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+                SmartViewType.UPCOMING ->
+                    currentNav == ActiveNavigationTarget.SmartView(SmartViewType.INBOX) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+                SmartViewType.ANYTIME ->
+                    currentNav == ActiveNavigationTarget.SmartView(SmartViewType.INBOX) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+            }
+            is WorkspaceDragDropDestination.AreaTarget ->
+                currentNav != ActiveNavigationTarget.AreaDetail(destination.areaId)
+            is WorkspaceDragDropDestination.ProjectTarget ->
+                currentNav != ActiveNavigationTarget.ProjectDetail(destination.projectId)
+            else -> false
+        }
+
+        if (movesOutOfCurrentView) {
+            if (_expandedTaskId.value in draggedSet) {
+                _expandedTaskId.value = null
+            }
+            _selectedTaskIds.value = _selectedTaskIds.value - draggedSet
+        } else if (orderedIds.size > 1) {
+            _selectedTaskIds.value = emptySet()
+        }
+
+        if (destination is WorkspaceDragDropDestination.SmartView &&
+            (destination.viewType == SmartViewType.TRASH || destination.viewType == SmartViewType.LOGBOOK)
+        ) {
+            if (_focusTimerState.value?.taskId in draggedSet) {
+                stopFocusTimer()
+            }
+        }
+
+        safeVmScope.launch {
+            val beforeSnapshots = repository.captureTaskDropSnapshots(orderedIds)
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now(zone)
+            val todayMillis = today.atStartOfDay(zone).toInstant().toEpochMilli()
+            val tomorrowMillis = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+
+            val destLabel: String = when (destination) {
+                is WorkspaceDragDropDestination.SmartView -> {
+                    repository.dropTasksOntoSmartView(
+                        taskIds = orderedIds,
+                        targetView = destination.viewType,
+                        todayMillis = todayMillis,
+                        tomorrowMillis = tomorrowMillis
+                    )
+                    destination.displayTitle.ifBlank { getLocalizedString(destination.viewType.titleRes) }
+                }
+                is WorkspaceDragDropDestination.AreaTarget -> {
+                    repository.dropTasksOntoArea(
+                        taskIds = orderedIds,
+                        areaId = destination.areaId
+                    )
+                    destination.areaTitle
+                }
+                is WorkspaceDragDropDestination.ProjectTarget -> {
+                    if (destination.headingId != null) expandHeading(destination.headingId)
+                    repository.dropTasksOntoProject(
+                        taskIds = orderedIds,
+                        projectId = destination.projectId,
+                        headingId = destination.headingId,
+                        beforeSortOrder = null,
+                        afterSortOrder = null
+                    )
+                    if (!destination.headingTitle.isNullOrBlank()) {
+                        "${destination.projectTitle} › ${destination.headingTitle}"
+                    } else {
+                        destination.projectTitle
+                    }
+                }
+                else -> ""
+            }
+
+            if (beforeSnapshots.isNotEmpty()) {
+                val baseMsg = getLocalizedString(R.string.v30_drop_moved_feedback, orderedIds.size)
+                val fullMsg = if (destLabel.isNotBlank()) "$baseMsg · $destLabel" else baseMsg
+                registerUndoAction(message = fullMsg) {
+                    repository.restoreTaskDropSnapshots(beforeSnapshots)
+                }
+            }
+        }
+    }
+
+    fun updateProjectViewMode(projectId: String, mode: ProjectWorkspaceMode) {
+        if (projectId.isBlank()) return
+        safeVmScope.launch {
+            repository.updateProjectViewMode(projectId, mode.storageKey)
+        }
+    }
+
+    fun shiftHeadingRoadmapDates(
+        heading: Heading,
+        deltaDays: Long,
+        fallbackEpochDayRange: Pair<Long, Long>? = null
+    ) {
+        if (deltaDays == 0L) return
+        val zone = ZoneId.systemDefault()
+        val prevStart = heading.startDate
+        val prevEnd = heading.endDate
+        val (nextStart, nextEnd) = if (heading.startDate == null && heading.endDate == null && fallbackEpochDayRange != null) {
+            val s = ProjectRoadmapEngine.epochDayToStartOfDayMillis(fallbackEpochDayRange.first + deltaDays, zone)
+            val e = ProjectRoadmapEngine.epochDayToStartOfDayMillis(fallbackEpochDayRange.second + deltaDays, zone)
+            s to maxOf(s, e)
+        } else {
+            ProjectRoadmapEngine.shiftHeadingDatesByDays(heading, deltaDays, zone)
+        }
+        safeVmScope.launch {
+            repository.updateHeadingDates(heading.id, nextStart, nextEnd)
+            val sign = if (deltaDays > 0) "+$deltaDays" else "$deltaDays"
+            registerUndoAction(message = "${heading.title} ($sign d)") {
+                repository.updateHeadingDates(heading.id, prevStart, prevEnd)
+            }
+        }
+    }
+
+    fun shiftTaskRoadmapDates(task: TaskItem, deltaDays: Long) {
+        val zone = ZoneId.systemDefault()
+        val todayEpochDay = LocalDate.now(zone).toEpochDay()
+        val (nextState, nextWhenMillis, nextDeadlineMillis) = ProjectRoadmapEngine.shiftTaskDatesByDays(
+            task = task,
+            deltaDays = deltaDays,
+            todayEpochDay = todayEpochDay,
+            zoneId = zone
+        )
+        val prevState = task.scheduleState
+        val prevWhen = task.whenDate
+        val prevDeadline = task.deadline
+        safeVmScope.launch {
+            repository.updateTaskScheduleAndDeadline(
+                taskId = task.id,
+                newState = nextState,
+                newWhenDate = nextWhenMillis,
+                newDeadline = nextDeadlineMillis
+            )
+            if (deltaDays != 0L || (prevWhen == null && prevDeadline == null)) {
+                val label = task.title.ifBlank { getLocalizedString(R.string.entity_todo) }
+                val sign = if (deltaDays > 0) "+$deltaDays" else "$deltaDays"
+                registerUndoAction(message = "$label ($sign d)") {
+                    repository.updateTaskScheduleAndDeadline(
+                        taskId = task.id,
+                        newState = prevState,
+                        newWhenDate = prevWhen,
+                        newDeadline = prevDeadline
+                    )
+                }
+            }
         }
     }
 
@@ -1239,6 +1502,12 @@ class ThingsbookViewModel @Inject constructor(
     fun updateHeadingEndDate(headingId: String, endDate: Long?) {
         safeVmScope.launch {
             repository.updateHeadingEndDate(headingId, endDate)
+        }
+    }
+
+    fun updateHeadingDates(headingId: String, startDate: Long?, endDate: Long?) {
+        safeVmScope.launch {
+            repository.updateHeadingDates(headingId, startDate, endDate)
         }
     }
 

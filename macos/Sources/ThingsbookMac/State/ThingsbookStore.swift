@@ -548,19 +548,76 @@ public final class ThingsbookStore: ObservableObject {
             }
         case .project(let pid):
             let open = tasksForProject(pid)
-            let headings = headingsByProject[pid] ?? []
-            var ordered = TaskViewSorter.sort(open.filter { $0.headingId == nil }, mode: preferences.viewSortMode).map(\.id)
-            for heading in headings where !collapsedHeadingIds.contains(heading.id) {
-                let sec = TaskViewSorter.sort(open.filter { $0.headingId == heading.id }, mode: preferences.viewSortMode)
-                ordered.append(contentsOf: sec.map(\.id))
+            let headings = (headingsByProject[pid] ?? []).filter { !$0.isDeleted && !$0.isArchived }
+            let validHeadingIds = Set(headings.map(\.id))
+            let mode = ProjectViewMode.normalized(project(byId: pid)?.viewMode)
+            let unheaded = TaskViewSorter.sort(
+                open.filter { task in
+                    guard let hid = task.headingId else { return true }
+                    return !validHeadingIds.contains(hid)
+                },
+                mode: preferences.viewSortMode
+            )
+            switch mode {
+            case .list:
+                var ordered = unheaded.map(\.id)
+                for heading in headings where !collapsedHeadingIds.contains(heading.id) {
+                    let sec = TaskViewSorter.sort(open.filter { $0.headingId == heading.id }, mode: preferences.viewSortMode)
+                    ordered.append(contentsOf: sec.map(\.id))
+                }
+                return ordered
+            case .board:
+                var ordered = unheaded.map(\.id)
+                for heading in headings {
+                    let sec = TaskViewSorter.sort(open.filter { $0.headingId == heading.id }, mode: preferences.viewSortMode)
+                    ordered.append(contentsOf: sec.map(\.id))
+                }
+                return ordered
+            case .roadmap:
+                let proj = project(byId: pid) ?? Project(id: pid, title: "", createdAt: 0, updatedAt: 0)
+                let layout = ProjectRoadmapEngine.buildLayout(
+                    project: proj,
+                    headings: headings,
+                    tasks: open,
+                    todayMillis: DateEpochConverter.startOfDayMillis(for: Date())
+                )
+                var ordered = layout.allTaskBars.map(\.id)
+                let plottedSet = Set(ordered)
+                for unsched in layout.unscheduledTasks where !plottedSet.contains(unsched.id) {
+                    ordered.append(unsched.id)
+                }
+                return ordered
             }
-            return ordered
         case .area(let aid):
             return looseTasksForArea(aid).map(\.id)
         case .perspective(let pid):
             guard let p = perspective(byId: pid) else { return [] }
             return tasksForPerspective(p).map(\.id)
         }
+    }
+
+    public func selectAllVisibleTasks() {
+        let visible = currentVisibleTaskIdsInOrder()
+        guard !visible.isEmpty else { return }
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+            selectedTaskIds = Set(visible)
+            lastSelectedTaskId = visible.last
+            if visible.count > 1 {
+                expandedTaskId = nil
+            }
+        }
+    }
+
+    public func dragPayload(for taskId: String) -> String {
+        TaskDragPayloadCodec.encode(
+            primaryTaskId: taskId,
+            selectedSet: selectedTaskIds,
+            orderedSelectedIds: orderedTaskIds(matching: selectedTaskIds)
+        )
+    }
+
+    public static func decodeDragPayloads(_ payloads: [String]) -> [String] {
+        TaskDragPayloadCodec.decode(payloads)
     }
 
     public func orderedTaskIds(matching set: Set<String>) -> [String] {
@@ -919,12 +976,252 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func setProjectViewMode(_ projectId: String, mode: ProjectViewMode) {
+        try? database.setProjectViewMode(projectId: projectId, viewMode: mode.rawValue)
+    }
+
     public func updateHeadingStartDate(_ headingId: String, startDate: Int64?) {
         try? database.updateHeadingStartDate(headingId, startDate: startDate)
     }
 
     public func updateHeadingEndDate(_ headingId: String, endDate: Int64?) {
         try? database.updateHeadingEndDate(headingId, endDate: endDate)
+    }
+
+    public func updateHeadingDates(_ headingId: String, startDate: Int64?, endDate: Int64?) {
+        try? database.updateHeadingDates(headingId, startDate: startDate, endDate: endDate)
+    }
+
+    public func shiftHeadingRoadmapDates(_ heading: Heading, deltaDays: Int) {
+        guard deltaDays != 0 else { return }
+        var effectiveHeading = heading
+        if effectiveHeading.startDate == nil && effectiveHeading.endDate == nil {
+            let open = allOpenTasks.filter { $0.projectId == heading.projectId && !$0.isDeleted }
+            if let proj = project(byId: heading.projectId) {
+                let layout = ProjectRoadmapEngine.buildLayout(
+                    project: proj,
+                    headings: headingsByProject[proj.id] ?? [heading],
+                    tasks: open,
+                    todayMillis: DateEpochConverter.startOfDayMillis(for: Date())
+                )
+                if let inferred = layout.phaseBar(for: heading.id) {
+                    effectiveHeading.startDate = DateEpochConverter.startOfDayMillis(
+                        for: DateEpochConverter.date(fromEpochDay: inferred.startEpochDay)
+                    )
+                    effectiveHeading.endDate = DateEpochConverter.startOfDayMillis(
+                        for: DateEpochConverter.date(fromEpochDay: inferred.endEpochDay)
+                    )
+                }
+            }
+        }
+        let shifted = ProjectRoadmapEngine.shiftHeadingDates(heading: effectiveHeading, deltaDays: deltaDays)
+        updateHeadingDates(heading.id, startDate: shifted.startDate, endDate: shifted.endDate)
+    }
+
+    public func shiftTaskRoadmapDates(_ task: TaskItem, deltaDays: Int) {
+        guard deltaDays != 0 else { return }
+        let todayMs = DateEpochConverter.startOfDayMillis(for: Date())
+        let targetIds: [String]
+        if selectedTaskIds.contains(task.id) && selectedTaskIds.count > 1 {
+            targetIds = orderedTaskIds(matching: selectedTaskIds)
+        } else {
+            targetIds = [task.id]
+        }
+        let byId = Dictionary(uniqueKeysWithValues: (allOpenTasks + logbookTasks).map { ($0.id, $0) })
+        for tid in targetIds {
+            guard var current = byId[tid] ?? (tid == task.id ? task : nil) else { continue }
+            let shifted = ProjectRoadmapEngine.shiftTaskDates(task: current, deltaDays: deltaDays, todayMillis: todayMs)
+            current.scheduleState = shifted.scheduleState
+            current.whenDate = shifted.whenDate
+            current.deadline = shifted.deadline
+            updateTask(current)
+        }
+    }
+
+    @discardableResult
+    public func dropTasks(_ payloads: [String], onto destination: NavigationDestination) -> Bool {
+        let decodedIds = Self.decodeDragPayloads(payloads)
+        guard !decodedIds.isEmpty else { return false }
+        if case .perspective = destination { return false }
+
+        if destination == .smartView(.trash) || destination == .smartView(.logbook) {
+            if let ft = focusTimer, decodedIds.contains(ft.taskId) {
+                stopFocusTimer()
+            }
+            NotificationReminderService.shared.cancelTaskReminders(taskIds: decodedIds)
+        }
+
+        guard let result = try? database.moveTasksToDestination(decodedIds, destination: destination),
+              !result.snapshots.isEmpty else {
+            return false
+        }
+
+        reloadSnapshot()
+
+        let visibleAfter = Set(currentVisibleTaskIdsInOrder())
+        let remainingSelected = selectedTaskIds.intersection(visibleAfter)
+        if remainingSelected != selectedTaskIds {
+            selectedTaskIds = remainingSelected
+            if !remainingSelected.contains(lastSelectedTaskId ?? "") {
+                lastSelectedTaskId = remainingSelected.first
+            }
+        }
+        if let exp = expandedTaskId, !visibleAfter.contains(exp) {
+            expandedTaskId = nil
+        }
+
+        NotificationReminderService.shared.syncAllTaskReminders(
+            openTasks: allOpenTasks,
+            lang: preferences.language
+        )
+
+        if destination == .smartView(.trash) {
+            if result.snapshots.count == 1, let single = result.snapshots.first?.task {
+                let displayTitle = single.title.isEmpty ? tr("macos_untitled_todo") : single.title
+                presentUndo(
+                    message: trf("undo_task_deleted", displayTitle),
+                    action: .tasksMoved(snapshots: result.snapshots)
+                )
+            } else {
+                presentUndo(
+                    message: trf("undo_task_deleted", "\(result.snapshots.count)"),
+                    action: .tasksMoved(snapshots: result.snapshots)
+                )
+            }
+        } else if destination == .smartView(.logbook), result.snapshots.count == 1, let single = result.snapshots.first?.task {
+            let displayTitle = single.title.isEmpty ? tr("macos_untitled_todo") : single.title
+            presentUndo(
+                message: trf("undo_task_completed", displayTitle),
+                action: .tasksMoved(snapshots: result.snapshots, spawnedRecurringTaskIds: result.spawnedRecurringTaskIds)
+            )
+        } else {
+            presentUndo(
+                message: trf("v30_drop_moved_feedback", result.snapshots.count),
+                action: .tasksMoved(snapshots: result.snapshots, spawnedRecurringTaskIds: result.spawnedRecurringTaskIds)
+            )
+        }
+
+        return true
+    }
+
+    @discardableResult
+    public func dropTasksIntoProjectSection(
+        _ payloads: [String],
+        projectId: String,
+        headingId: String?,
+        beforeTaskId: String? = nil
+    ) -> Bool {
+        let decodedIds = Self.decodeDragPayloads(payloads)
+        guard !decodedIds.isEmpty else { return false }
+        if decodedIds.count == 1, decodedIds[0] == beforeTaskId {
+            return false
+        }
+
+        guard let snapshots = try? database.moveTasksIntoProjectSection(
+            decodedIds,
+            projectId: projectId,
+            headingId: headingId,
+            beforeTaskId: beforeTaskId
+        ), !snapshots.isEmpty else {
+            return false
+        }
+
+        reloadSnapshot()
+        let visibleAfter = Set(currentVisibleTaskIdsInOrder())
+        let remainingSelected = selectedTaskIds.intersection(visibleAfter)
+        if remainingSelected != selectedTaskIds {
+            selectedTaskIds = remainingSelected
+            if !remainingSelected.contains(lastSelectedTaskId ?? "") {
+                lastSelectedTaskId = remainingSelected.first
+            }
+        }
+        if let exp = expandedTaskId, !visibleAfter.contains(exp) {
+            expandedTaskId = nil
+        }
+
+        NotificationReminderService.shared.syncAllTaskReminders(
+            openTasks: allOpenTasks,
+            lang: preferences.language
+        )
+
+        presentUndo(
+            message: trf("v30_drop_moved_feedback", snapshots.count),
+            action: .tasksMoved(snapshots: snapshots)
+        )
+        return true
+    }
+
+    @discardableResult
+    public func dropTasksBeforeTask(
+        _ payloads: [String],
+        targetTask: TaskItem,
+        in sectionTasks: [TaskItem],
+        projectId: String? = nil,
+        targetHeadingId: String?? = nil
+    ) -> Bool {
+        let decodedIds = Self.decodeDragPayloads(payloads)
+        guard !decodedIds.isEmpty else { return false }
+        if decodedIds.count == 1, decodedIds[0] == targetTask.id {
+            return false
+        }
+
+        if let pid = projectId {
+            let resolvedHeading: String? = {
+                if let explicit = targetHeadingId {
+                    return explicit
+                }
+                return targetTask.headingId
+            }()
+            return dropTasksIntoProjectSection(
+                payloads,
+                projectId: pid,
+                headingId: resolvedHeading,
+                beforeTaskId: targetTask.id
+            )
+        }
+
+        // Non-project view: if dragged tasks include trashed/external tasks, apply current destination rules first
+        let needsContainerAdoption = decodedIds.contains { tid in
+            trashedTasks.contains(where: { $0.id == tid }) || logbookTasks.contains(where: { $0.id == tid })
+        }
+        if needsContainerAdoption {
+            switch selectedDestination {
+            case .smartView(.inbox), .smartView(.today), .smartView(.upcoming), .smartView(.anytime), .smartView(.someday), .area:
+                _ = try? database.moveTasksToDestination(decodedIds, destination: selectedDestination)
+            default:
+                break
+            }
+        }
+
+        let movingSet = Set(decodedIds)
+        let remaining = sectionTasks.filter { !movingSet.contains($0.id) }
+        let prevOrder: Double?
+        let nextOrder: Double?
+        if let remIdx = remaining.firstIndex(where: { $0.id == targetTask.id }) {
+            prevOrder = remIdx > 0 ? remaining[remIdx - 1].sortOrder : nil
+            nextOrder = remaining[remIdx].sortOrder
+        } else {
+            prevOrder = remaining.last?.sortOrder
+            nextOrder = nil
+        }
+
+        guard let snapshots = try? database.reorderMultipleTasks(
+            decodedIds,
+            prevOrder: prevOrder,
+            nextOrder: nextOrder,
+            newHeadingId: targetHeadingId
+        ), !snapshots.isEmpty else {
+            return false
+        }
+
+        reloadSnapshot()
+        if snapshots.count > 1 {
+            presentUndo(
+                message: trf("v30_drop_moved_feedback", snapshots.count),
+                action: .tasksMoved(snapshots: snapshots)
+            )
+        }
+        return true
     }
 
     public func setTaskStandaloneDuration(_ taskId: String, durationMinutes: Int?) {
@@ -1522,6 +1819,16 @@ public final class ThingsbookStore: ObservableObject {
             for id in taskIds {
                 try? database.restoreTask(id)
             }
+            reloadSnapshot()
+            NotificationReminderService.shared.syncAllTaskReminders(
+                openTasks: allOpenTasks,
+                lang: preferences.language
+            )
+        case .tasksMoved(let snapshots, let spawnedIds):
+            if !spawnedIds.isEmpty {
+                NotificationReminderService.shared.cancelTaskReminders(taskIds: spawnedIds)
+            }
+            try? database.restoreTaskPlacements(snapshots, spawnedRecurringTaskIds: spawnedIds)
             reloadSnapshot()
             NotificationReminderService.shared.syncAllTaskReminders(
                 openTasks: allOpenTasks,
@@ -2271,3 +2578,39 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 }
+
+public extension View {
+    @MainActor
+    func thingsTaskDraggable(store: ThingsbookStore, task: TaskItem) -> some View {
+        let payload = store.dragPayload(for: task.id)
+        let isMulti = store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1
+        let previewTitle = isMulti
+            ? store.trf("v30_drag_multi_count", store.selectedTaskIds.count)
+            : (task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? store.tr("macos_untitled_todo")
+                : task.title)
+        return self.draggable(payload) {
+            HStack(spacing: 7) {
+                Image(systemName: isMulti ? "square.stack.3d.up.fill" : "checkmark.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                Text(previewTitle)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(ThingsMacPalette.cardSurface)
+                    .shadow(color: Color.black.opacity(0.14), radius: 8, y: 3)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.45), lineWidth: 1)
+            )
+        }
+    }
+}
+

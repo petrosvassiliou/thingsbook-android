@@ -15,6 +15,15 @@ public struct SmartViewCanvas: View {
         self.store = store
     }
 
+    private var isWideProjectWorkspace: Bool {
+        guard case .project(let projId) = store.selectedDestination,
+              let project = store.project(byId: projId) else {
+            return false
+        }
+        let mode = ProjectViewMode.normalized(project.viewMode)
+        return mode == .board || mode == .roadmap
+    }
+
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -54,7 +63,7 @@ public struct SmartViewCanvas: View {
             .padding(.horizontal, 40)
             .padding(.top, 26)
             .padding(.bottom, 96)
-            .frame(maxWidth: 880, alignment: .leading)
+            .frame(maxWidth: isWideProjectWorkspace ? .infinity : 880, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .background(ThingsMacPalette.canvasBackground)
@@ -400,6 +409,7 @@ public struct SmartViewCanvas: View {
                             VStack(spacing: 3) {
                                 ForEach(Array(dayTasks.enumerated()), id: \.element.id) { idx, task in
                                     TaskRowCardView(store: store, task: task)
+                                        .thingsTaskDraggable(store: store, task: task)
                                         .magicPlusDropSlot(
                                             id: "utask_\(task.id)",
                                             kind: .task(
@@ -559,6 +569,8 @@ public struct SmartViewCanvas: View {
                 Spacer()
 
                 HStack(spacing: 6) {
+                    ProjectModeSegmentedSwitcher(store: store, project: project)
+
                     viewSortMenu
 
                     Button {
@@ -765,38 +777,70 @@ public struct SmartViewCanvas: View {
 
             let openTasks = store.tasksForProject(project.id)
             let headings = store.headingsByProject[project.id] ?? []
-            let unheaded = openTasks.filter { $0.headingId == nil }
+            let validHeadingIds = Set(headings.map(\.id))
+            let unheaded = openTasks.filter { task in
+                guard let hid = task.headingId else { return true }
+                return !validHeadingIds.contains(hid)
+            }
+            let logged = store.completedTasksForProject(project.id)
+            let projectMode = ProjectViewMode.normalized(project.viewMode)
 
             tagFilterBar(for: openTasks)
 
-            if openTasks.isEmpty && headings.isEmpty {
-                emptyPlaceholder(icon: "checkmark.circle", text: store.tr("empty_view"))
-            } else {
-                if !unheaded.isEmpty {
-                    reorderableTaskStack(unheaded, showSubtitle: false, targetHeadingId: .some(nil))
+            switch projectMode {
+            case .list:
+                if openTasks.isEmpty && headings.isEmpty {
+                    emptyPlaceholder(icon: "checkmark.circle", text: store.tr("empty_view"))
+                } else {
+                    if !headings.isEmpty {
+                        projectGeneralDropSection(project: project, unheadedTasks: unheaded)
+                    } else if !unheaded.isEmpty {
+                        reorderableTaskStack(
+                            unheaded,
+                            showSubtitle: false,
+                            projectId: project.id,
+                            targetHeadingId: .some(nil)
+                        )
+                    }
+
+                    ForEach(Array(headings.enumerated()), id: \.element.id) { hIdx, heading in
+                        let sectionTasks = openTasks.filter { $0.headingId == heading.id }
+                        let prevHeadingOrder = hIdx > 0 ? headings[hIdx - 1].sortOrder : nil
+                        let prevSectionId: String? = hIdx > 0 ? headings[hIdx - 1].id : nil
+                        let prevSectionLastTaskOrder: Double? = hIdx > 0
+                            ? openTasks.filter { $0.headingId == headings[hIdx - 1].id }.last?.sortOrder
+                            : unheaded.last?.sortOrder
+
+                        projectHeadingSection(
+                            project: project,
+                            heading: heading,
+                            tasks: sectionTasks,
+                            prevHeadingOrder: prevHeadingOrder,
+                            prevSectionId: prevSectionId,
+                            prevSectionLastTaskOrder: prevSectionLastTaskOrder
+                        )
+                    }
                 }
 
-                ForEach(Array(headings.enumerated()), id: \.element.id) { hIdx, heading in
-                    let sectionTasks = openTasks.filter { $0.headingId == heading.id }
-                    let prevHeadingOrder = hIdx > 0 ? headings[hIdx - 1].sortOrder : nil
-                    let prevSectionId: String? = hIdx > 0 ? headings[hIdx - 1].id : nil
-                    let prevSectionLastTaskOrder: Double? = hIdx > 0
-                        ? openTasks.filter { $0.headingId == headings[hIdx - 1].id }.last?.sortOrder
-                        : unheaded.last?.sortOrder
+            case .board:
+                ProjectBoardWorkspaceView(
+                    store: store,
+                    project: project,
+                    openTasks: openTasks,
+                    headings: headings
+                )
 
-                    projectHeadingSection(
-                        project: project,
-                        heading: heading,
-                        tasks: sectionTasks,
-                        prevHeadingOrder: prevHeadingOrder,
-                        prevSectionId: prevSectionId,
-                        prevSectionLastTaskOrder: prevSectionLastTaskOrder
-                    )
-                }
+            case .roadmap:
+                ProjectRoadmapWorkspaceView(
+                    store: store,
+                    project: project,
+                    openTasks: openTasks,
+                    completedTasks: logged,
+                    headings: headings
+                )
             }
 
             // Logged Items toggle
-            let logged = store.completedTasksForProject(project.id)
             if !logged.isEmpty {
                 Divider().padding(.top, 8)
                 Button {
@@ -820,10 +864,76 @@ public struct SmartViewCanvas: View {
                     VStack(spacing: 3) {
                         ForEach(logged) { t in
                             TaskRowCardView(store: store, task: t, showContextSubtitle: false)
+                                .thingsTaskDraggable(store: store, task: t)
                         }
                     }
                 }
             }
+        }
+    }
+
+    private func projectGeneralDropSection(
+        project: Project,
+        unheadedTasks: [TaskItem]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Capsule(style: .continuous)
+                    .fill(ThingsMacPalette.inboxBlue)
+                    .frame(width: 3.5, height: 16)
+
+                Text(store.tr("v30_board_ungrouped_column"))
+                    .font(.system(size: 13.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                if !unheadedTasks.isEmpty {
+                    Text("\(unheadedTasks.count)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(Color.primary.opacity(0.055)))
+                }
+
+                Spacer()
+
+                Button {
+                    store.createNewTaskInCurrentContext(preferredHeadingId: nil)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("entity_new_todo"))
+            }
+
+            if !unheadedTasks.isEmpty {
+                reorderableTaskStack(
+                    unheadedTasks,
+                    showSubtitle: false,
+                    projectId: project.id,
+                    targetHeadingId: .some(nil)
+                )
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, unheadedTasks.isEmpty ? 8 : 11)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer.opacity(unheadedTasks.isEmpty ? 0.42 : 0.68))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.065), lineWidth: 0.8)
+                )
+        )
+        .thingsDropTarget(cornerRadius: 14) { payloads in
+            store.dropTasksIntoProjectSection(
+                payloads,
+                projectId: project.id,
+                headingId: nil,
+                beforeTaskId: nil
+            )
         }
     }
 
@@ -900,6 +1010,11 @@ public struct SmartViewCanvas: View {
                         )
                     }
 
+                    PhaseStartDatePillButton(
+                        store: store,
+                        heading: heading
+                    )
+
                     PhaseEndDatePillButton(
                         store: store,
                         heading: heading,
@@ -975,7 +1090,12 @@ public struct SmartViewCanvas: View {
             )
 
             if !isCollapsed && !tasks.isEmpty {
-                reorderableTaskStack(tasks, showSubtitle: false, targetHeadingId: .some(heading.id))
+                reorderableTaskStack(
+                    tasks,
+                    showSubtitle: false,
+                    projectId: project.id,
+                    targetHeadingId: .some(heading.id)
+                )
             }
         }
         .padding(.horizontal, 13)
@@ -989,10 +1109,13 @@ public struct SmartViewCanvas: View {
                 )
         )
         .padding(.top, 4)
-        .dropDestination(for: String.self) { droppedIds, _ in
-            guard let draggedId = droppedIds.first else { return false }
-            try? store.database.reorderTask(taskId: draggedId, prevOrder: tasks.last?.sortOrder, nextOrder: nil, newHeadingId: .some(heading.id))
-            return true
+        .thingsDropTarget(cornerRadius: 14) { payloads in
+            store.dropTasksIntoProjectSection(
+                payloads,
+                projectId: project.id,
+                headingId: heading.id,
+                beforeTaskId: nil
+            )
         }
     }
 
@@ -1088,6 +1211,9 @@ public struct SmartViewCanvas: View {
                             .thingsCardSurface(cornerRadius: 12)
                         }
                         .buttonStyle(.plain)
+                        .thingsDropTarget(cornerRadius: 12) { payloads in
+                            store.dropTasks(payloads, onto: .project(proj.id))
+                        }
                         .contextMenu {
                             Button(store.tr("project_edit_title")) {
                                 store.editingProject = proj
@@ -1326,6 +1452,7 @@ public struct SmartViewCanvas: View {
                     Divider().opacity(0.65)
                     ForEach(grouped[dayTitle] ?? []) { task in
                         TaskRowCardView(store: store, task: task)
+                            .thingsTaskDraggable(store: store, task: task)
                     }
                 }
             }
@@ -1431,7 +1558,11 @@ public struct SmartViewCanvas: View {
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
-                            .thingsCardSurface(cornerRadius: 10)
+                            .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
+                            .onTapGesture {
+                                store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+                            }
+                            .thingsTaskDraggable(store: store, task: task)
                         }
                     }
                 }
@@ -1448,6 +1579,7 @@ public struct SmartViewCanvas: View {
     private func reorderableTaskStack(
         _ tasks: [TaskItem],
         showSubtitle: Bool = true,
+        projectId: String? = nil,
         targetHeadingId: String?? = nil,
         evening: Bool = false,
         epochDayOverride: Int? = nil
@@ -1462,13 +1594,15 @@ public struct SmartViewCanvas: View {
         return VStack(spacing: 3) {
             ForEach(Array(tasks.enumerated()), id: \.element.id) { idx, task in
                 TaskRowCardView(store: store, task: task, showContextSubtitle: showSubtitle)
-                    .draggable(task.id)
-                    .dropDestination(for: String.self) { droppedIds, _ in
-                        guard let draggedId = droppedIds.first, draggedId != task.id else { return false }
-                        let prev = idx > 0 ? tasks[idx - 1].sortOrder : nil
-                        let next = task.sortOrder
-                        try? store.database.reorderTask(taskId: draggedId, prevOrder: prev, nextOrder: next, newHeadingId: targetHeadingId)
-                        return true
+                    .thingsTaskDraggable(store: store, task: task)
+                    .thingsDropTarget(cornerRadius: 10) { droppedPayloads in
+                        store.dropTasksBeforeTask(
+                            droppedPayloads,
+                            targetTask: task,
+                            in: tasks,
+                            projectId: projectId,
+                            targetHeadingId: targetHeadingId
+                        )
                     }
                     .magicPlusDropSlot(
                         id: "task_\(task.id)",
@@ -1519,6 +1653,7 @@ public struct SmartViewCanvas: View {
                     }
                     ForEach(Array(groupTasks.enumerated()), id: \.element.id) { idx, task in
                         TaskRowCardView(store: store, task: task, showContextSubtitle: false)
+                            .thingsTaskDraggable(store: store, task: task)
                             .magicPlusDropSlot(
                                 id: "gtask_\(task.id)",
                                 kind: .task(
@@ -2085,11 +2220,15 @@ private struct TodayDailyTimelineView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .thingsCardSurface(cornerRadius: 11)
+        .thingsCardSurface(cornerRadius: 11, isSelected: store.selectedTaskIds.contains(task.id))
         .overlay(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(hasConflict ? ThingsMacPalette.somedayAmber.opacity(0.65) : Color.clear, lineWidth: 1.2)
         )
+        .onTapGesture {
+            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+        }
+        .thingsTaskDraggable(store: store, task: task)
     }
 
     private func unscheduledTaskRow(_ task: TaskItem) -> some View {
@@ -2149,7 +2288,11 @@ private struct TodayDailyTimelineView: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 9)
-        .thingsCardSurface(cornerRadius: 10)
+        .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
+        .onTapGesture {
+            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
+        }
+        .thingsTaskDraggable(store: store, task: task)
     }
 
     private var conflictBadge: some View {
@@ -2425,76 +2568,3 @@ private struct MacCompactCalendarEventRow: View {
     }
 }
 
-private struct PhaseEndDatePillButton: View {
-    @ObservedObject var store: ThingsbookStore
-    let heading: Heading
-    let hasOpenTasks: Bool
-
-    @State private var isPopoverOpen = false
-    @State private var isHovering = false
-
-    private var formattedEndDate: String? {
-        guard let endMs = heading.endDate else { return nil }
-        let df = DateFormatter()
-        df.locale = store.preferences.language.locale
-        df.setLocalizedDateFormatFromTemplate("dMMM")
-        return df.string(from: DateEpochConverter.date(fromMillis: endMs))
-    }
-
-    private var isOverdue: Bool {
-        guard hasOpenTasks, let endMs = heading.endDate else { return false }
-        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
-        return DateEpochConverter.epochDay(forMillis: endMs) < todayEpochDay
-    }
-
-    var body: some View {
-        let activeTint = isOverdue ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue
-        let hasEndDate = heading.endDate != nil
-
-        Button {
-            isPopoverOpen = true
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: hasEndDate ? "calendar.badge.clock" : "calendar.badge.plus")
-                    .font(.system(size: 10, weight: .semibold))
-                if let formattedEndDate {
-                    Text(store.trf("phase_ends_on", formattedEndDate))
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                } else {
-                    Text(store.tr("phase_set_end_date"))
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                }
-            }
-            .foregroundStyle(hasEndDate ? activeTint : (isHovering ? ThingsMacPalette.accentBlue : .secondary))
-            .padding(.horizontal, 8.5)
-            .padding(.vertical, 3)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(
-                        hasEndDate
-                            ? activeTint.opacity(isHovering ? 0.18 : 0.12)
-                            : Color.primary.opacity(isHovering ? 0.08 : 0.045)
-                    )
-            )
-            .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            isHovering = hovering
-        }
-        .thingsTooltip(store.tr("phase_set_end_date"))
-        .popover(isPresented: $isPopoverOpen) {
-            DeadlinePopoverView(
-                store: store,
-                currentDeadlineMillis: heading.endDate,
-                customTitle: store.tr("phase_set_end_date"),
-                customClearTitle: store.tr("phase_clear_end_date"),
-                accentTint: ThingsMacPalette.accentBlue
-            ) { newEndMs in
-                store.updateHeadingEndDate(heading.id, endDate: newEndMs)
-            }
-        }
-    }
-}

@@ -408,15 +408,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.11")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.11")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 88)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-alpha.12")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-alpha.12")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 89)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.11", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.11", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.11", current: "3.0.0-alpha.10"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.12", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.12", current: "2.5.0", includeBeta: true))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.12", current: "3.0.0-alpha.11"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.11"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-alpha.13", current: "3.0.0-alpha.12"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-alpha.12"))
         let ultraCompact = MacToolbarLayoutMetrics.compute(detailWidth: 506.0, isSidebarCollapsed: false)
         XCTAssertEqual(ultraCompact.usableWidth, 450.0)
         XCTAssertFalse(ultraCompact.showGeminiLabel)
@@ -3668,5 +3668,432 @@ final class ThingsbookCoreTests: XCTestCase {
             XCTAssertTrue(ThingsStrings.shared.format("v30_blocked_by_count_badge", lang: lang, 3).contains("3"))
         }
     }
+
+    // MARK: - 32. v3.0.0-alpha.12 Milestone 3: ProjectRoadmapEngine Layout, Dependencies & Date Shifting
+
+    func testMilestone3RoadmapLayoutAndDependencies() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let todayDate = cal.date(from: DateComponents(year: 2026, month: 9, day: 10))!
+        let todayMs = DateEpochConverter.startOfDayMillis(for: todayDate, calendar: cal)
+        let todayDay = DateEpochConverter.epochDay(forMillis: todayMs, calendar: cal)
+        let dayMs: Int64 = 86_400_000
+
+        // 1. ProjectViewMode normalization
+        XCTAssertEqual(ProjectViewMode.normalized(nil), .list)
+        XCTAssertEqual(ProjectViewMode.normalized(""), .list)
+        XCTAssertEqual(ProjectViewMode.normalized("list"), .list)
+        XCTAssertEqual(ProjectViewMode.normalized("BOARD"), .board)
+        XCTAssertEqual(ProjectViewMode.normalized("roadmap"), .roadmap)
+        XCTAssertEqual(ProjectViewMode.normalized("gantt"), .roadmap)
+
+        // 2. Duration day-span formula: max(1, ((durationMinutes ?? 30) + 479) / 480)
+        XCTAssertEqual(ProjectRoadmapEngine.durationSpanDays(for: nil), 1)
+        XCTAssertEqual(ProjectRoadmapEngine.durationSpanDays(for: 30), 1)
+        XCTAssertEqual(ProjectRoadmapEngine.durationSpanDays(for: 480), 1)
+        XCTAssertEqual(ProjectRoadmapEngine.durationSpanDays(for: 481), 2)
+        XCTAssertEqual(ProjectRoadmapEngine.durationSpanDays(for: 960), 2)
+        XCTAssertEqual(ProjectRoadmapEngine.durationSpanDays(for: 1440), 3)
+
+        let project = Project(
+            id: "proj-roadmap-1",
+            title: "macOS 3.0 Launch",
+            viewMode: "roadmap",
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        XCTAssertEqual(project.resolvedViewMode, .roadmap)
+
+        // Phase 1 has explicit dates (with inverted end < start to verify clamping endDay >= startDay)
+        let phaseExplicit = Heading(
+            id: "phase-explicit",
+            projectId: project.id,
+            title: "Phase 1: Architecture",
+            sortOrder: 100,
+            startDate: todayMs + 2 * dayMs,
+            endDate: todayMs, // Earlier than start -> clamped to startDay
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        // Phase 2 has no explicit dates -> inferred from its scheduled child tasks
+        let phaseInferred = Heading(
+            id: "phase-inferred",
+            projectId: project.id,
+            title: "Phase 2: QA & Release",
+            sortOrder: 200,
+            startDate: nil,
+            endDate: nil,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let generalTask = TaskItem(
+            id: "task-general",
+            title: "Kickoff Spec",
+            status: .open,
+            scheduleState: .today,
+            whenDate: todayMs,
+            durationMinutes: 960, // 2 days: [todayDay, todayDay + 1]
+            projectId: project.id,
+            headingId: nil,
+            sortOrder: 10,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let blockerOpen = TaskItem(
+            id: "task-blocker-open",
+            title: "Build Gantt Engine",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: todayMs + 2 * dayMs,
+            deadline: todayMs + 5 * dayMs, // [todayDay + 2, todayDay + 5]
+            projectId: project.id,
+            headingId: phaseExplicit.id,
+            sortOrder: 20,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let blockerCompleted = TaskItem(
+            id: "task-blocker-done",
+            title: "Sync Strings",
+            status: .completed,
+            scheduleState: .today,
+            whenDate: todayMs - 1 * dayMs,
+            completedAt: todayMs,
+            projectId: project.id,
+            headingId: phaseExplicit.id,
+            sortOrder: 15,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let dependentTask = TaskItem(
+            id: "task-dependent",
+            title: "Export Vector PDF",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: todayMs + 6 * dayMs,
+            deadline: todayMs + 9 * dayMs,
+            projectId: project.id,
+            headingId: phaseInferred.id,
+            sortOrder: 30,
+            blockedByTaskIds: [blockerOpen.id, blockerCompleted.id],
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let unscheduledTask = TaskItem(
+            id: "task-unscheduled",
+            title: "Write Postmortem",
+            status: .open,
+            scheduleState: .anytime,
+            whenDate: nil,
+            deadline: nil,
+            projectId: project.id,
+            headingId: phaseInferred.id,
+            sortOrder: 40,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let layout = ProjectRoadmapEngine.buildLayout(
+            project: project,
+            headings: [phaseExplicit, phaseInferred],
+            tasks: [generalTask, blockerOpen, blockerCompleted, dependentTask, unscheduledTask],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+
+        // Window covers todayDay - 3 through maxScheduledDay + 7 and totalDays >= 21
+        XCTAssertLessThanOrEqual(layout.startEpochDay, todayDay - 3)
+        XCTAssertGreaterThanOrEqual(layout.endEpochDay, (todayDay + 9) + 7)
+        XCTAssertGreaterThanOrEqual(layout.totalDays, 21)
+
+        // Explicit vs inferred phase bars
+        let explicitBar = try? XCTUnwrap(layout.phaseBar(for: phaseExplicit.id))
+        XCTAssertEqual(explicitBar?.hasExplicitDates, true)
+        XCTAssertEqual(explicitBar?.startEpochDay, todayDay + 2)
+        XCTAssertEqual(explicitBar?.endEpochDay, todayDay + 2)
+
+        let inferredBar = try? XCTUnwrap(layout.phaseBar(for: phaseInferred.id))
+        XCTAssertEqual(inferredBar?.hasExplicitDates, false)
+        XCTAssertEqual(inferredBar?.startEpochDay, todayDay + 6)
+        XCTAssertEqual(inferredBar?.endEpochDay, todayDay + 9)
+
+        // General task bar spans 2 days from 960m duration
+        XCTAssertEqual(layout.generalTaskBars.count, 1)
+        XCTAssertEqual(layout.generalTaskBars.first?.startEpochDay, todayDay)
+        XCTAssertEqual(layout.generalTaskBars.first?.endEpochDay, todayDay + 1)
+        XCTAssertEqual(layout.generalTaskBars.first?.spanDays, 2)
+
+        // Unscheduled partition
+        XCTAssertEqual(layout.unscheduledTasks.map(\.id), [unscheduledTask.id])
+
+        // Dependency edges: open blocker -> isActivelyBlocking == true; completed blocker -> isActivelyBlocking == false
+        XCTAssertEqual(layout.dependencyEdges.count, 2)
+        let activeEdge = layout.dependencyEdges.first { $0.fromTaskId == blockerOpen.id && $0.toTaskId == dependentTask.id }
+        let doneEdge = layout.dependencyEdges.first { $0.fromTaskId == blockerCompleted.id && $0.toTaskId == dependentTask.id }
+        XCTAssertEqual(activeEdge?.isActivelyBlocking, true)
+        XCTAssertEqual(doneEdge?.isActivelyBlocking, false)
+
+        // DST-safe shiftHeadingDates & shiftTaskDates
+        let validPhase = Heading(
+            id: "phase-shift",
+            projectId: project.id,
+            title: "Shiftable",
+            sortOrder: 100,
+            startDate: todayMs,
+            endDate: todayMs + 4 * dayMs,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let shiftedPhase = ProjectRoadmapEngine.shiftHeadingDates(heading: validPhase, deltaDays: 3, calendar: cal)
+        XCTAssertEqual(shiftedPhase.startDate, todayMs + 3 * dayMs)
+        XCTAssertEqual(shiftedPhase.endDate, todayMs + 7 * dayMs)
+
+        // Shift scheduled task back into Today vs forward into Upcoming
+        let shiftedToToday = ProjectRoadmapEngine.shiftTaskDates(task: blockerOpen, deltaDays: -2, todayMillis: todayMs, calendar: cal)
+        XCTAssertEqual(shiftedToToday.scheduleState, .today)
+        XCTAssertEqual(shiftedToToday.whenDate, todayMs)
+        XCTAssertEqual(shiftedToToday.deadline, todayMs + 3 * dayMs)
+
+        // Shift dateless task sets whenDate = today + deltaDays
+        let shiftedDateless = ProjectRoadmapEngine.shiftTaskDates(task: unscheduledTask, deltaDays: 5, todayMillis: todayMs, calendar: cal)
+        XCTAssertEqual(shiftedDateless.scheduleState, .upcoming)
+        XCTAssertEqual(shiftedDateless.whenDate, todayMs + 5 * dayMs)
+        XCTAssertNil(shiftedDateless.deadline)
+    }
+
+    // MARK: - 33. v3.0.0-alpha.12 Milestone 3: Cross-Container & Phase Drag-and-Drop Moves + Undo
+
+    func testMilestone3CrossContainerAndPhaseMoves() throws {
+        // 1. Multi-task drag payload codec
+        let singlePayload = TaskDragPayloadCodec.encode(
+            primaryTaskId: "t2",
+            selectedSet: ["t2"],
+            orderedSelectedIds: ["t2"]
+        )
+        XCTAssertEqual(singlePayload, "t2")
+
+        let multiPayload = TaskDragPayloadCodec.encode(
+            primaryTaskId: "t2",
+            selectedSet: ["t1", "t2", "t3"],
+            orderedSelectedIds: ["t1", "t2", "t3"]
+        )
+        XCTAssertEqual(multiPayload, "t1\nt2\nt3")
+        XCTAssertEqual(
+            TaskDragPayloadCodec.decode([" t1 \n t2\n", "t2\nt3 ", ""]),
+            ["t1", "t2", "t3"]
+        )
+
+        // 2. Database viewMode & heading date range persistence
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let area = try db.createArea(title: "Product")
+        let projA = try db.createProject(title: "Alpha Project", areaId: area.id)
+        let projB = try db.createProject(title: "Beta Project", areaId: nil)
+
+        try db.setProjectViewMode(projectId: projA.id, viewMode: "roadmap")
+        var snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.projects.first(where: { $0.id == projA.id })?.viewMode, "roadmap")
+
+        let phase1 = try db.createHeading(projectId: projA.id, title: "Design")
+        let phase2 = try db.createHeading(projectId: projA.id, title: "Build")
+        let todayDate = Date()
+        let todayMs = DateEpochConverter.startOfDayMillis(for: todayDate)
+        let futureMs = todayMs + 5 * 86_400_000
+        try db.updateHeadingDates(phase1.id, startDate: futureMs, endDate: todayMs) // Clamps endDate >= startDate
+        snap = try db.loadWorkspaceSnapshot()
+        let updatedPhase1 = try XCTUnwrap(snap.headingsByProject[projA.id]?.first(where: { $0.id == phase1.id }))
+        XCTAssertEqual(updatedPhase1.startDate, futureMs)
+        XCTAssertEqual(updatedPhase1.endDate, futureMs)
+
+        // 3. Multi-task cross-container moves across Inbox, Today, Upcoming, Anytime, Someday, Area, Project, Logbook, Trash
+        let t1 = try db.createTask(title: "Move 1", scheduleState: .inbox, sortOrder: 100)
+        let t2 = try db.createTask(title: "Move 2", scheduleState: .inbox, sortOrder: 200)
+        let t3 = try db.createTask(title: "Move 3", scheduleState: .upcoming, whenDate: futureMs, sortOrder: 300)
+
+        // Move [t1, t2] into Area -> promotes .inbox -> .anytime, sets areaId
+        let areaMove = try db.moveTasksToDestination([t1.id, t2.id], destination: .area(area.id), referenceDate: todayDate)
+        XCTAssertEqual(areaMove.snapshots.count, 2)
+        snap = try db.loadWorkspaceSnapshot()
+        for id in [t1.id, t2.id] {
+            let loaded = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == id }))
+            XCTAssertEqual(loaded.areaId, area.id)
+            XCTAssertNil(loaded.projectId)
+            XCTAssertEqual(loaded.scheduleState, .anytime)
+        }
+
+        // Undo restores [t1, t2] back to Inbox with nil areaId
+        try db.restoreTaskPlacements(areaMove.snapshots)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertEqual(snap.inboxTasks.map(\.id), [t1.id, t2.id])
+
+        // Move [t1, t3] to Upcoming -> t1 gets tomorrowStartMillis while t3 preserves its existing futureMs!
+        _ = try db.moveTasksToDestination([t1.id, t3.id], destination: .smartView(.upcoming), referenceDate: todayDate)
+        snap = try db.loadWorkspaceSnapshot()
+        let upcomingT3 = try XCTUnwrap(snap.allOpenTasks.first(where: { $0.id == t3.id }))
+        XCTAssertEqual(upcomingT3.whenDate, futureMs)
+
+        // Soft-delete via .smartView(.trash), then drop trashed task onto .smartView(.today) -> auto-restores & schedules Today!
+        _ = try db.moveTasksToDestination([t2.id], destination: .smartView(.trash), referenceDate: todayDate)
+        XCTAssertTrue(try db.loadWorkspaceSnapshot().trashedTasks.contains(where: { $0.id == t2.id }))
+
+        _ = try db.moveTasksToDestination([t2.id], destination: .smartView(.today), referenceDate: todayDate)
+        snap = try db.loadWorkspaceSnapshot()
+        XCTAssertFalse(snap.trashedTasks.contains(where: { $0.id == t2.id }))
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == t2.id })?.scheduleState, .today)
+
+        // 4. Move multiple tasks across containers into a specific Project Phase preserving sequential order!
+        let anchorInPhase2 = try db.createTask(
+            title: "Existing Anchor",
+            scheduleState: .anytime,
+            projectId: projA.id,
+            headingId: phase2.id,
+            areaId: area.id,
+            sortOrder: 1000
+        )
+        _ = try db.moveTasksIntoProjectSection(
+            [t1.id, t2.id, t3.id],
+            projectId: projA.id,
+            headingId: phase2.id,
+            beforeTaskId: anchorInPhase2.id
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        let phase2Tasks = snap.allOpenTasks
+            .filter { $0.projectId == projA.id && $0.headingId == phase2.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(phase2Tasks.map(\.id), [t1.id, t2.id, t3.id, anchorInPhase2.id])
+        XCTAssertTrue(phase2Tasks.allSatisfy { $0.areaId == area.id })
+
+        // Move [t2, t3] from Phase 2 to General (headingId == nil) in projB
+        _ = try db.moveTasksIntoProjectSection(
+            [t2.id, t3.id],
+            projectId: projB.id,
+            headingId: nil,
+            beforeTaskId: nil
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        let projBGeneral = snap.allOpenTasks
+            .filter { $0.projectId == projB.id && $0.headingId == nil }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(projBGeneral.map(\.id), [t2.id, t3.id])
+        XCTAssertTrue(projBGeneral.allSatisfy { $0.areaId == nil })
+
+        // Complete via .smartView(.logbook)
+        _ = try db.moveTasksToDestination([t1.id], destination: .smartView(.logbook), referenceDate: todayDate)
+        XCTAssertTrue(try db.loadWorkspaceSnapshot().logbookTasks.contains(where: { $0.id == t1.id }))
+    }
+
+    // MARK: - 34. v3.0.0-alpha.12 Milestone 3: Vector PDF & 2x Retina PNG Export + 5-Language Keys
+
+    @MainActor
+    func testMilestone3RoadmapPdfAndPngExportData() throws {
+        let todayMs: Int64 = 1_795_046_400_000
+        let dayMs: Int64 = 86_400_000
+        let project = Project(
+            id: "proj-export-1",
+            title: "Thingsbook 3.0 Roadmap",
+            viewMode: "roadmap",
+            totalTaskCount: 2,
+            completedTaskCount: 0,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let phase = Heading(
+            id: "hdg-export-1",
+            projectId: project.id,
+            title: "Milestone 3",
+            sortOrder: 100,
+            startDate: todayMs,
+            endDate: todayMs + 10 * dayMs,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let t1 = TaskItem(
+            id: "exp-t1",
+            title: "Kanban Workspace",
+            scheduleState: .today,
+            whenDate: todayMs,
+            deadline: todayMs + 3 * dayMs,
+            projectId: project.id,
+            headingId: phase.id,
+            sortOrder: 10,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let t2 = TaskItem(
+            id: "exp-t2",
+            title: "Calm Bento Gantt",
+            scheduleState: .upcoming,
+            whenDate: todayMs + 4 * dayMs,
+            deadline: todayMs + 9 * dayMs,
+            projectId: project.id,
+            headingId: phase.id,
+            sortOrder: 20,
+            blockedByTaskIds: [t1.id],
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let layout = ProjectRoadmapEngine.buildLayout(
+            project: project,
+            headings: [phase],
+            tasks: [t1, t2],
+            todayMillis: todayMs
+        )
+
+        let pdfData = try XCTUnwrap(
+            ProjectRoadmapExporter.exportRoadmapPDFData(
+                project: project,
+                headings: [phase],
+                layout: layout
+            )
+        )
+        XCTAssertTrue(pdfData.starts(with: Data("%PDF-".utf8)), "Exported Roadmap PDF must begin with %PDF-")
+        XCTAssertGreaterThan(pdfData.count, 256)
+
+        let pngData = try XCTUnwrap(
+            ProjectRoadmapExporter.exportRoadmapPNGData(
+                project: project,
+                headings: [phase],
+                layout: layout,
+                scale: 2.0
+            )
+        )
+        let pngMagic: [UInt8] = [0x89, 0x50, 0x4E, 0x47]
+        XCTAssertTrue(pngData.starts(with: pngMagic), "Exported Roadmap PNG must begin with \\x89PNG")
+        XCTAssertGreaterThan(pngData.count, 256)
+
+        // Verify all Milestone 3 localization keys in EN, DE, FR, IT, ES
+        let m3PlainKeys = [
+            "v30_project_mode_list",
+            "v30_project_mode_board",
+            "v30_project_mode_roadmap",
+            "v30_board_ungrouped_column",
+            "v30_board_add_phase",
+            "v30_phase_set_start_date",
+            "v30_phase_clear_start_date",
+            "phase_set_end_date",
+            "phase_clear_end_date",
+            "v30_roadmap_export",
+            "v30_roadmap_export_pdf",
+            "v30_roadmap_export_png",
+            "v30_roadmap_jump_today",
+            "v30_roadmap_unscheduled_section",
+            "v30_roadmap_unscheduled_hint",
+            "v30_roadmap_shift_earlier",
+            "v30_roadmap_shift_later"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in m3PlainKeys {
+                let text = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertFalse(text.isEmpty, "Missing \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(text, key, "Unresolved \(key) in \(lang.rawValue)")
+            }
+            XCTAssertTrue(ThingsStrings.shared.format("v30_phase_starts_on", lang: lang, "Sep 10").contains("Sep 10"))
+            XCTAssertTrue(ThingsStrings.shared.format("phase_ends_on", lang: lang, "Sep 20").contains("Sep 20"))
+            XCTAssertTrue(ThingsStrings.shared.format("v30_drag_multi_count", lang: lang, 4).contains("4"))
+            XCTAssertTrue(ThingsStrings.shared.format("v30_drop_moved_feedback", lang: lang, 4).contains("4"))
+        }
+    }
 }
+
 

@@ -638,7 +638,16 @@ export const TrashViewList: React.FC<{
 
         const task = entry.item;
         return (
-          <div key={`task-${task.id}`} className="trash-item-card">
+          <div
+            key={`task-${task.id}`}
+            className="trash-item-card"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('application/x-thingsbook-task', task.id);
+              e.dataTransfer.setData('application/x-thingsbook-tasks', JSON.stringify([task.id]));
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+          >
             <div className="trash-item-left">
               <span className="trash-task-circle" />
               <div style={{ minWidth: 0 }}>

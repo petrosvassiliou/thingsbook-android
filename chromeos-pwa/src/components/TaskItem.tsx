@@ -71,6 +71,11 @@ import { extractDetectedLinksFromNotes } from '../domain/powerUtils';
 import { DetectedNotesLinksRow, MarkdownNotesField } from './MarkdownNotesField';
 import { AttachmentsStrip } from './AttachmentStrip';
 import { processAndAddAttachmentFile } from '../data/attachmentHelpers';
+import {
+  attachMultiTaskDragPreview,
+  extractDraggedTaskIds,
+  hasDraggedTaskMime
+} from '../domain/v30Roadmap';
 
 interface ChecklistSubtaskRowProps {
   item: ChecklistItemRecord;
@@ -227,7 +232,8 @@ interface TaskItemProps {
   lang: SupportedLang;
   geminiApiKey: string;
   t: TranslationStrings;
-  onSelect: (multiToggle: boolean) => void;
+  dragTaskIds?: string[];
+  onSelect: (multiToggle: boolean, shiftRange?: boolean) => void;
   onExpand: () => void;
   onCollapse: () => void;
   onRequestEnsureVisible?: (preferBottomVisible: boolean) => void;
@@ -244,6 +250,7 @@ interface TaskItemProps {
   ) => void;
   onDuplicateTask: (taskId: string) => void;
   onDropReorder: (draggedTaskId: string, targetTaskId: string) => void;
+  onDropReorderTasks?: (draggedTaskIds: string[], targetTaskId: string) => void;
   onToast: (msg: string) => void;
 }
 
@@ -269,6 +276,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   lang,
   geminiApiKey,
   t,
+  dragTaskIds,
   onSelect,
   onExpand,
   onCollapse,
@@ -282,6 +290,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   onStartFocusTimer,
   onDuplicateTask,
   onDropReorder,
+  onDropReorderTasks,
   onToast
 }) => {
   const [prevTaskId, setPrevTaskId] = useState(task.id);
@@ -1610,12 +1619,20 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         data-task-id={task.id}
         draggable
         onDragStart={(e) => {
-          e.dataTransfer.setData('application/x-thingsbook-task', task.id);
-          e.dataTransfer.effectAllowed = 'move';
+          const payloadIds =
+            isSelected && dragTaskIds && dragTaskIds.length > 1 && dragTaskIds.includes(task.id)
+              ? dragTaskIds
+              : [task.id];
+          attachMultiTaskDragPreview(
+            e.dataTransfer,
+            payloadIds,
+            t.dragTasksCount(payloadIds.length)
+          );
         }}
         onDragOver={(e) => {
-          if (e.dataTransfer.types.includes('application/x-thingsbook-task')) {
+          if (hasDraggedTaskMime(e.dataTransfer)) {
             e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
             setDragOver(true);
           }
         }}
@@ -1623,15 +1640,21 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          const draggedId = e.dataTransfer.getData('application/x-thingsbook-task');
-          if (draggedId && draggedId !== task.id) {
-            onDropReorder(draggedId, task.id);
+          const draggedIds = extractDraggedTaskIds(e.dataTransfer);
+          if (draggedIds.length === 0) return;
+          if (draggedIds.length === 1 && draggedIds[0] === task.id) return;
+          if (onDropReorderTasks) {
+            onDropReorderTasks(draggedIds, task.id);
+          } else {
+            onDropReorder(draggedIds[0], task.id);
           }
         }}
         onClick={(e) => {
           e.stopPropagation();
-          if (e.ctrlKey || e.metaKey || e.shiftKey || isMultiSelectMode) {
-            onSelect(true);
+          if (e.shiftKey) {
+            onSelect(true, true);
+          } else if (e.ctrlKey || e.metaKey || isMultiSelectMode) {
+            onSelect(true, false);
           } else {
             onExpand();
           }

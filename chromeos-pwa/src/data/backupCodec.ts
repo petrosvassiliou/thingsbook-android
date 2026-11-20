@@ -726,6 +726,9 @@ export function normalizeProjectViewMode(val: unknown): ProjectViewMode | null {
   if (low === 'list' || low === 'board' || low === 'roadmap') {
     return low;
   }
+  if (low === 'gantt') {
+    return 'roadmap';
+  }
   return null;
 }
 

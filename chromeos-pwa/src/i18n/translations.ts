@@ -420,6 +420,20 @@ export interface TranslationStrings {
   workspaceLabel: string;
   assigneeLabel: string;
   importAsanaPlannerLabel: string;
+  projectUngroupedColumn: string;
+  boardAddPhase: string;
+  phaseClearStartDate: string;
+  phaseStartsOn: (date: string) => string;
+  roadmapExport: string;
+  roadmapExportPdf: string;
+  roadmapExportPng: string;
+  roadmapJumpToday: string;
+  roadmapUnscheduledSection: string;
+  roadmapUnscheduledHint: string;
+  roadmapShiftEarlier: string;
+  roadmapShiftLater: string;
+  dragTasksCount: (count: number) => string;
+  dropMovedFeedback: (count: number) => string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -861,7 +875,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     phaseSetStartDate: 'Set Start Date',
     workspaceLabel: 'Workspace',
     assigneeLabel: 'Assignee',
-    importAsanaPlannerLabel: 'Import from Asana / Microsoft Planner'
+    importAsanaPlannerLabel: 'Import from Asana / Microsoft Planner',
+    projectUngroupedColumn: 'General',
+    boardAddPhase: 'New Phase',
+    phaseClearStartDate: 'Clear Start Date',
+    phaseStartsOn: (date) => `Starts ${date}`,
+    roadmapExport: 'Export Roadmap',
+    roadmapExportPdf: 'Export PDF',
+    roadmapExportPng: 'Export PNG',
+    roadmapJumpToday: 'Jump to Today',
+    roadmapUnscheduledSection: 'Unscheduled',
+    roadmapUnscheduledHint:
+      'Set When or Deadline dates on phases or to-dos to plot them on the timeline',
+    roadmapShiftEarlier: '-1 Day',
+    roadmapShiftLater: '+1 Day',
+    dragTasksCount: (count) => `${count} To-Dos`,
+    dropMovedFeedback: (count) => `Moved ${count} to-dos`
   },
   de: {
     appName: 'Thingsbook',
@@ -1304,7 +1333,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     phaseSetStartDate: 'Startdatum setzen',
     workspaceLabel: 'Workspace',
     assigneeLabel: 'Zuständig',
-    importAsanaPlannerLabel: 'Aus Asana / Microsoft Planner importieren'
+    importAsanaPlannerLabel: 'Aus Asana / Microsoft Planner importieren',
+    projectUngroupedColumn: 'Allgemein',
+    boardAddPhase: 'Neue Phase',
+    phaseClearStartDate: 'Startdatum löschen',
+    phaseStartsOn: (date) => `Startet ${date}`,
+    roadmapExport: 'Roadmap exportieren',
+    roadmapExportPdf: 'Als PDF exportieren',
+    roadmapExportPng: 'Als PNG exportieren',
+    roadmapJumpToday: 'Zu Heute springen',
+    roadmapUnscheduledSection: 'Ohne Datum',
+    roadmapUnscheduledHint:
+      'Lege Start- oder Enddaten für Phasen oder Aufgaben fest, um sie auf der Zeitleiste darzustellen',
+    roadmapShiftEarlier: '-1 Tag',
+    roadmapShiftLater: '+1 Tag',
+    dragTasksCount: (count) => `${count} Aufgaben`,
+    dropMovedFeedback: (count) => `${count} Aufgaben verschoben`
   },
   fr: {
     appName: 'Thingsbook',
@@ -1745,7 +1789,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     phaseSetStartDate: 'Définir la date de début',
     workspaceLabel: 'Espace de travail',
     assigneeLabel: 'Responsable',
-    importAsanaPlannerLabel: 'Importer depuis Asana / Microsoft Planner'
+    importAsanaPlannerLabel: 'Importer depuis Asana / Microsoft Planner',
+    projectUngroupedColumn: 'Général',
+    boardAddPhase: 'Nouvelle phase',
+    phaseClearStartDate: 'Effacer la date de début',
+    phaseStartsOn: (date) => `Débute le ${date}`,
+    roadmapExport: 'Exporter la feuille de route',
+    roadmapExportPdf: 'Exporter en PDF',
+    roadmapExportPng: 'Exporter en PNG',
+    roadmapJumpToday: 'Aller à Aujourd’hui',
+    roadmapUnscheduledSection: 'Non planifié',
+    roadmapUnscheduledHint:
+      'Définissez des dates Quand ou Échéance sur les phases ou tâches pour les afficher sur la chronologie',
+    roadmapShiftEarlier: '-1 jour',
+    roadmapShiftLater: '+1 jour',
+    dragTasksCount: (count) => `${count} tâches`,
+    dropMovedFeedback: (count) => `${count} tâches déplacées`
   },
   it: {
     appName: 'Thingsbook',
@@ -2186,7 +2245,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     phaseSetStartDate: 'Imposta data di inizio',
     workspaceLabel: 'Spazio di lavoro',
     assigneeLabel: 'Assegnatario',
-    importAsanaPlannerLabel: 'Importa da Asana / Microsoft Planner'
+    importAsanaPlannerLabel: 'Importa da Asana / Microsoft Planner',
+    projectUngroupedColumn: 'Generale',
+    boardAddPhase: 'Nuova fase',
+    phaseClearStartDate: 'Rimuovi data di inizio',
+    phaseStartsOn: (date) => `Inizia ${date}`,
+    roadmapExport: 'Esporta Roadmap',
+    roadmapExportPdf: 'Esporta PDF',
+    roadmapExportPng: 'Esporta PNG',
+    roadmapJumpToday: 'Vai a Oggi',
+    roadmapUnscheduledSection: 'Senza data',
+    roadmapUnscheduledHint:
+      'Imposta date Quando o Scadenza su fasi o attività per visualizzarle sulla timeline',
+    roadmapShiftEarlier: '-1 giorno',
+    roadmapShiftLater: '+1 giorno',
+    dragTasksCount: (count) => `${count} attività`,
+    dropMovedFeedback: (count) => `${count} attività spostate`
   },
   es: {
     appName: 'Thingsbook',
@@ -2627,7 +2701,22 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     phaseSetStartDate: 'Establecer fecha de inicio',
     workspaceLabel: 'Espacio de trabajo',
     assigneeLabel: 'Responsable',
-    importAsanaPlannerLabel: 'Importar desde Asana / Microsoft Planner'
+    importAsanaPlannerLabel: 'Importar desde Asana / Microsoft Planner',
+    projectUngroupedColumn: 'General',
+    boardAddPhase: 'Nueva fase',
+    phaseClearStartDate: 'Borrar fecha de inicio',
+    phaseStartsOn: (date) => `Empieza ${date}`,
+    roadmapExport: 'Exportar hoja de ruta',
+    roadmapExportPdf: 'Exportar PDF',
+    roadmapExportPng: 'Exportar PNG',
+    roadmapJumpToday: 'Ir a Hoy',
+    roadmapUnscheduledSection: 'Sin fecha',
+    roadmapUnscheduledHint:
+      'Establece fechas de Cuándo o Fecha límite en fases o tareas para mostrarlas en la línea de tiempo',
+    roadmapShiftEarlier: '-1 día',
+    roadmapShiftLater: '+1 día',
+    dragTasksCount: (count) => `${count} tareas`,
+    dropMovedFeedback: (count) => `${count} tareas movidas`
   }
 };
 

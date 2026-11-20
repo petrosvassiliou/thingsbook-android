@@ -1,0 +1,3092 @@
+package com.pv.thingsbook.ui.components
+
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.DashPathEffect
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.graphics.pdf.PdfDocument
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Remove
+import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
+import com.pv.thingsbook.R
+import com.pv.thingsbook.domain.model.Area
+import com.pv.thingsbook.domain.model.EffortLevel
+import com.pv.thingsbook.domain.model.Heading
+import com.pv.thingsbook.domain.model.Project
+import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
+import com.pv.thingsbook.domain.model.ProjectRoadmapLayout
+import com.pv.thingsbook.domain.model.ProjectWorkspaceMode
+import com.pv.thingsbook.domain.model.RoadmapPhaseBar
+import com.pv.thingsbook.domain.model.RoadmapTaskBar
+import com.pv.thingsbook.domain.model.ScheduleState
+import com.pv.thingsbook.domain.model.TaskItem
+import com.pv.thingsbook.domain.model.TaskStatus
+import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
+import com.pv.thingsbook.domain.model.formatDurationCompact
+import com.pv.thingsbook.domain.model.isTaskActivelyBlocked
+import com.pv.thingsbook.ui.theme.ThingsTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
+
+private val GlacierGradientStart = Color(0xFF74C4FF)
+private val GlacierGradientEnd = Color(0xFF3898EC)
+
+/**
+ * Soft Bento 3-Way Segmented Switcher (`List | Board | Roadmap`) rendered inside `ViewTitleHeader`
+ * whenever an active Project is open.
+ */
+@Composable
+fun ProjectWorkspaceSegmentedSwitcher(
+    currentMode: ProjectWorkspaceMode,
+    onSelectMode: (ProjectWorkspaceMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+
+    val items: List<Triple<ProjectWorkspaceMode, Int, ImageVector>> = listOf(
+        Triple(ProjectWorkspaceMode.LIST, R.string.v30_project_mode_list, Icons.Outlined.Checklist),
+        Triple(ProjectWorkspaceMode.BOARD, R.string.v30_project_mode_board, Icons.Outlined.GridView),
+        Triple(ProjectWorkspaceMode.ROADMAP, R.string.v30_project_mode_roadmap, Icons.Outlined.CalendarMonth)
+    )
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(11.dp))
+            .background(colors.tagPillBg)
+            .border(0.75.dp, colors.hairlineDivider, RoundedCornerShape(11.dp))
+            .padding(2.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        items.forEach { (mode, labelRes, icon) ->
+            val selected = currentMode == mode
+            val label = stringResource(labelRes)
+            ThingsHoverTooltip(text = label) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.5.dp))
+                        .background(if (selected) colors.cardSurface else Color.Transparent)
+                        .then(
+                            if (selected) {
+                                Modifier.border(
+                                    0.75.dp,
+                                    colors.thingsBlue.copy(alpha = 0.35f),
+                                    RoundedCornerShape(8.5.dp)
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .clickable {
+                            if (!selected) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectMode(mode)
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = if (selected) colors.thingsBlue else colors.secondaryText,
+                        modifier = Modifier.size(14.5.dp)
+                    )
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        color = if (selected) colors.thingsBlue else colors.secondaryText,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Reusable `Export Roadmap` (`PDF` / `PNG`) dropdown pill used in both `ViewTitleHeader` and `ProjectRoadmapWorkspace`.
+ */
+@Composable
+fun RoadmapExportMenuPill(
+    onExportPdf: () -> Unit,
+    onExportPng: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    var expanded by remember { mutableStateOf(false) }
+    val exportTitle = stringResource(R.string.v30_roadmap_export)
+
+    Box(modifier = modifier) {
+        ThingsHoverTooltip(text = exportTitle) {
+            Surface(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .clickable { expanded = true },
+                shape = RoundedCornerShape(10.dp),
+                color = colors.thingsBlueSoft,
+                border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.42f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.FileDownload,
+                        contentDescription = exportTitle,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = exportTitle,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue,
+                        maxLines = 1
+                    )
+                    Icon(
+                        imageVector = Icons.Outlined.ExpandMore,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Description,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(17.dp)
+                    )
+                },
+                text = {
+                    Text(
+                        text = stringResource(R.string.v30_roadmap_export_pdf),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onExportPdf()
+                }
+            )
+            DropdownMenuItem(
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Image,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(17.dp)
+                    )
+                },
+                text = {
+                    Text(
+                        text = stringResource(R.string.v30_roadmap_export_png),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onExportPng()
+                }
+            )
+        }
+    }
+}
+
+/**
+ * Compact Top Drop Dock shown automatically on narrower screens (`< 700dp`) while dragging To-Dos,
+ * exposing Smart Views, Areas, Projects, Logbook, and Trash as Sky-Blue cross-container drop zones!
+ */
+@Composable
+fun CompactMobileDragDropDock(
+    controller: ProjectDragDropController,
+    areas: List<Area>,
+    projects: List<Project>,
+    modifier: Modifier = Modifier
+) {
+    val session = controller.session
+    if (session?.kind != ProjectDragKind.MOVE_TASK) return
+    val colors = ThingsTheme.colors
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .shadow(10.dp, RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        color = colors.cardElevatedSurface,
+        border = BorderStroke(1.dp, colors.thingsBlue.copy(alpha = 0.38f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            // Row 1: Smart Views (Inbox, Today, Planned, Anytime, Someday, Logbook, Trash)
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp)
+            ) {
+                items(SmartViewType.entries, key = { "mob_drop_sv_${it.name}" }) { viewType ->
+                    val label = stringResource(viewType.titleRes)
+                    Row(
+                        modifier = Modifier
+                            .workspaceDropTarget(
+                                controller = controller,
+                                key = "mobile_dock_smart_${viewType.name}",
+                                destination = WorkspaceDragDropDestination.SmartView(viewType, label),
+                                cornerRadius = 50.dp,
+                                priority = 25
+                            )
+                            .clip(RoundedCornerShape(50))
+                            .background(colors.tagPillBg)
+                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        SmartViewIcon(viewType = viewType, modifier = Modifier.size(14.dp), isSelected = true)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.primaryText,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            // Row 2: Areas & Active Projects
+            if (areas.isNotEmpty() || projects.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp)
+                ) {
+                    items(areas, key = { "mob_drop_area_${it.id}" }) { area ->
+                        Row(
+                            modifier = Modifier
+                                .workspaceDropTarget(
+                                    controller = controller,
+                                    key = "mobile_dock_area_${area.id}",
+                                    destination = WorkspaceDragDropDestination.AreaTarget(area.id, area.title),
+                                    cornerRadius = 50.dp,
+                                    priority = 25
+                                )
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.thingsBlueSoft.copy(alpha = 0.65f))
+                                .padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Folder,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = area.title,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.primaryText,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    items(projects, key = { "mob_drop_proj_${it.id}" }) { proj ->
+                        Row(
+                            modifier = Modifier
+                                .workspaceDropTarget(
+                                    controller = controller,
+                                    key = "mobile_dock_proj_${proj.id}",
+                                    destination = WorkspaceDragDropDestination.ProjectTarget(proj.id, proj.title),
+                                    cornerRadius = 50.dp,
+                                    priority = 25
+                                )
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.tagPillBg)
+                                .padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            ProjectProgressRing(progress = proj.progress, size = 13.dp)
+                            Text(
+                                text = proj.title,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                color = colors.primaryText,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Mode 2: Project Board Workspace (Calm Soft Bento Kanban)
+// =============================================================================
+
+@Composable
+fun ProjectBoardWorkspace(
+    project: Project,
+    projectHeadings: List<Heading>,
+    projectSections: Map<String?, List<TaskItem>>,
+    headingTaskCounts: Map<String, Pair<Int, Int>>,
+    allOpenTasks: List<TaskItem>,
+    openTaskIds: Set<String>,
+    selectedTaskIds: Set<String>,
+    allVisibleTaskIds: List<String>,
+    controller: ProjectDragDropController,
+    locale: Locale,
+    onCreateTaskInSection: (headingId: String?, sectionTasks: List<TaskItem>, indexInSection: Int) -> Unit,
+    onCreatePhase: (title: String) -> Unit,
+    onRenameHeading: (headingId: String, newTitle: String) -> Unit,
+    onUpdateHeadingStartDate: (headingId: String, startDate: Long?) -> Unit,
+    onUpdateHeadingEndDate: (headingId: String, endDate: Long?) -> Unit,
+    onDeleteHeading: (headingId: String) -> Unit,
+    onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
+    onToggleTaskPin: (taskId: String) -> Unit,
+    onOpenTaskEditor: (taskId: String) -> Unit,
+    onToggleTaskSelection: (taskId: String) -> Unit,
+    onRangeSelectTask: (taskId: String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    val density = LocalDensity.current
+    val horizontalScrollState = rememberScrollState()
+    var boardLeftWinX by remember { mutableFloatStateOf(0f) }
+    var boardWidthPx by remember { mutableFloatStateOf(0f) }
+
+    val ungroupedTasks = projectSections[null].orEmpty()
+    val isDraggingTask = controller.session?.kind == ProjectDragKind.MOVE_TASK
+    val showGeneralColumn = ungroupedTasks.isNotEmpty() || projectHeadings.isEmpty() || isDraggingTask
+
+    SideEffect {
+        controller.isBoardActive = true
+        controller.boardProjectId = project.id
+        controller.boardSectionTasks = projectSections
+    }
+    DisposableEffect(controller, project.id) {
+        onDispose {
+            controller.clearBoardGeometry()
+        }
+    }
+
+    // Horizontal auto-scroll when dragging near left/right edge of the Kanban board
+    val edgePx = with(density) { 80.dp.toPx() }
+    val maxSpeedPx = with(density) { 14.dp.toPx() }
+    LaunchedEffect(isDraggingTask, horizontalScrollState) {
+        if (!isDraggingTask) return@LaunchedEffect
+        while (true) {
+            withFrameNanos { }
+            val s = controller.session ?: break
+            if (boardWidthPx <= 0f) continue
+            val localX = s.pointerWindow.x - boardLeftWinX
+            if (localX < -20f || localX > boardWidthPx + 20f) continue
+            val delta = when {
+                localX < edgePx -> -maxSpeedPx * ((edgePx - localX) / edgePx).coerceIn(0.2f, 1f)
+                localX > boardWidthPx - edgePx -> maxSpeedPx * ((localX - (boardWidthPx - edgePx)) / edgePx).coerceIn(0.2f, 1f)
+                else -> 0f
+            }
+            if (delta != 0f) {
+                val consumed = runCatching { horizontalScrollState.scrollBy(delta) }.getOrDefault(0f)
+                if (consumed != 0f) controller.refresh()
+            }
+        }
+    }
+
+    var isCreatingNewPhase by remember { mutableStateOf(false) }
+    var newPhaseField by remember { mutableStateOf(TextFieldValue(text = "", selection = TextRange(0))) }
+    val newPhaseFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isCreatingNewPhase) {
+        if (isCreatingNewPhase) {
+            delay(50)
+            runCatching { newPhaseFocusRequester.requestFocus() }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coords ->
+                val win = coords.localToWindowSafe(Offset.Zero)
+                boardLeftWinX = win.x
+                boardWidthPx = coords.size.width.toFloat()
+            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .horizontalScroll(horizontalScrollState)
+                .padding(start = 16.dp, end = 96.dp, top = 6.dp, bottom = 88.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            if (showGeneralColumn) {
+                val generalLabel = stringResource(R.string.v30_board_ungrouped_column)
+                ProjectBoardPhaseColumn(
+                    heading = null,
+                    columnTitle = generalLabel,
+                    tasks = ungroupedTasks,
+                    completedCount = 0,
+                    totalCount = ungroupedTasks.size,
+                    allOpenTasks = allOpenTasks,
+                    openTaskIds = openTaskIds,
+                    selectedTaskIds = selectedTaskIds,
+                    allVisibleTaskIds = allVisibleTaskIds,
+                    controller = controller,
+                    locale = locale,
+                    onAddTopTask = { onCreateTaskInSection(null, ungroupedTasks, 0) },
+                    onAddBottomTask = { onCreateTaskInSection(null, ungroupedTasks, ungroupedTasks.size) },
+                    onRenameHeading = null,
+                    onUpdateStartDate = null,
+                    onUpdateEndDate = null,
+                    onDeleteHeading = null,
+                    onUpdateTaskStatus = onUpdateTaskStatus,
+                    onToggleTaskPin = onToggleTaskPin,
+                    onOpenTaskEditor = onOpenTaskEditor,
+                    onToggleTaskSelection = onToggleTaskSelection,
+                    onRangeSelectTask = onRangeSelectTask
+                )
+            }
+
+            projectHeadings.forEach { heading ->
+                val colTasks = projectSections[heading.id].orEmpty()
+                val counts = headingTaskCounts[heading.id]
+                val completedInPhase = counts?.first ?: 0
+                val totalInPhase = counts?.second ?: colTasks.size
+                ProjectBoardPhaseColumn(
+                    heading = heading,
+                    columnTitle = heading.title.ifBlank { stringResource(R.string.entity_heading) },
+                    tasks = colTasks,
+                    completedCount = completedInPhase,
+                    totalCount = totalInPhase,
+                    allOpenTasks = allOpenTasks,
+                    openTaskIds = openTaskIds,
+                    selectedTaskIds = selectedTaskIds,
+                    allVisibleTaskIds = allVisibleTaskIds,
+                    controller = controller,
+                    locale = locale,
+                    onAddTopTask = { onCreateTaskInSection(heading.id, colTasks, 0) },
+                    onAddBottomTask = { onCreateTaskInSection(heading.id, colTasks, colTasks.size) },
+                    onRenameHeading = { newName -> onRenameHeading(heading.id, newName) },
+                    onUpdateStartDate = { s -> onUpdateHeadingStartDate(heading.id, s) },
+                    onUpdateEndDate = { e -> onUpdateHeadingEndDate(heading.id, e) },
+                    onDeleteHeading = { onDeleteHeading(heading.id) },
+                    onUpdateTaskStatus = onUpdateTaskStatus,
+                    onToggleTaskPin = onToggleTaskPin,
+                    onOpenTaskEditor = onOpenTaskEditor,
+                    onToggleTaskSelection = onToggleTaskSelection,
+                    onRangeSelectTask = onRangeSelectTask
+                )
+            }
+
+            // Trailing "+ New Phase" Soft Bento Card
+            Surface(
+                modifier = Modifier
+                    .width(272.dp)
+                    .clip(RoundedCornerShape(18.dp)),
+                shape = RoundedCornerShape(18.dp),
+                color = colors.tagPillBg.copy(alpha = 0.45f),
+                border = BorderStroke(1.dp, colors.thingsBlue.copy(alpha = 0.25f))
+            ) {
+                if (isCreatingNewPhase) {
+                    val commitPhase = {
+                        val trimmed = newPhaseField.text.trim()
+                        if (trimmed.isNotEmpty()) {
+                            onCreatePhase(trimmed)
+                            newPhaseField = TextFieldValue(text = "", selection = TextRange(0))
+                            isCreatingNewPhase = false
+                        }
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = newPhaseField,
+                            onValueChange = { newPhaseField = it },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(R.string.entity_new_heading),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { commitPhase() }),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(newPhaseFocusRequester)
+                                .onPreviewKeyEvent { ev ->
+                                    if (ev.type == KeyEventType.KeyDown &&
+                                        (ev.key == Key.Enter || ev.key == Key.NumPadEnter)
+                                    ) {
+                                        commitPhase()
+                                        true
+                                    } else if (ev.type == KeyEventType.KeyDown && ev.key == Key.Escape) {
+                                        isCreatingNewPhase = false
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    newPhaseField = TextFieldValue(text = "", selection = TextRange(0))
+                                    isCreatingNewPhase = false
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = commitPhase,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Check,
+                                    contentDescription = stringResource(R.string.action_save),
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .clickable { isCreatingNewPhase = true }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.thingsBlueSoft),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = stringResource(R.string.v30_board_add_phase),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.v30_board_add_phase),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProjectBoardPhaseColumn(
+    heading: Heading?,
+    columnTitle: String,
+    tasks: List<TaskItem>,
+    completedCount: Int,
+    totalCount: Int,
+    allOpenTasks: List<TaskItem>,
+    openTaskIds: Set<String>,
+    selectedTaskIds: Set<String>,
+    allVisibleTaskIds: List<String>,
+    controller: ProjectDragDropController,
+    locale: Locale,
+    onAddTopTask: () -> Unit,
+    onAddBottomTask: () -> Unit,
+    onRenameHeading: ((String) -> Unit)?,
+    onUpdateStartDate: ((Long?) -> Unit)?,
+    onUpdateEndDate: ((Long?) -> Unit)?,
+    onDeleteHeading: (() -> Unit)?,
+    onUpdateTaskStatus: (String, TaskStatus) -> Unit,
+    onToggleTaskPin: (String) -> Unit,
+    onOpenTaskEditor: (String) -> Unit,
+    onToggleTaskSelection: (String) -> Unit,
+    onRangeSelectTask: (String) -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    val headingKey = heading?.id
+    val zoneHoverKey = "board_col_${headingKey ?: "general"}"
+    val session = controller.session
+    val isColumnHovered = session?.kind == ProjectDragKind.MOVE_TASK && session.hoveredZoneKey == zoneHoverKey
+    val draggedIdsSet = remember(session?.draggedTaskIds, session?.draggedTaskId) {
+        session?.effectiveTaskIds?.toHashSet().orEmpty()
+    }
+
+    var colWindowTop by remember { mutableFloatStateOf(0f) }
+    var showStartPicker by remember(headingKey) { mutableStateOf(false) }
+    var showEndPicker by remember(headingKey) { mutableStateOf(false) }
+    var isEditingTitle by remember(headingKey) { mutableStateOf(heading != null && heading.title.isEmpty()) }
+    var editedTitle by remember(headingKey, heading?.title) {
+        val init = heading?.title.orEmpty()
+        mutableStateOf(TextFieldValue(text = init, selection = TextRange(0, init.length)))
+    }
+
+    DisposableEffect(controller, headingKey) {
+        onDispose {
+            controller.unregisterBoardColumn(headingKey)
+        }
+    }
+
+    val startLocal = remember(heading?.startDate, zone) {
+        heading?.startDate?.let { ms ->
+            runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull()
+        }
+    }
+    val endLocal = remember(heading?.endDate, zone) {
+        heading?.endDate?.let { ms ->
+            runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull()
+        }
+    }
+    val datePattern = if (locale.language == "de") "d. MMM" else "MMM d"
+    val formattedStart = remember(startLocal, locale) {
+        startLocal?.let { runCatching { it.format(DateTimeFormatter.ofPattern(datePattern, locale)) }.getOrNull() }
+    }
+    val formattedEnd = remember(endLocal, locale) {
+        endLocal?.let { runCatching { it.format(DateTimeFormatter.ofPattern(datePattern, locale)) }.getOrNull() }
+    }
+    val isOverduePhase = endLocal != null && endLocal.isBefore(today) && tasks.isNotEmpty()
+    val phaseProgress = if (totalCount > 0) completedCount.toFloat() / totalCount.toFloat() else 0f
+
+    Surface(
+        modifier = Modifier
+            .width(296.dp)
+            .fillMaxHeight()
+            .onGloballyPositioned { coords ->
+                if (coords.isAttached) {
+                    val win = coords.localToWindowSafe(Offset.Zero)
+                    colWindowTop = win.y
+                    controller.registerBoardColumn(
+                        headingId = headingKey,
+                        headingTitle = columnTitle,
+                        boundsWindow = IntRect(
+                            left = win.x.roundToInt(),
+                            top = win.y.roundToInt(),
+                            right = (win.x + coords.size.width).roundToInt(),
+                            bottom = (win.y + coords.size.height).roundToInt()
+                        )
+                    )
+                }
+            },
+        shape = RoundedCornerShape(18.dp),
+        color = if (isColumnHovered) {
+            colors.thingsBlueSoft.copy(alpha = 0.55f)
+        } else {
+            colors.sidebarBackground.copy(alpha = if (colors.isDark) 0.92f else 0.85f)
+        },
+        border = BorderStroke(
+            width = if (isColumnHovered) 1.75.dp else 0.85.dp,
+            color = if (isColumnHovered) colors.thingsBlue else colors.hairlineDivider
+        )
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(11.dp)
+            ) {
+                // Column Header
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 3.dp, vertical = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (isEditingTitle && onRenameHeading != null) {
+                        val commitRename = {
+                            val clean = editedTitle.text.trim()
+                            if (clean.isNotEmpty()) {
+                                onRenameHeading(clean)
+                                isEditingTitle = false
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = editedTitle,
+                                onValueChange = { editedTitle = it },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { commitRename() }),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .onPreviewKeyEvent { ev ->
+                                        if (ev.type == KeyEventType.KeyDown &&
+                                            (ev.key == Key.Enter || ev.key == Key.NumPadEnter)
+                                        ) {
+                                            commitRename()
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                            )
+                            IconButton(onClick = commitRename, modifier = Modifier.size(26.dp)) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Check,
+                                    contentDescription = stringResource(R.string.action_save),
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    if (heading?.title.isNullOrEmpty() && editedTitle.text.isBlank()) {
+                                        onDeleteHeading?.invoke()
+                                    } else {
+                                        isEditingTitle = false
+                                    }
+                                },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(4.dp)
+                                        .height(18.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(GlacierGradientStart, GlacierGradientEnd)
+                                            )
+                                        )
+                                )
+                                Text(
+                                    text = columnTitle,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.primaryText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(50),
+                                    color = colors.cardSurface
+                                ) {
+                                    Text(
+                                        text = tasks.size.toString(),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = colors.secondaryText,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.5.dp)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                IconButton(onClick = onAddTopTask, modifier = Modifier.size(25.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = stringResource(R.string.entity_new_todo),
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                if (onRenameHeading != null) {
+                                    IconButton(
+                                        onClick = {
+                                            editedTitle = TextFieldValue(
+                                                text = heading?.title.orEmpty(),
+                                                selection = TextRange(0, heading?.title?.length ?: 0)
+                                            )
+                                            isEditingTitle = true
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Edit,
+                                            contentDescription = stringResource(R.string.entity_heading),
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(13.5.dp)
+                                        )
+                                    }
+                                }
+                                if (onDeleteHeading != null) {
+                                    IconButton(onClick = onDeleteHeading, modifier = Modifier.size(24.dp)) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DeleteOutline,
+                                            contentDescription = stringResource(R.string.action_delete),
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Progress ring + Phase Start/End Date Badges
+                    if (totalCount > 0 || heading != null) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (totalCount > 0) {
+                                ProjectProgressRing(
+                                    progress = phaseProgress,
+                                    size = 14.dp,
+                                    showFraction = true,
+                                    completedCount = completedCount,
+                                    totalCount = totalCount,
+                                    modifier = Modifier.align(Alignment.CenterVertically)
+                                )
+                            }
+                            if (heading != null && onUpdateStartDate != null) {
+                                val startLabel = if (formattedStart != null) {
+                                    stringResource(R.string.v30_phase_starts_on, formattedStart)
+                                } else {
+                                    "+ ${stringResource(R.string.v30_phase_set_start_date)}"
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (formattedStart != null) colors.thingsBlueSoft else colors.cardSurface.copy(alpha = 0.72f))
+                                        .clickable { showStartPicker = true }
+                                        .padding(horizontal = 7.5.dp, vertical = 2.5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CalendarToday,
+                                        contentDescription = null,
+                                        tint = if (formattedStart != null) colors.thingsBlue else colors.secondaryText,
+                                        modifier = Modifier.size(10.5.dp)
+                                    )
+                                    Text(
+                                        text = startLabel,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = if (formattedStart != null) colors.thingsBlue else colors.secondaryText
+                                    )
+                                }
+                            }
+                            if (heading != null && onUpdateEndDate != null) {
+                                val endLabel = if (formattedEnd != null) {
+                                    stringResource(R.string.phase_ends_on, formattedEnd)
+                                } else {
+                                    "+ ${stringResource(R.string.phase_set_end_date)}"
+                                }
+                                val endBg = when {
+                                    isOverduePhase -> colors.deadlineSoftBg
+                                    formattedEnd != null -> colors.thingsBlueSoft
+                                    else -> colors.cardSurface.copy(alpha = 0.72f)
+                                }
+                                val endFg = when {
+                                    isOverduePhase -> colors.deadlineUrgentRed
+                                    formattedEnd != null -> colors.thingsBlue
+                                    else -> colors.secondaryText
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(endBg)
+                                        .clickable { showEndPicker = true }
+                                        .padding(horizontal = 7.5.dp, vertical = 2.5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Flag,
+                                        contentDescription = null,
+                                        tint = endFg,
+                                        modifier = Modifier.size(10.5.dp)
+                                    )
+                                    Text(
+                                        text = endLabel,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = endFg
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Scrollable Task Cards List
+                val colScrollState = rememberScrollState()
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(colScrollState),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    tasks.forEach { task ->
+                        KanbanTaskCard(
+                            task = task,
+                            isSelected = task.id in selectedTaskIds,
+                            isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+                            isBeingDragged = task.id in draggedIdsSet,
+                            allOpenTasks = allOpenTasks,
+                            openTaskIds = openTaskIds,
+                            selectedTaskIds = selectedTaskIds,
+                            allVisibleTaskIds = allVisibleTaskIds,
+                            controller = controller,
+                            locale = locale,
+                            onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
+                            onTogglePin = { onToggleTaskPin(task.id) },
+                            onOpenEditor = { onOpenTaskEditor(task.id) },
+                            onToggleSelection = { onToggleTaskSelection(task.id) },
+                            onRangeSelect = { onRangeSelectTask(task.id) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Column Footer: "+ New To-Do"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(colors.cardSurface.copy(alpha = 0.65f))
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .clickable(onClick = onAddBottomTask)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.entity_new_todo),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
+                }
+            }
+
+            // Sky-Blue Intra-Column Insertion Line when dragging over this column
+            val indicatorWinY = session?.boardIndicatorWindowY
+            if (isColumnHovered && indicatorWinY != null) {
+                val localIndicatorY = (indicatorWinY - colWindowTop).roundToInt().coerceAtLeast(44)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset { IntOffset(0, localIndicatorY) }
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(colors.thingsBlue)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(2.5.dp)
+                            .background(colors.thingsBlue)
+                    )
+                }
+            }
+        }
+    }
+
+    if (showStartPicker && heading != null && onUpdateStartDate != null) {
+        DeadlineDatePickerDialog(
+            currentDeadline = heading.startDate,
+            locale = locale,
+            onApplyDeadline = onUpdateStartDate,
+            onDismiss = { showStartPicker = false },
+            titleText = stringResource(R.string.v30_phase_set_start_date),
+            clearButtonText = stringResource(R.string.v30_phase_clear_start_date)
+        )
+    }
+    if (showEndPicker && heading != null && onUpdateEndDate != null) {
+        DeadlineDatePickerDialog(
+            currentDeadline = heading.endDate,
+            locale = locale,
+            onApplyDeadline = onUpdateEndDate,
+            onDismiss = { showEndPicker = false },
+            titleText = stringResource(R.string.phase_set_end_date),
+            clearButtonText = stringResource(R.string.phase_clear_end_date)
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@Composable
+private fun KanbanTaskCard(
+    task: TaskItem,
+    isSelected: Boolean,
+    isSelectionModeActive: Boolean,
+    isBeingDragged: Boolean,
+    allOpenTasks: List<TaskItem>,
+    openTaskIds: Set<String>,
+    selectedTaskIds: Set<String>,
+    allVisibleTaskIds: List<String>,
+    controller: ProjectDragDropController,
+    locale: Locale,
+    onStatusChange: (TaskStatus) -> Unit,
+    onTogglePin: () -> Unit,
+    onOpenEditor: () -> Unit,
+    onToggleSelection: () -> Unit,
+    onRangeSelect: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+    val isBlocked = remember(task.blockedByTaskIds, openTaskIds) {
+        isTaskActivelyBlocked(task, openTaskIds)
+    }
+    val activeOpenBlockerIds = remember(task.blockedByTaskIds, openTaskIds) {
+        task.blockedByTaskIds.filter { it in openTaskIds }.distinct()
+    }
+
+    DisposableEffect(controller, task.id) {
+        onDispose {
+            controller.unregisterBoardCardBounds(task.id)
+        }
+    }
+
+    var modifierHeldShift by remember { mutableStateOf(false) }
+    var modifierHeldCtrlOrMeta by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (isBeingDragged) 0.35f else 1f)
+            .onGloballyPositioned { coords ->
+                if (coords.isAttached) {
+                    val win = coords.localToWindowSafe(Offset.Zero)
+                    controller.registerBoardCardBounds(
+                        taskId = task.id,
+                        windowTop = win.y,
+                        windowBottom = win.y + coords.size.height
+                    )
+                }
+            }
+            .pointerInput(task.id) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        if (ev.type == PointerEventType.Press) {
+                            modifierHeldShift = ev.keyboardModifiers.isShiftPressed
+                            modifierHeldCtrlOrMeta = ev.keyboardModifiers.isCtrlPressed || ev.keyboardModifiers.isMetaPressed
+                        }
+                    }
+                }
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    when {
+                        modifierHeldShift -> {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onRangeSelect()
+                        }
+                        modifierHeldCtrlOrMeta || isSelectionModeActive -> {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleSelection()
+                        }
+                        else -> onOpenEditor()
+                    }
+                },
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onToggleSelection()
+                }
+            ),
+        shape = RoundedCornerShape(14.dp),
+        color = if (isSelected) colors.thingsBlueSoft else colors.cardSurface,
+        shadowElevation = if (colors.isDark) 2.dp else 1.5.dp,
+        border = BorderStroke(
+            width = if (isSelected) 1.5.dp else 0.75.dp,
+            color = when {
+                isSelected -> colors.thingsBlue
+                isBlocked -> colors.somedayWarmAmber.copy(alpha = 0.45f)
+                else -> colors.hairlineDivider
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (isBlocked) 0.72f else 1f)
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                ThingsCheckbox(
+                    status = task.status,
+                    onStatusChange = onStatusChange,
+                    isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                    size = 18.dp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = if (task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
+                    ),
+                    color = if (task.title.isBlank()) colors.tertiaryText else colors.primaryText,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(top = 3.dp)
+                )
+                if (task.isPinned) {
+                    Icon(
+                        imageVector = Icons.Outlined.PushPin,
+                        contentDescription = stringResource(R.string.v25_pinned_badge),
+                        tint = colors.thingsBlue,
+                        modifier = Modifier
+                            .padding(top = 5.dp, start = 4.dp)
+                            .size(13.5.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(onClick = onTogglePin)
+                    )
+                }
+                if (task.status == TaskStatus.OPEN) {
+                    ProjectTaskDragHandle(
+                        task = task,
+                        controller = controller,
+                        selectedTaskIds = selectedTaskIds,
+                        orderedVisibleTaskIds = allVisibleTaskIds
+                    )
+                }
+            }
+
+            if (task.notes.isNotBlank()) {
+                Text(
+                    text = task.notes,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.secondaryText,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 30.dp)
+                )
+            }
+
+            val hasBadges = activeOpenBlockerIds.isNotEmpty() ||
+                EffortLevel.normalize(task.effortLevel) != null ||
+                task.scheduledStartMinutes != null ||
+                task.durationMinutes != null ||
+                task.whenDate != null ||
+                task.scheduleState == ScheduleState.TODAY ||
+                task.scheduleState == ScheduleState.THIS_EVENING ||
+                task.scheduleState == ScheduleState.SOMEDAY ||
+                task.deadline != null ||
+                task.checklistItems.isNotEmpty() ||
+                task.tags.isNotEmpty()
+
+            if (hasBadges) {
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 30.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (activeOpenBlockerIds.isNotEmpty()) {
+                        val firstBlockerTitle = if (activeOpenBlockerIds.size == 1) {
+                            allOpenTasks.firstOrNull { it.id == activeOpenBlockerIds.first() }?.title?.trim()?.takeIf { it.isNotEmpty() }
+                        } else null
+                        val blockedLabel = if (firstBlockerTitle != null) {
+                            stringResource(R.string.v30_blocked_by_badge, firstBlockerTitle)
+                        } else {
+                            stringResource(R.string.v30_blocked_by_count_badge, activeOpenBlockerIds.size)
+                        }
+                        ThingsTagPill(title = "⏳ $blockedLabel")
+                    }
+
+                    when (EffortLevel.normalize(task.effortLevel)) {
+                        EffortLevel.QUICK_WIN -> ThingsTagPill(title = "⚡ ${stringResource(R.string.v30_effort_quick_win)}")
+                        EffortLevel.MEDIUM -> ThingsTagPill(title = "◐ ${stringResource(R.string.v30_effort_medium)}")
+                        EffortLevel.DEEP_FOCUS -> ThingsTagPill(title = "🧠 ${stringResource(R.string.v30_effort_deep_focus)}")
+                    }
+
+                    if (task.scheduledStartMinutes != null) {
+                        ThingsTagPill(
+                            title = TimeblockScheduleUtils.formatTimeblockBadge(
+                                task.scheduledStartMinutes,
+                                task.durationMinutes
+                            )
+                        )
+                    } else if (task.durationMinutes != null) {
+                        val durFmt = formatDurationCompact(task.durationMinutes) ?: "${task.durationMinutes}m"
+                        ThingsTagPill(title = "⏱ $durFmt")
+                    }
+
+                    if (task.whenDate != null ||
+                        task.scheduleState == ScheduleState.TODAY ||
+                        task.scheduleState == ScheduleState.THIS_EVENING ||
+                        task.scheduleState == ScheduleState.SOMEDAY
+                    ) {
+                        ThingsWhenBadge(
+                            scheduleState = task.scheduleState,
+                            whenDateEpochMillis = task.whenDate,
+                            locale = locale
+                        )
+                    }
+
+                    task.deadline?.let { dl ->
+                        ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
+                    }
+
+                    if (task.checklistItems.isNotEmpty()) {
+                        val done = task.checklistItems.count { it.isCompleted }
+                        ThingsTagPill(title = "☑ $done/${task.checklistItems.size}")
+                    }
+
+                    task.tags.forEach { tag ->
+                        ThingsTagPill(title = tag.title)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Mode 3: Project Roadmap Workspace (Calm Bento Gantt + 1-Click PDF/PNG Export)
+// =============================================================================
+
+private sealed interface RoadmapDisplayRow {
+    data class PhaseRow(
+        val heading: Heading?,
+        val title: String,
+        val phaseBar: RoadmapPhaseBar?,
+        val completedCount: Int,
+        val totalCount: Int
+    ) : RoadmapDisplayRow
+
+    data class TaskRow(
+        val taskBar: RoadmapTaskBar
+    ) : RoadmapDisplayRow
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ProjectRoadmapWorkspace(
+    project: Project,
+    projectHeadings: List<Heading>,
+    primaryTasks: List<TaskItem>,
+    headingTaskCounts: Map<String, Pair<Int, Int>>,
+    currentEpochDay: Long,
+    locale: Locale,
+    onShiftHeadingDates: (heading: Heading, deltaDays: Long, fallbackRange: Pair<Long, Long>?) -> Unit,
+    onShiftTaskDates: (task: TaskItem, deltaDays: Long) -> Unit,
+    onUpdateHeadingStartDate: (headingId: String, startDate: Long?) -> Unit,
+    onUpdateTaskDeadline: (task: TaskItem, deadline: Long?) -> Unit,
+    onScheduleTaskToday: (task: TaskItem) -> Unit,
+    onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
+    onOpenTaskEditor: (taskId: String) -> Unit,
+    onShowError: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+    val configuration = LocalConfiguration.current
+    val isWideScreen = configuration.screenWidthDp >= 700
+    val zone = ZoneId.systemDefault()
+
+    val layout = remember(project, projectHeadings, primaryTasks, currentEpochDay, zone) {
+        ProjectRoadmapEngine.buildRoadmapLayout(
+            project = project,
+            headings = projectHeadings,
+            tasks = primaryTasks,
+            todayEpochDay = currentEpochDay,
+            zoneId = zone
+        )
+    }
+
+    val zoomLevelsDp = listOf(32.dp, 44.dp, 62.dp)
+    var zoomIndex by remember { mutableIntStateOf(1) }
+    val dayWidthDp: Dp = zoomLevelsDp[zoomIndex.coerceIn(0, zoomLevelsDp.lastIndex)]
+    val dayWidthPx = with(density) { dayWidthDp.toPx() }
+    val labelColWidth: Dp = if (isWideScreen) 216.dp else 148.dp
+
+    val horizontalScrollState = rememberScrollState()
+    val verticalScrollState = rememberScrollState()
+
+    val jumpToToday: () -> Unit = {
+        val targetOffsetDays = (layout.todayEpochDay - layout.startEpochDay - 2L).coerceAtLeast(0L)
+        val targetPx = (targetOffsetDays * dayWidthPx).roundToInt()
+        coroutineScope.launch {
+            runCatching { horizontalScrollState.animateScrollTo(targetPx) }
+        }
+    }
+
+    LaunchedEffect(project.id) {
+        val targetOffsetDays = (layout.todayEpochDay - layout.startEpochDay - 2L).coerceAtLeast(0L)
+        val targetPx = (targetOffsetDays * dayWidthPx).roundToInt()
+        runCatching { horizontalScrollState.scrollTo(targetPx) }
+    }
+
+    val exportChooserTitle = stringResource(R.string.v30_roadmap_export)
+    val triggerExport: (Boolean) -> Unit = { asPdf ->
+        coroutineScope.launch {
+            runCatching {
+                RoadmapExporter.exportAndShareRoadmap(
+                    context = context,
+                    layout = layout,
+                    headingCounts = headingTaskCounts,
+                    locale = locale,
+                    isDark = colors.isDark,
+                    asPdf = asPdf,
+                    exportChooserTitle = exportChooserTitle
+                )
+            }.onFailure { err ->
+                onShowError(err.localizedMessage ?: err.message ?: "Export failed")
+            }
+        }
+    }
+
+    val generalTitle = stringResource(R.string.v30_board_ungrouped_column)
+    val displayRows: List<RoadmapDisplayRow> = remember(layout, headingTaskCounts, generalTitle) {
+        val rows = mutableListOf<RoadmapDisplayRow>()
+        for (lane in layout.lanes) {
+            val h = lane.heading
+            val counts = h?.let { headingTaskCounts[it.id] }
+            val completed = counts?.first ?: 0
+            val total = counts?.second ?: (lane.taskBars.size + lane.unscheduledTasks.size)
+            rows += RoadmapDisplayRow.PhaseRow(
+                heading = h,
+                title = h?.title?.ifBlank { generalTitle } ?: generalTitle,
+                phaseBar = lane.phaseBar,
+                completedCount = completed,
+                totalCount = total
+            )
+            for (tb in lane.taskBars) {
+                rows += RoadmapDisplayRow.TaskRow(tb)
+            }
+        }
+        rows
+    }
+
+    // Live drag delta-days preview state keyed by "phase_<id>" or "task_<id>"
+    val livePreviewDeltaDays = remember { mutableStateMapOf<String, Long>() }
+
+    val windowRangeLabel = remember(layout.startEpochDay, layout.endEpochDay, locale) {
+        val fmt = DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM" else "MMM d", locale)
+        val yearFmt = DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM yyyy" else "MMM d, yyyy", locale)
+        val s = LocalDate.ofEpochDay(layout.startEpochDay)
+        val e = LocalDate.ofEpochDay(layout.endEpochDay)
+        "${s.format(fmt)} – ${e.format(yearFmt)}"
+    }
+
+    var unscheduledHeadingPickerTarget by remember { mutableStateOf<Heading?>(null) }
+    var unscheduledTaskDeadlineTarget by remember { mutableStateOf<TaskItem?>(null) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        // 1. Roadmap Toolbar (Date window, Jump to Today, Zoom Toggle, Export PDF/PNG)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.tagPillBg
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarMonth,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(14.5.dp)
+                        )
+                        Text(
+                            text = windowRangeLabel,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.primaryText
+                        )
+                    }
+                }
+
+                // Jump to Today Chip
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            jumpToToday()
+                        },
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.thingsBlueSoft,
+                    border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.WbSunny,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.v30_roadmap_jump_today),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue
+                        )
+                    }
+                }
+
+                // Zoom Toggle (- / +)
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.tagPillBg,
+                    border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        IconButton(
+                            onClick = { if (zoomIndex > 0) zoomIndex-- },
+                            enabled = zoomIndex > 0,
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Remove,
+                                contentDescription = "-",
+                                tint = if (zoomIndex > 0) colors.primaryText else colors.tertiaryText,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        Text(
+                            text = "${zoomIndex + 1}x",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = colors.secondaryText,
+                            modifier = Modifier.padding(horizontal = 3.dp)
+                        )
+                        IconButton(
+                            onClick = { if (zoomIndex < zoomLevelsDp.lastIndex) zoomIndex++ },
+                            enabled = zoomIndex < zoomLevelsDp.lastIndex,
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = "+",
+                                tint = if (zoomIndex < zoomLevelsDp.lastIndex) colors.primaryText else colors.tertiaryText,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            RoadmapExportMenuPill(
+                onExportPdf = { triggerExport(true) },
+                onExportPng = { triggerExport(false) }
+            )
+        }
+
+        // 2. Scrollable Gantt Card + Unscheduled Section
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(verticalScrollState)
+                .padding(bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = colors.cardSurface,
+                border = BorderStroke(0.85.dp, colors.hairlineDivider),
+                shadowElevation = if (colors.isDark) 2.dp else 1.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Synchronized Day-Column Header Row
+                    RoadmapDayHeaderStrip(
+                        startEpochDay = layout.startEpochDay,
+                        totalDays = layout.totalDays,
+                        todayEpochDay = layout.todayEpochDay,
+                        dayWidthDp = dayWidthDp,
+                        labelColWidth = labelColWidth,
+                        horizontalScrollState = horizontalScrollState,
+                        locale = locale
+                    )
+
+                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.85.dp)
+
+                    if (displayRows.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stringResource(R.string.v30_roadmap_unscheduled_hint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.secondaryText
+                            )
+                        }
+                    } else {
+                        RoadmapSynchronizedLanesBody(
+                            layout = layout,
+                            displayRows = displayRows,
+                            dayWidthDp = dayWidthDp,
+                            dayWidthPx = dayWidthPx,
+                            labelColWidth = labelColWidth,
+                            horizontalScrollState = horizontalScrollState,
+                            livePreviewDeltaDays = livePreviewDeltaDays,
+                            onShiftHeadingDates = onShiftHeadingDates,
+                            onShiftTaskDates = onShiftTaskDates,
+                            onUpdateTaskStatus = onUpdateTaskStatus,
+                            onOpenTaskEditor = onOpenTaskEditor
+                        )
+                    }
+                }
+            }
+
+            // 3. Unscheduled Section Card
+            if (layout.unscheduledHeadings.isNotEmpty() || layout.unscheduledTasks.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = colors.sidebarBackground.copy(alpha = 0.72f),
+                    border = BorderStroke(0.85.dp, colors.hairlineDivider)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.v30_roadmap_unscheduled_section),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.primaryText
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = colors.thingsBlueSoft
+                            ) {
+                                Text(
+                                    text = (layout.unscheduledHeadings.size + layout.unscheduledTasks.size).toString(),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.thingsBlue,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.5.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = stringResource(R.string.v30_roadmap_unscheduled_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondaryText
+                        )
+
+                        layout.unscheduledHeadings.forEach { heading ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(11.dp),
+                                color = colors.cardSurface,
+                                border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(3.5.dp)
+                                                .height(16.dp)
+                                                .clip(RoundedCornerShape(50))
+                                                .background(colors.thingsBlue)
+                                        )
+                                        Text(
+                                            text = heading.title.ifBlank { stringResource(R.string.entity_heading) },
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = colors.primaryText,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        ThingsTagPill(
+                                            title = "★ ${stringResource(R.string.view_today)}",
+                                            onClick = {
+                                                val todayMs = ProjectRoadmapEngine.epochDayToStartOfDayMillis(currentEpochDay, zone)
+                                                onUpdateHeadingStartDate(heading.id, todayMs)
+                                            }
+                                        )
+                                        ThingsTagPill(
+                                            title = "+ ${stringResource(R.string.v30_phase_set_start_date)}",
+                                            onClick = { unscheduledHeadingPickerTarget = heading }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        layout.unscheduledTasks.forEach { task ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .clickable { onOpenTaskEditor(task.id) },
+                                shape = RoundedCornerShape(11.dp),
+                                color = colors.cardSurface,
+                                border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        ThingsCheckbox(
+                                            status = task.status,
+                                            onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
+                                            size = 18.dp
+                                        )
+                                        Text(
+                                            text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.primaryText,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        ThingsTagPill(
+                                            title = "★ ${stringResource(R.string.view_today)}",
+                                            onClick = { onScheduleTaskToday(task) }
+                                        )
+                                        ThingsTagPill(
+                                            title = "+ ${stringResource(R.string.action_deadline)}",
+                                            onClick = { unscheduledTaskDeadlineTarget = task }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    unscheduledHeadingPickerTarget?.let { targetHeading ->
+        DeadlineDatePickerDialog(
+            currentDeadline = targetHeading.startDate,
+            locale = locale,
+            onApplyDeadline = { picked -> onUpdateHeadingStartDate(targetHeading.id, picked) },
+            onDismiss = { unscheduledHeadingPickerTarget = null },
+            titleText = stringResource(R.string.v30_phase_set_start_date),
+            clearButtonText = stringResource(R.string.v30_phase_clear_start_date)
+        )
+    }
+
+    unscheduledTaskDeadlineTarget?.let { targetTask ->
+        DeadlineDatePickerDialog(
+            currentDeadline = targetTask.deadline,
+            locale = locale,
+            onApplyDeadline = { picked -> onUpdateTaskDeadline(targetTask, picked) },
+            onDismiss = { unscheduledTaskDeadlineTarget = null }
+        )
+    }
+}
+
+@Composable
+private fun RoadmapDayHeaderStrip(
+    startEpochDay: Long,
+    totalDays: Int,
+    todayEpochDay: Long,
+    dayWidthDp: Dp,
+    labelColWidth: Dp,
+    horizontalScrollState: ScrollState,
+    locale: Locale
+) {
+    val colors = ThingsTheme.colors
+    val dowFmt = remember(locale) { DateTimeFormatter.ofPattern("EE", locale) }
+    val monthFmt = remember(locale) { DateTimeFormatter.ofPattern("MMM", locale) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .background(colors.sidebarBackground.copy(alpha = 0.6f)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .width(labelColWidth)
+                .fillMaxHeight()
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = "${stringResource(R.string.entity_heading)} / ${stringResource(R.string.entity_todos)}",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = colors.secondaryText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        VerticalDivider(color = colors.hairlineDivider, thickness = 0.85.dp)
+
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .horizontalScroll(horizontalScrollState)
+        ) {
+            for (i in 0 until totalDays) {
+                val epochDay = startEpochDay + i
+                val date = LocalDate.ofEpochDay(epochDay)
+                val isToday = epochDay == todayEpochDay
+                val isWeekend = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
+                val showMonthPrefix = i == 0 || date.dayOfMonth == 1
+
+                Box(
+                    modifier = Modifier
+                        .width(dayWidthDp)
+                        .fillMaxHeight()
+                        .background(
+                            when {
+                                isToday -> colors.thingsBlueSoft
+                                isWeekend -> colors.tagPillBg.copy(alpha = 0.45f)
+                                else -> Color.Transparent
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = if (showMonthPrefix) {
+                                date.format(monthFmt).uppercase(locale)
+                            } else {
+                                date.format(dowFmt).take(2)
+                            },
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.5.sp,
+                                fontWeight = if (isToday || showMonthPrefix) FontWeight.Bold else FontWeight.Normal
+                            ),
+                            color = if (isToday) colors.thingsBlue else colors.tertiaryText,
+                            maxLines = 1
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (isToday) colors.thingsBlue else Color.Transparent)
+                                .padding(horizontal = if (isToday) 6.dp else 2.dp, vertical = 1.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = date.dayOfMonth.toString(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isToday) FontWeight.ExtraBold else FontWeight.SemiBold
+                                ),
+                                color = if (isToday) Color.White else colors.primaryText,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val PHASE_ROW_HEIGHT = 42.dp
+private val TASK_ROW_HEIGHT = 38.dp
+
+@Composable
+private fun RoadmapSynchronizedLanesBody(
+    layout: ProjectRoadmapLayout,
+    displayRows: List<RoadmapDisplayRow>,
+    dayWidthDp: Dp,
+    dayWidthPx: Float,
+    labelColWidth: Dp,
+    horizontalScrollState: ScrollState,
+    livePreviewDeltaDays: MutableMap<String, Long>,
+    onShiftHeadingDates: (heading: Heading, deltaDays: Long, fallbackRange: Pair<Long, Long>?) -> Unit,
+    onShiftTaskDates: (task: TaskItem, deltaDays: Long) -> Unit,
+    onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
+    onOpenTaskEditor: (taskId: String) -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val density = LocalDensity.current
+    val phaseRowPx = with(density) { PHASE_ROW_HEIGHT.toPx() }
+    val taskRowPx = with(density) { TASK_ROW_HEIGHT.toPx() }
+
+    val rowOffsetsDp = remember(displayRows) {
+        val list = ArrayList<Dp>(displayRows.size)
+        var cursor = 0.dp
+        for (row in displayRows) {
+            list += cursor
+            cursor += when (row) {
+                is RoadmapDisplayRow.PhaseRow -> PHASE_ROW_HEIGHT
+                is RoadmapDisplayRow.TaskRow -> TASK_ROW_HEIGHT
+            }
+        }
+        list to cursor
+    }
+    val rowTopsDp = rowOffsetsDp.first
+    val totalHeightDp = rowOffsetsDp.second.coerceAtLeast(56.dp)
+    val totalTimelineWidthDp = dayWidthDp * layout.totalDays
+
+    // Map taskId -> (rowTopPx, rowHeightPx, taskBar) for fast cubic-Bézier dependency rendering
+    val taskRowGeometry = remember(displayRows, phaseRowPx, taskRowPx) {
+        val map = HashMap<String, Triple<Float, Float, RoadmapTaskBar>>()
+        var yPx = 0f
+        for (row in displayRows) {
+            when (row) {
+                is RoadmapDisplayRow.PhaseRow -> yPx += phaseRowPx
+                is RoadmapDisplayRow.TaskRow -> {
+                    map[row.taskBar.taskId] = Triple(yPx, taskRowPx, row.taskBar)
+                    yPx += taskRowPx
+                }
+            }
+        }
+        map
+    }
+
+    val shiftEarlierLabel = stringResource(R.string.v30_roadmap_shift_earlier)
+    val shiftLaterLabel = stringResource(R.string.v30_roadmap_shift_later)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(totalHeightDp)
+    ) {
+        // Left Fixed Labels Column
+        Column(
+            modifier = Modifier
+                .width(labelColWidth)
+                .fillMaxHeight()
+                .background(colors.sidebarBackground.copy(alpha = 0.36f))
+        ) {
+            displayRows.forEach { row ->
+                when (row) {
+                    is RoadmapDisplayRow.PhaseRow -> {
+                        val phaseProgress = if (row.totalCount > 0) {
+                            row.completedCount.toFloat() / row.totalCount.toFloat()
+                        } else 0f
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(PHASE_ROW_HEIGHT)
+                                .background(colors.thingsBlueSoft.copy(alpha = 0.35f))
+                                .padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.5.dp)
+                                        .height(15.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(colors.thingsBlue)
+                                )
+                                Text(
+                                    text = row.title,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = colors.primaryText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (row.totalCount > 0) {
+                                    ProjectProgressRing(progress = phaseProgress, size = 13.dp)
+                                }
+                            }
+                            if (row.heading != null && row.phaseBar != null) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    ThingsHoverTooltip(text = shiftEarlierLabel) {
+                                        IconButton(
+                                            onClick = {
+                                                onShiftHeadingDates(
+                                                    row.heading,
+                                                    -1L,
+                                                    row.phaseBar.startEpochDay to row.phaseBar.endEpochDay
+                                                )
+                                            },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.ChevronLeft,
+                                                contentDescription = shiftEarlierLabel,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                    ThingsHoverTooltip(text = shiftLaterLabel) {
+                                        IconButton(
+                                            onClick = {
+                                                onShiftHeadingDates(
+                                                    row.heading,
+                                                    1L,
+                                                    row.phaseBar.startEpochDay to row.phaseBar.endEpochDay
+                                                )
+                                            },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.ChevronRight,
+                                                contentDescription = shiftLaterLabel,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    is RoadmapDisplayRow.TaskRow -> {
+                        val task = row.taskBar.task
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(TASK_ROW_HEIGHT)
+                                .clickable { onOpenTaskEditor(task.id) }
+                                .padding(start = 12.dp, end = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                ThingsCheckbox(
+                                    status = task.status,
+                                    onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
+                                    size = 16.dp
+                                )
+                                Text(
+                                    text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = FontWeight.Medium,
+                                        textDecoration = if (task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
+                                    ),
+                                    color = if (row.taskBar.isActivelyBlocked) colors.secondaryText else colors.primaryText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                                ThingsHoverTooltip(text = shiftEarlierLabel) {
+                                    IconButton(
+                                        onClick = { onShiftTaskDates(task, -1L) },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.ChevronLeft,
+                                            contentDescription = shiftEarlierLabel,
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                                ThingsHoverTooltip(text = shiftLaterLabel) {
+                                    IconButton(
+                                        onClick = { onShiftTaskDates(task, 1L) },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.ChevronRight,
+                                            contentDescription = shiftLaterLabel,
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        VerticalDivider(color = colors.hairlineDivider, thickness = 0.85.dp)
+
+        // Right Synchronized Horizontal Timeline Grid + Bars + Dependency Bézier Curves
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .horizontalScroll(horizontalScrollState)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(totalTimelineWidthDp)
+                    .height(totalHeightDp)
+            ) {
+                // Grid Background + Today Accent Line
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val h = size.height
+                    for (i in 0 until layout.totalDays) {
+                        val day = layout.startEpochDay + i
+                        val x = i * dayWidthPx
+                        val dow = LocalDate.ofEpochDay(day).dayOfWeek
+                        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+                            drawRect(
+                                color = colors.tagPillBg.copy(alpha = 0.35f),
+                                topLeft = Offset(x, 0f),
+                                size = androidx.compose.ui.geometry.Size(dayWidthPx, h)
+                            )
+                        }
+                        drawLine(
+                            color = colors.hairlineDivider.copy(alpha = 0.55f),
+                            start = Offset(x, 0f),
+                            end = Offset(x, h),
+                            strokeWidth = 1f
+                        )
+                    }
+
+                    // Horizontal row separators
+                    var rowY = 0f
+                    displayRows.forEach { row ->
+                        rowY += when (row) {
+                            is RoadmapDisplayRow.PhaseRow -> phaseRowPx
+                            is RoadmapDisplayRow.TaskRow -> taskRowPx
+                        }
+                        drawLine(
+                            color = colors.hairlineDivider.copy(alpha = 0.45f),
+                            start = Offset(0f, rowY),
+                            end = Offset(size.width, rowY),
+                            strokeWidth = 1f
+                        )
+                    }
+
+                    // Vertical Today Accent Line
+                    if (layout.todayEpochDay in layout.startEpochDay..layout.endEpochDay) {
+                        val todayX = (layout.todayEpochDay - layout.startEpochDay) * dayWidthPx + dayWidthPx * 0.5f
+                        drawLine(
+                            color = colors.thingsBlue.copy(alpha = 0.72f),
+                            start = Offset(todayX, 0f),
+                            end = Offset(todayX, h),
+                            strokeWidth = 2.dp.toPx()
+                        )
+                    }
+                }
+
+                // Phase Bars & Task Bars with Horizontal Drag-to-Reschedule
+                displayRows.forEachIndexed { idx, row ->
+                    val topDp = rowTopsDp[idx]
+                    when (row) {
+                        is RoadmapDisplayRow.PhaseRow -> {
+                            val pb = row.phaseBar
+                            val heading = row.heading
+                            if (pb != null && heading != null) {
+                                RoadmapDraggablePhaseBar(
+                                    phaseBar = pb,
+                                    startEpochDayWindow = layout.startEpochDay,
+                                    topDp = topDp,
+                                    dayWidthDp = dayWidthDp,
+                                    dayWidthPx = dayWidthPx,
+                                    previewDelta = livePreviewDeltaDays["phase_${heading.id}"] ?: 0L,
+                                    onPreviewDeltaChanged = { delta ->
+                                        if (delta == 0L) livePreviewDeltaDays.remove("phase_${heading.id}")
+                                        else livePreviewDeltaDays["phase_${heading.id}"] = delta
+                                    },
+                                    onCommitShift = { delta ->
+                                        onShiftHeadingDates(heading, delta, pb.startEpochDay to pb.endEpochDay)
+                                    }
+                                )
+                            }
+                        }
+
+                        is RoadmapDisplayRow.TaskRow -> {
+                            val tb = row.taskBar
+                            RoadmapDraggableTaskBar(
+                                taskBar = tb,
+                                startEpochDayWindow = layout.startEpochDay,
+                                todayEpochDay = layout.todayEpochDay,
+                                topDp = topDp,
+                                dayWidthDp = dayWidthDp,
+                                dayWidthPx = dayWidthPx,
+                                previewDelta = livePreviewDeltaDays["task_${tb.taskId}"] ?: 0L,
+                                onPreviewDeltaChanged = { delta ->
+                                    if (delta == 0L) livePreviewDeltaDays.remove("task_${tb.taskId}")
+                                    else livePreviewDeltaDays["task_${tb.taskId}"] = delta
+                                },
+                                onCommitShift = { delta ->
+                                    onShiftTaskDates(tb.task, delta)
+                                },
+                                onClickTask = { onOpenTaskEditor(tb.taskId) }
+                            )
+                        }
+                    }
+                }
+
+                // Dependency Connector Overlay (Smooth Cubic-Bézier S-Curves + Arrowheads)
+                if (layout.dependencyEdges.isNotEmpty()) {
+                    val activeEdgeColor = colors.somedayWarmAmber
+                    val resolvedEdgeColor = colors.thingsBlue.copy(alpha = 0.55f)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val hPad = 3.dp.toPx()
+                        val strokeW = 1.85.dp.toPx()
+                        val arrowSize = 6.dp.toPx()
+
+                        for (edge in layout.dependencyEdges) {
+                            val fromInfo = taskRowGeometry[edge.fromTaskId] ?: continue
+                            val toInfo = taskRowGeometry[edge.toTaskId] ?: continue
+
+                            val fromDelta = livePreviewDeltaDays["task_${edge.fromTaskId}"] ?: 0L
+                            val toDelta = livePreviewDeltaDays["task_${edge.toTaskId}"] ?: 0L
+
+                            val fromEndIdx = (fromInfo.third.endEpochDay + fromDelta - layout.startEpochDay + 1L)
+                            val toStartIdx = (toInfo.third.startEpochDay + toDelta - layout.startEpochDay)
+
+                            val startX = fromEndIdx * dayWidthPx - hPad
+                            val startY = fromInfo.first + fromInfo.second * 0.5f
+                            val endX = toStartIdx * dayWidthPx + hPad
+                            val endY = toInfo.first + toInfo.second * 0.5f
+
+                            val dx = kotlin.math.abs(endX - startX)
+                            val ctrlOffset = maxOf(dx * 0.48f, 18.dp.toPx())
+                            val c1X = startX + ctrlOffset
+                            val c1Y = startY
+                            val c2X = endX - ctrlOffset
+                            val c2Y = endY
+
+                            val curveColor = if (edge.isActivelyBlocking) activeEdgeColor else resolvedEdgeColor
+                            val path = Path().apply {
+                                moveTo(startX, startY)
+                                cubicTo(c1X, c1Y, c2X, c2Y, endX, endY)
+                            }
+                            drawPath(
+                                path = path,
+                                color = curveColor,
+                                style = Stroke(
+                                    width = strokeW,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
+                                )
+                            )
+
+                            val angle = atan2(endY - c2Y, endX - c2X)
+                            val arrowPath = Path().apply {
+                                moveTo(endX, endY)
+                                lineTo(
+                                    endX - arrowSize * cos(angle - 0.52f),
+                                    endY - arrowSize * sin(angle - 0.52f)
+                                )
+                                lineTo(
+                                    endX - arrowSize * cos(angle + 0.52f),
+                                    endY - arrowSize * sin(angle + 0.52f)
+                                )
+                                close()
+                            }
+                            drawPath(path = arrowPath, color = curveColor)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoadmapDraggablePhaseBar(
+    phaseBar: RoadmapPhaseBar,
+    startEpochDayWindow: Long,
+    topDp: Dp,
+    dayWidthDp: Dp,
+    dayWidthPx: Float,
+    previewDelta: Long,
+    onPreviewDeltaChanged: (Long) -> Unit,
+    onCommitShift: (Long) -> Unit
+) {
+    val haptics = LocalHapticFeedback.current
+    val currentDayWidthPx by rememberUpdatedState(dayWidthPx)
+    val currentOnPreview by rememberUpdatedState(onPreviewDeltaChanged)
+    val currentOnCommit by rememberUpdatedState(onCommitShift)
+
+    val effectiveStartDay = phaseBar.startEpochDay + previewDelta
+    val spanDays = phaseBar.spanDays
+    val xOffsetDp = dayWidthDp * (effectiveStartDay - startEpochDayWindow).toInt()
+    val barWidthDp = (dayWidthDp * spanDays).coerceAtLeast(dayWidthDp)
+
+    val gradientBrush = Brush.horizontalGradient(
+        colors = if (phaseBar.hasExplicitDates) {
+            listOf(GlacierGradientStart, GlacierGradientEnd)
+        } else {
+            listOf(GlacierGradientStart.copy(alpha = 0.78f), GlacierGradientEnd.copy(alpha = 0.78f))
+        }
+    )
+
+    Box(
+        modifier = Modifier
+            .offset(x = xOffsetDp, y = topDp + 7.dp)
+            .width(barWidthDp)
+            .height(PHASE_ROW_HEIGHT - 14.dp)
+            .padding(horizontal = 3.dp)
+            .shadow(if (previewDelta != 0L) 6.dp else 2.dp, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(gradientBrush)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .pointerInput(phaseBar.headingId) {
+                var rawDragPx = 0f
+                var lastDelta = 0L
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        rawDragPx = 0f
+                        lastDelta = 0L
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        rawDragPx += dragAmount
+                        val snapped = if (currentDayWidthPx > 1f) {
+                            (rawDragPx / currentDayWidthPx).roundToInt().toLong()
+                        } else 0L
+                        if (snapped != lastDelta) {
+                            lastDelta = snapped
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            currentOnPreview(snapped)
+                        }
+                    },
+                    onDragEnd = {
+                        val finalDelta = lastDelta
+                        currentOnPreview(0L)
+                        if (finalDelta != 0L) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            currentOnCommit(finalDelta)
+                        }
+                    },
+                    onDragCancel = {
+                        currentOnPreview(0L)
+                    }
+                )
+            }
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = buildString {
+                append(phaseBar.title)
+                if (previewDelta != 0L) {
+                    append(if (previewDelta > 0) " (+${previewDelta}d)" else " (${previewDelta}d)")
+                }
+            },
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun RoadmapDraggableTaskBar(
+    taskBar: RoadmapTaskBar,
+    startEpochDayWindow: Long,
+    todayEpochDay: Long,
+    topDp: Dp,
+    dayWidthDp: Dp,
+    dayWidthPx: Float,
+    previewDelta: Long,
+    onPreviewDeltaChanged: (Long) -> Unit,
+    onCommitShift: (Long) -> Unit,
+    onClickTask: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+    val currentDayWidthPx by rememberUpdatedState(dayWidthPx)
+    val currentOnPreview by rememberUpdatedState(onPreviewDeltaChanged)
+    val currentOnCommit by rememberUpdatedState(onCommitShift)
+
+    val effectiveStartDay = taskBar.startEpochDay + previewDelta
+    val effectiveEndDay = taskBar.endEpochDay + previewDelta
+    val spanDays = taskBar.spanDays
+    val xOffsetDp = dayWidthDp * (effectiveStartDay - startEpochDayWindow).toInt()
+    val barWidthDp = (dayWidthDp * spanDays).coerceAtLeast(dayWidthDp)
+
+    val isOverdue = taskBar.task.status == TaskStatus.OPEN &&
+        taskBar.task.deadline != null &&
+        effectiveEndDay < todayEpochDay
+
+    val barFill = when {
+        taskBar.task.status != TaskStatus.OPEN -> colors.tagPillBg
+        isOverdue -> colors.deadlineSoftBg
+        taskBar.isActivelyBlocked -> colors.somedayWarmAmber.copy(alpha = 0.16f)
+        else -> colors.thingsBlueSoft
+    }
+    val barBorder = when {
+        taskBar.task.status != TaskStatus.OPEN -> colors.hairlineDivider
+        isOverdue -> colors.deadlineUrgentRed.copy(alpha = 0.65f)
+        taskBar.isActivelyBlocked -> colors.somedayWarmAmber.copy(alpha = 0.72f)
+        else -> colors.thingsBlue.copy(alpha = 0.58f)
+    }
+    val barTextColor = when {
+        taskBar.task.status != TaskStatus.OPEN -> colors.secondaryText
+        isOverdue -> colors.deadlineUrgentRed
+        taskBar.isActivelyBlocked -> colors.somedayWarmAmber
+        else -> colors.primaryText
+    }
+
+    Box(
+        modifier = Modifier
+            .offset(x = xOffsetDp, y = topDp + 6.dp)
+            .width(barWidthDp)
+            .height(TASK_ROW_HEIGHT - 12.dp)
+            .padding(horizontal = 3.dp)
+            .shadow(if (previewDelta != 0L) 5.dp else 1.dp, RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(8.dp))
+            .background(barFill)
+            .border(1.1.dp, barBorder, RoundedCornerShape(8.dp))
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(onClick = onClickTask)
+            .pointerInput(taskBar.taskId) {
+                var rawDragPx = 0f
+                var lastDelta = 0L
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        rawDragPx = 0f
+                        lastDelta = 0L
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        rawDragPx += dragAmount
+                        val snapped = if (currentDayWidthPx > 1f) {
+                            (rawDragPx / currentDayWidthPx).roundToInt().toLong()
+                        } else 0L
+                        if (snapped != lastDelta) {
+                            lastDelta = snapped
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            currentOnPreview(snapped)
+                        }
+                    },
+                    onDragEnd = {
+                        val finalDelta = lastDelta
+                        currentOnPreview(0L)
+                        if (finalDelta != 0L) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            currentOnCommit(finalDelta)
+                        }
+                    },
+                    onDragCancel = {
+                        currentOnPreview(0L)
+                    }
+                )
+            }
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = buildString {
+                if (taskBar.isActivelyBlocked) append("⏳ ")
+                append(taskBar.title.ifBlank { "To-Do" })
+                if (previewDelta != 0L) {
+                    append(if (previewDelta > 0) " (+${previewDelta}d)" else " (${previewDelta}d)")
+                }
+            },
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.SemiBold
+            ),
+            color = barTextColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+// =============================================================================
+// 1-Click PDF & PNG Roadmap Exporter (`android.graphics.Canvas` + `FileProvider`)
+// =============================================================================
+
+object RoadmapExporter {
+
+    private const val EXPORT_HEADER_H = 76f
+    private const val EXPORT_DAY_HEADER_H = 44f
+    private const val EXPORT_LABEL_W = 240f
+    private const val EXPORT_DAY_W = 42f
+    private const val EXPORT_PHASE_H = 40f
+    private const val EXPORT_TASK_H = 34f
+    private const val EXPORT_PADDING = 24f
+
+    suspend fun exportAndShareRoadmap(
+        context: Context,
+        layout: ProjectRoadmapLayout,
+        headingCounts: Map<String, Pair<Int, Int>>,
+        locale: Locale,
+        isDark: Boolean,
+        asPdf: Boolean,
+        exportChooserTitle: String
+    ) {
+        val generalLabel = context.getString(R.string.v30_board_ungrouped_column)
+        val outFile = withContext(Dispatchers.IO) {
+            val rows = buildExportRows(layout, headingCounts, generalLabel)
+            val rowsHeight = rows.sumOf {
+                (if (it is RoadmapDisplayRow.PhaseRow) EXPORT_PHASE_H else EXPORT_TASK_H).toDouble()
+            }.toFloat().coerceAtLeast(72f)
+
+            val totalWidth = (EXPORT_PADDING * 2f + EXPORT_LABEL_W + layout.totalDays * EXPORT_DAY_W).roundToInt()
+            val totalHeight = (EXPORT_PADDING * 2f + EXPORT_HEADER_H + EXPORT_DAY_HEADER_H + rowsHeight).roundToInt()
+
+            val backupsDir = File(context.cacheDir, "backups").apply { mkdirs() }
+            val safeProjectSlug = layout.project.title
+                .replace(Regex("[^A-Za-z0-9_-]+"), "-")
+                .trim('-')
+                .take(40)
+                .ifEmpty { "Project" }
+            val dateStamp = LocalDate.now().toString()
+            val ext = if (asPdf) "pdf" else "png"
+            val targetFile = File(backupsDir, "Thingsbook-Roadmap-$safeProjectSlug-$dateStamp.$ext")
+
+            if (asPdf) {
+                val pdfDoc = PdfDocument()
+                try {
+                    val pageInfo = PdfDocument.PageInfo.Builder(totalWidth, totalHeight, 1).create()
+                    val page = pdfDoc.startPage(pageInfo)
+                    drawRoadmapToAndroidCanvas(
+                        canvas = page.canvas,
+                        layout = layout,
+                        rows = rows,
+                        totalWidth = totalWidth.toFloat(),
+                        totalHeight = totalHeight.toFloat(),
+                        locale = locale,
+                        isDark = isDark
+                    )
+                    pdfDoc.finishPage(page)
+                    FileOutputStream(targetFile).use { out ->
+                        pdfDoc.writeTo(out)
+                        out.flush()
+                    }
+                } finally {
+                    pdfDoc.close()
+                }
+            } else {
+                val maxBitmapDim = 4096f
+                val scale = minOf(1f, maxBitmapDim / maxOf(totalWidth.toFloat(), totalHeight.toFloat()))
+                val bmpW = (totalWidth * scale).roundToInt().coerceAtLeast(1)
+                val bmpH = (totalHeight * scale).roundToInt().coerceAtLeast(1)
+                val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                try {
+                    val bmpCanvas = android.graphics.Canvas(bitmap)
+                    bmpCanvas.scale(scale, scale)
+                    drawRoadmapToAndroidCanvas(
+                        canvas = bmpCanvas,
+                        layout = layout,
+                        rows = rows,
+                        totalWidth = totalWidth.toFloat(),
+                        totalHeight = totalHeight.toFloat(),
+                        locale = locale,
+                        isDark = isDark
+                    )
+                    FileOutputStream(targetFile).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        out.flush()
+                    }
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+            targetFile
+        }
+
+        val shareUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            outFile
+        )
+        val mimeType = if (asPdf) "application/pdf" else "image/png"
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_SUBJECT, "${layout.project.title} — Roadmap")
+            putExtra(Intent.EXTRA_STREAM, shareUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(sendIntent, exportChooserTitle).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(chooser)
+    }
+
+    private fun buildExportRows(
+        layout: ProjectRoadmapLayout,
+        headingCounts: Map<String, Pair<Int, Int>>,
+        generalLabel: String
+    ): List<RoadmapDisplayRow> {
+        val rows = mutableListOf<RoadmapDisplayRow>()
+        for (lane in layout.lanes) {
+            val h = lane.heading
+            val counts = h?.let { headingCounts[it.id] }
+            val completed = counts?.first ?: 0
+            val total = counts?.second ?: (lane.taskBars.size + lane.unscheduledTasks.size)
+            rows += RoadmapDisplayRow.PhaseRow(
+                heading = h,
+                title = h?.title?.ifBlank { generalLabel } ?: generalLabel,
+                phaseBar = lane.phaseBar,
+                completedCount = completed,
+                totalCount = total
+            )
+            for (tb in lane.taskBars) {
+                rows += RoadmapDisplayRow.TaskRow(tb)
+            }
+        }
+        return rows
+    }
+
+    fun drawRoadmapToAndroidCanvas(
+        canvas: android.graphics.Canvas,
+        layout: ProjectRoadmapLayout,
+        headingCounts: Map<String, Pair<Int, Int>> = emptyMap(),
+        locale: Locale = Locale.getDefault(),
+        isDark: Boolean = false
+    ) {
+        val rows = buildExportRows(layout, headingCounts, "General")
+        val rowsHeight = rows.sumOf {
+            (if (it is RoadmapDisplayRow.PhaseRow) EXPORT_PHASE_H else EXPORT_TASK_H).toDouble()
+        }.toFloat().coerceAtLeast(72f)
+        val totalWidth = EXPORT_PADDING * 2f + EXPORT_LABEL_W + layout.totalDays * EXPORT_DAY_W
+        val totalHeight = EXPORT_PADDING * 2f + EXPORT_HEADER_H + EXPORT_DAY_HEADER_H + rowsHeight
+        drawRoadmapToAndroidCanvas(canvas, layout, rows, totalWidth, totalHeight, locale, isDark)
+    }
+
+    private fun drawRoadmapToAndroidCanvas(
+        canvas: android.graphics.Canvas,
+        layout: ProjectRoadmapLayout,
+        rows: List<RoadmapDisplayRow>,
+        totalWidth: Float,
+        totalHeight: Float,
+        locale: Locale,
+        isDark: Boolean
+    ) {
+        val bgArgb = if (isDark) 0xFF121417.toInt() else 0xFFFFFFFF.toInt()
+        val cardArgb = if (isDark) 0xFF1B1F25.toInt() else 0xFFF9FAFC.toInt()
+        val sidebarArgb = if (isDark) 0xFF171A1E.toInt() else 0xFFF3F5F9.toInt()
+        val dividerArgb = if (isDark) 0xFF2B313B.toInt() else 0xFFE4E8F0.toInt()
+        val primaryTextArgb = if (isDark) 0xFFF3F5F8.toInt() else 0xFF15181E.toInt()
+        val secondaryTextArgb = if (isDark) 0xFF9AA3B2.toInt() else 0xFF5F6775.toInt()
+        val blueArgb = if (isDark) 0xFF6BC0FF.toInt() else 0xFF3898EC.toInt()
+        val blueSoftArgb = if (isDark) 0xFF1A3047.toInt() else 0xFFE5F3FF.toInt()
+        val amberArgb = if (isDark) 0xFFFBBF24.toInt() else 0xFFD69F3A.toInt()
+
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryTextArgb
+            textSize = 22f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = secondaryTextArgb
+            textSize = 12.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        }
+        val rowBoldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryTextArgb
+            textSize = 12.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val rowRegularPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryTextArgb
+            textSize = 11.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        }
+
+        // Background
+        fillPaint.color = bgArgb
+        canvas.drawRect(0f, 0f, totalWidth, totalHeight, fillPaint)
+
+        // Header Title + Date Range
+        val fmt = DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM yyyy" else "MMM d, yyyy", locale)
+        val rangeText = "${LocalDate.ofEpochDay(layout.startEpochDay).format(fmt)} – ${LocalDate.ofEpochDay(layout.endEpochDay).format(fmt)}"
+        canvas.drawText(layout.project.title, EXPORT_PADDING, EXPORT_PADDING + 28f, titlePaint)
+        canvas.drawText(
+            "Thingsbook Roadmap  •  $rangeText  •  ${layout.project.completedTaskCount}/${layout.project.totalTaskCount}",
+            EXPORT_PADDING,
+            EXPORT_PADDING + 50f,
+            subtitlePaint
+        )
+
+        val tableLeft = EXPORT_PADDING
+        val tableTop = EXPORT_PADDING + EXPORT_HEADER_H
+        val tableRight = totalWidth - EXPORT_PADDING
+        val tableBottom = totalHeight - EXPORT_PADDING
+        val timelineLeft = tableLeft + EXPORT_LABEL_W
+        val bodyTop = tableTop + EXPORT_DAY_HEADER_H
+
+        // Table surface
+        fillPaint.color = cardArgb
+        canvas.drawRoundRect(RectF(tableLeft, tableTop, tableRight, tableBottom), 16f, 16f, fillPaint)
+
+        // Left column & header strip shading
+        fillPaint.color = sidebarArgb
+        canvas.drawRect(tableLeft, tableTop, timelineLeft, tableBottom, fillPaint)
+        canvas.drawRect(tableLeft, tableTop, tableRight, bodyTop, fillPaint)
+
+        // Day headers & vertical grid
+        val dayNumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10.5f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val monthShortFmt = DateTimeFormatter.ofPattern("MMM", locale)
+        for (i in 0 until layout.totalDays) {
+            val day = layout.startEpochDay + i
+            val d = LocalDate.ofEpochDay(day)
+            val colLeft = timelineLeft + i * EXPORT_DAY_W
+            val colCenter = colLeft + EXPORT_DAY_W * 0.5f
+            val isToday = day == layout.todayEpochDay
+            val isWeekend = d.dayOfWeek == DayOfWeek.SATURDAY || d.dayOfWeek == DayOfWeek.SUNDAY
+
+            if (isToday) {
+                fillPaint.color = blueSoftArgb
+                canvas.drawRect(colLeft, tableTop, colLeft + EXPORT_DAY_W, tableBottom, fillPaint)
+            } else if (isWeekend) {
+                fillPaint.color = if (isDark) 0x22FFFFFF else 0x0A000000
+                canvas.drawRect(colLeft, bodyTop, colLeft + EXPORT_DAY_W, tableBottom, fillPaint)
+            }
+
+            if (i == 0 || d.dayOfMonth == 1) {
+                dayNumPaint.color = blueArgb
+                canvas.drawText(d.format(monthShortFmt).uppercase(locale), colCenter, tableTop + 15f, dayNumPaint)
+            }
+            dayNumPaint.color = if (isToday) blueArgb else secondaryTextArgb
+            canvas.drawText(d.dayOfMonth.toString(), colCenter, tableTop + 33f, dayNumPaint)
+
+            strokePaint.color = dividerArgb
+            strokePaint.strokeWidth = 1f
+            canvas.drawLine(colLeft, tableTop, colLeft, tableBottom, strokePaint)
+        }
+
+        // Rows, Phase Glacier-Blue Bars, and Soft Bento Task Bars
+        val taskGeometry = HashMap<String, Triple<Float, Float, RoadmapTaskBar>>()
+        var curY = bodyTop
+        for (row in rows) {
+            when (row) {
+                is RoadmapDisplayRow.PhaseRow -> {
+                    fillPaint.color = if (isDark) 0x223898EC else 0x143898EC
+                    canvas.drawRect(tableLeft, curY, timelineLeft, curY + EXPORT_PHASE_H, fillPaint)
+                    canvas.drawText(
+                        ellipsizeText(row.title, rowBoldPaint, EXPORT_LABEL_W - 24f),
+                        tableLeft + 12f,
+                        curY + 25f,
+                        rowBoldPaint
+                    )
+                    val pb = row.phaseBar
+                    if (pb != null) {
+                        val barLeft = timelineLeft + (pb.startEpochDay - layout.startEpochDay) * EXPORT_DAY_W + 3f
+                        val barRight = timelineLeft + (pb.endEpochDay - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+                        val barRect = RectF(barLeft, curY + 7f, maxOf(barLeft + 16f, barRight), curY + EXPORT_PHASE_H - 7f)
+                        val gradPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            style = Paint.Style.FILL
+                            shader = LinearGradient(
+                                barRect.left,
+                                barRect.top,
+                                barRect.right,
+                                barRect.top,
+                                0xFF74C4FF.toInt(),
+                                0xFF3898EC.toInt(),
+                                Shader.TileMode.CLAMP
+                            )
+                        }
+                        canvas.drawRoundRect(barRect, 9f, 9f, gradPaint)
+                        val barTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = 0xFFFFFFFF.toInt()
+                            textSize = 11f
+                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        }
+                        canvas.drawText(
+                            ellipsizeText(pb.title, barTextPaint, (barRect.width() - 14f).coerceAtLeast(0f)),
+                            barRect.left + 8f,
+                            barRect.centerY() + 4f,
+                            barTextPaint
+                        )
+                    }
+                    curY += EXPORT_PHASE_H
+                }
+
+                is RoadmapDisplayRow.TaskRow -> {
+                    val tb = row.taskBar
+                    taskGeometry[tb.taskId] = Triple(curY, EXPORT_TASK_H, tb)
+                    canvas.drawText(
+                        ellipsizeText("• ${tb.title.ifBlank { "To-Do" }}", rowRegularPaint, EXPORT_LABEL_W - 28f),
+                        tableLeft + 16f,
+                        curY + 21f,
+                        rowRegularPaint
+                    )
+                    val barLeft = timelineLeft + (tb.startEpochDay - layout.startEpochDay) * EXPORT_DAY_W + 3f
+                    val barRight = timelineLeft + (tb.endEpochDay - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+                    val barRect = RectF(barLeft, curY + 5f, maxOf(barLeft + 14f, barRight), curY + EXPORT_TASK_H - 5f)
+
+                    fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
+                    canvas.drawRoundRect(barRect, 7f, 7f, fillPaint)
+
+                    strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
+                    strokePaint.strokeWidth = 1.3f
+                    canvas.drawRoundRect(barRect, 7f, 7f, strokePaint)
+
+                    val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
+                        textSize = 10.5f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    }
+                    canvas.drawText(
+                        ellipsizeText(tb.title.ifBlank { "To-Do" }, taskBarTextPaint, (barRect.width() - 12f).coerceAtLeast(0f)),
+                        barRect.left + 6f,
+                        barRect.centerY() + 3.8f,
+                        taskBarTextPaint
+                    )
+                    curY += EXPORT_TASK_H
+                }
+            }
+            strokePaint.color = dividerArgb
+            strokePaint.strokeWidth = 1f
+            canvas.drawLine(tableLeft, curY, tableRight, curY, strokePaint)
+        }
+
+        // Today vertical line
+        if (layout.todayEpochDay in layout.startEpochDay..layout.endEpochDay) {
+            val todayX = timelineLeft + (layout.todayEpochDay - layout.startEpochDay) * EXPORT_DAY_W + EXPORT_DAY_W * 0.5f
+            val todayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = blueArgb
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+                pathEffect = DashPathEffect(floatArrayOf(6f, 4f), 0f)
+            }
+            canvas.drawLine(todayX, bodyTop, todayX, tableBottom, todayPaint)
+        }
+
+        // Dependency Cubic-Bézier Curves + Arrowheads
+        for (edge in layout.dependencyEdges) {
+            val fromGeom = taskGeometry[edge.fromTaskId] ?: continue
+            val toGeom = taskGeometry[edge.toTaskId] ?: continue
+            val sx = timelineLeft + (fromGeom.third.endEpochDay - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+            val sy = fromGeom.first + fromGeom.second * 0.5f
+            val ex = timelineLeft + (toGeom.third.startEpochDay - layout.startEpochDay) * EXPORT_DAY_W + 3f
+            val ey = toGeom.first + toGeom.second * 0.5f
+            val ctrl = maxOf(kotlin.math.abs(ex - sx) * 0.48f, 18f)
+            val c1x = sx + ctrl
+            val c2x = ex - ctrl
+
+            val edgeColor = if (edge.isActivelyBlocking) amberArgb else blueArgb
+            val curvePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = edgeColor
+                style = Paint.Style.STROKE
+                strokeWidth = 1.8f
+                strokeCap = Paint.Cap.ROUND
+            }
+            val path = android.graphics.Path().apply {
+                moveTo(sx, sy)
+                cubicTo(c1x, sy, c2x, ey, ex, ey)
+            }
+            canvas.drawPath(path, curvePaint)
+
+            val angle = atan2(ey - ey, ex - c2x)
+            val arrowLen = 6f
+            val arrowPath = android.graphics.Path().apply {
+                moveTo(ex, ey)
+                lineTo(ex - arrowLen * cos(angle - 0.52f), ey - arrowLen * sin(angle - 0.52f))
+                lineTo(ex - arrowLen * cos(angle + 0.52f), ey - arrowLen * sin(angle + 0.52f))
+                close()
+            }
+            fillPaint.color = edgeColor
+            canvas.drawPath(arrowPath, fillPaint)
+        }
+
+        // Outer table frame & label divider
+        strokePaint.color = dividerArgb
+        strokePaint.strokeWidth = 1.2f
+        canvas.drawLine(timelineLeft, tableTop, timelineLeft, tableBottom, strokePaint)
+        canvas.drawLine(tableLeft, bodyTop, tableRight, bodyTop, strokePaint)
+        canvas.drawRoundRect(RectF(tableLeft, tableTop, tableRight, tableBottom), 16f, 16f, strokePaint)
+    }
+
+    private fun ellipsizeText(text: String, paint: Paint, maxWidth: Float): String {
+        if (maxWidth <= 8f || text.isEmpty()) return ""
+        if (paint.measureText(text) <= maxWidth) return text
+        val ellipsis = "…"
+        var low = 0
+        var high = text.length
+        while (low < high) {
+            val mid = (low + high + 1) / 2
+            if (paint.measureText(text.substring(0, mid) + ellipsis) <= maxWidth) {
+                low = mid
+            } else {
+                high = mid - 1
+            }
+        }
+        return if (low <= 0) "" else text.substring(0, low) + ellipsis
+    }
+}

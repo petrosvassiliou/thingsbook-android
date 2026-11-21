@@ -202,6 +202,7 @@ private val CUSTOM_DURATION_HOUR_UNITS = setOf(
 private val CUSTOM_DURATION_MIN_UNITS = setOf(
     "m", "min", "mins", "minute", "minutes", "minuten", "minuto", "minuti", "minutos"
 )
+private val CUSTOM_DURATION_PLAIN_NUMBER_REGEX = Regex("""^\d+(?:\.\d+)?$""")
 private val CUSTOM_DURATION_TOKEN_REGEX = Regex("""(\d+(?:\.\d+)?)\s*([a-zA-Zäöüßáéíóúàèìòù]+)""")
 
 fun parseCustomDurationMinutes(rawInput: String): Int? {
@@ -219,8 +220,9 @@ fun parseCustomDurationMinutes(rawInput: String): Int? {
         return null
     }
 
-    normalized.toDoubleOrNull()?.let { plain ->
-        if (plain.isFinite()) {
+    if (CUSTOM_DURATION_PLAIN_NUMBER_REGEX.matches(normalized)) {
+        val plain = normalized.toDoubleOrNull()
+        if (plain != null && plain.isFinite()) {
             val rounded = kotlin.math.round(plain).toInt()
             return if (rounded > 0) rounded.coerceAtMost(48_000) else null
         }

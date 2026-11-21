@@ -528,7 +528,8 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         }
 
         // Plain integer/decimal without unit defaults to minutes (e.g. "45" -> 45m)
-        if let plainMinutes = Double(normalized), plainMinutes.isFinite {
+        if normalized.range(of: #"^\d+(?:\.\d+)?$"#, options: .regularExpression) != nil,
+           let plainMinutes = Double(normalized), plainMinutes.isFinite {
             let rounded = Int(plainMinutes.rounded())
             return rounded > 0 ? min(48_000, rounded) : nil
         }

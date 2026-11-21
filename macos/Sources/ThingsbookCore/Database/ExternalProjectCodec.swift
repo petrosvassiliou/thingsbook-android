@@ -902,7 +902,10 @@ public enum ExternalProjectCodec {
 
         if let rootArray = jsonObj as? [[String: Any]] {
             ingestFlatTaskArray(rootArray)
-        } else if let rootDict = jsonObj as? [String: Any] {
+        } else if let rawRootDict = jsonObj as? [String: Any] {
+            let rootDict: [String: Any] = (rawRootDict["project"] == nil && rawRootDict["sections"] == nil && rawRootDict["phases"] == nil)
+                ? ((rawRootDict["data"] as? [String: Any]) ?? rawRootDict)
+                : rawRootDict
             // 1. Project metadata (`project` can be String or Dictionary, or top-level `title` / `name`)
             if let projStr = rootDict["project"] as? String {
                 let clean = projStr.trimmingCharacters(in: .whitespacesAndNewlines)

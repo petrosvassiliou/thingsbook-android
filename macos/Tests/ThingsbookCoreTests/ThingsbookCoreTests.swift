@@ -5351,9 +5351,7 @@ final class ThingsbookCoreTests: XCTestCase {
             calendar: cal
         )
         let rawExportObj = try XCTUnwrap(JSONSerialization.jsonObject(with: exportedAsana.data) as? [String: Any])
-        let dataObj = try XCTUnwrap(rawExportObj["data"] as? [String: Any])
-        let sectionsArr = try XCTUnwrap(dataObj["sections"] as? [[String: Any]])
-        let exportedSectionTasks = try XCTUnwrap(sectionsArr.first?["tasks"] as? [[String: Any]])
+        let exportedSectionTasks = try XCTUnwrap(rawExportObj["data"] as? [[String: Any]])
         let switchoverJson = try XCTUnwrap(exportedSectionTasks.first { ($0["name"] as? String) == "Zero-Downtime DNS Switchover" })
         let runbooksJson = try XCTUnwrap(exportedSectionTasks.first { ($0["name"] as? String) == "Update runbooks" })
         XCTAssertEqual(switchoverJson["resource_subtype"] as? String, "milestone")

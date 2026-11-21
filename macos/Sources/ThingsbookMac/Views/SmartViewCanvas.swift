@@ -1073,6 +1073,7 @@ public struct SmartViewCanvas: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, unheadedTasks.isEmpty ? 8 : 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(ThingsMacPalette.subtleContainer.opacity(unheadedTasks.isEmpty ? 0.42 : 0.68))
@@ -1264,6 +1265,7 @@ public struct SmartViewCanvas: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(ThingsMacPalette.subtleContainer.opacity(0.68))
@@ -1837,6 +1839,7 @@ public struct SmartViewCanvas: View {
                 }
                 .padding(.horizontal, 13)
                 .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(ThingsMacPalette.subtleContainer.opacity(0.65))
@@ -1847,6 +1850,7 @@ public struct SmartViewCanvas: View {
                 )
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

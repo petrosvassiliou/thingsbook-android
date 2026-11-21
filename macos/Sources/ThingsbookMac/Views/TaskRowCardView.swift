@@ -157,10 +157,9 @@ public struct TaskRowCardView: View {
                         .lineLimit(1)
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 8)
-
-            // Trailing metadata badges + subtle hover Quick Edit / When / Open Details buttons
+            // Trailing metadata badges + permanently reserved hover Quick Edit / When / Open Details slot (zero layout shift on hover)
             HStack(spacing: 6) {
                 if let blockedBadge = store.blockedByBadgeText(for: task) {
                     Button {
@@ -172,6 +171,8 @@ public struct TaskRowCardView: View {
                             Text(blockedBadge)
                                 .font(.system(size: 11, weight: .semibold))
                                 .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: 230, alignment: .leading)
                         }
                         .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.somedayAmber)
@@ -219,6 +220,7 @@ public struct TaskRowCardView: View {
                         Text("\(task.attachments.count)")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
@@ -235,7 +237,9 @@ public struct TaskRowCardView: View {
                                 .font(.system(size: 10, weight: .semibold))
                             Text(tbPill)
                                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.anytimeTeal)
                         .padding(.horizontal, 7.5)
                         .padding(.vertical, 2.5)
@@ -313,6 +317,7 @@ public struct TaskRowCardView: View {
                         Text("\(done)/\(task.checklistItems.count)")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
@@ -366,8 +371,9 @@ public struct TaskRowCardView: View {
                     deadlineChip(dl)
                 }
 
-                if (isHoveringRow || isRowWhenPopoverOpen) && !isInlineQuickEditing {
-                    HStack(spacing: 4) {
+                if !isInlineQuickEditing {
+                    let showHoverActions = isHoveringRow || isRowWhenPopoverOpen
+                    HStack(spacing: 3) {
                         rowHoverActionButton(
                             systemImage: "pencil",
                             isHovered: isHoveringQuickEditIcon,
@@ -404,9 +410,13 @@ public struct TaskRowCardView: View {
                             store.openTaskModal(task.id)
                         }
                     }
+                    .opacity(showHoverActions ? 1.0 : 0.0)
+                    .allowsHitTesting(showHoverActions)
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
+        .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
         .opacity(isActivelyBlocked ? 0.62 : 1.0)
         .padding(.horizontal, 12)
         .padding(.vertical, 8.5)

@@ -82,3 +82,26 @@ test('v3.0.0-beta.8 Sidebar clearly separates Perspectives (Soft Bento card) fro
     'Standalone unassigned projects must also render an explicit Projects section header'
   );
 });
+
+test('v3.0.0-beta.9 Hovering over task rows never changes row or section frame dimensions (opacity-only hover actions)', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
+
+  const quickEditHoverBlock =
+    css.match(/\.task-row:hover \.task-row-quick-edit-btn[^{]*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(quickEditHoverBlock.includes('opacity: 1;'));
+  assert.ok(!quickEditHoverBlock.includes('display:'));
+  assert.ok(!quickEditHoverBlock.includes('width:'));
+  assert.ok(!quickEditHoverBlock.includes('height:'));
+
+  const openBtnHoverBlock =
+    css.match(/\.task-row:hover \.task-row-open-btn[^{]*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(openBtnHoverBlock.includes('opacity: 1;'));
+  assert.ok(!openBtnHoverBlock.includes('display:'));
+  assert.ok(!openBtnHoverBlock.includes('width:'));
+  assert.ok(!openBtnHoverBlock.includes('height:'));
+
+  const taskRowHoverBlock = css.match(/\.task-row:hover\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(!taskRowHoverBlock.includes('padding'));
+  assert.ok(!taskRowHoverBlock.includes('margin'));
+  assert.ok(!taskRowHoverBlock.includes('border'));
+});

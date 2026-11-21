@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.0.0-beta.8';
-export const APP_BUILD_CODE = 99;
+export const APP_VERSION = '3.0.0-beta.9';
+export const APP_BUILD_CODE = 100;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =

@@ -68,4 +68,30 @@ class V3Beta7LayoutPolishTest {
         assertTrue(macSidebarSwift.contains("private var standaloneProjectsSectionHeader: some View"))
         assertTrue(macSidebarSwift.contains("store.tr(\"entity_areas\").uppercased()"))
     }
+
+    @Test
+    fun `v3_0_0_beta_9 section frames and task rows never change width or height when hovering over tasks`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        val macTaskRowSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/TaskRowCardView.swift").readText()
+        assertFalse(
+            "TaskRowCardView must NOT conditionally mount/unmount hover buttons on isHoveringRow",
+            macTaskRowSwift.contains("if (isHoveringRow")
+        )
+        assertTrue(macTaskRowSwift.contains(".opacity(showHoverActions ? 1.0 : 0.0)"))
+        assertTrue(macTaskRowSwift.contains(".allowsHitTesting(showHoverActions)"))
+        assertTrue(macTaskRowSwift.contains(".frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)"))
+
+        val macBoardSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/ProjectBoardAndRoadmapView.swift").readText()
+        assertFalse(
+            "BoardTaskCard must NOT conditionally mount/unmount its hover action button",
+            macBoardSwift.contains("if isHovering {\n                    Button(action: onOpenDetail)")
+        )
+        assertTrue(macBoardSwift.contains(".opacity(isHovering ? 1.0 : 0.0)"))
+        assertTrue(macBoardSwift.contains(".allowsHitTesting(isHovering)"))
+
+        val macCanvasSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/SmartViewCanvas.swift").readText()
+        assertTrue(macCanvasSwift.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+    }
 }

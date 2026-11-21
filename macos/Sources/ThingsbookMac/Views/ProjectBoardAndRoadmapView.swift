@@ -693,16 +693,16 @@ private struct KanbanTaskCardView: View {
 
                 Spacer(minLength: 0)
 
-                if isHovering {
-                    Button(action: onOpenDetail) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("action_more_options"))
+                Button(action: onOpenDetail) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
                 }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("action_more_options"))
+                .opacity(isHovering ? 1.0 : 0.0)
+                .allowsHitTesting(isHovering)
             }
 
             if hasAnyMetadataBadges {

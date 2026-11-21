@@ -298,7 +298,17 @@ function isUngroupedSectionName(raw: string): boolean {
     norm.length === 0 ||
     norm === '(no section)' ||
     norm === 'no section' ||
-    norm === 'untitled section'
+    norm === 'untitled section' ||
+    norm === 'unbenannter abschnitt' ||
+    norm === 'kein abschnitt' ||
+    norm === '(kein abschnitt)' ||
+    norm === 'section sans titre' ||
+    norm === 'aucune section' ||
+    norm === 'sezione senza titolo' ||
+    norm === 'nessuna sezione' ||
+    norm === 'sección sin título' ||
+    norm === 'seccion sin titulo' ||
+    norm === 'sin sección'
   );
 }
 
@@ -357,17 +367,43 @@ export function importAsanaCsv(
   }
 
   const headers = rows[0].map(normalizeHeaderKey);
-  const idxTaskId = findColumnIndex(headers, ['task id', 'id', 'gid']);
-  const idxCompletedAt = findColumnIndex(headers, ['completed at', 'completed date']);
-  const idxName = findColumnIndex(headers, ['name', 'task name', 'title']);
-  const idxSection = findColumnIndex(headers, ['section/column', 'section', 'column']);
-  const idxAssignee = findColumnIndex(headers, ['assignee', 'assignee email', 'assigned to']);
-  const idxStartDate = findColumnIndex(headers, ['start date', 'start_on']);
-  const idxDueDate = findColumnIndex(headers, ['due date', 'due_on', 'deadline']);
-  const idxTags = findColumnIndex(headers, ['tags', 'categories', 'labels']);
-  const idxNotes = findColumnIndex(headers, ['notes', 'description']);
-  const idxProjects = findColumnIndex(headers, ['projects', 'project']);
-  const idxParent = findColumnIndex(headers, ['parent task', 'parent']);
+  const idxTaskId = findColumnIndex(headers, [
+    'task id', 'id', 'gid', 'aufgaben-id', 'id de la tâche', 'id de la tache', 'id attività', 'id attivita', 'id de tarea'
+  ]);
+  const idxCompletedAt = findColumnIndex(headers, [
+    'completed at', 'completed date', 'abgeschlossen am', 'erledigt am', 'terminé le', 'termine le', 'completato il', 'completada el', 'finalizado el'
+  ]);
+  const idxName = findColumnIndex(headers, [
+    'name', 'task name', 'title', 'aufgabe', 'aufgabenname', 'nom', 'nom de la tâche', 'nome', 'nombre', 'nombre de la tarea'
+  ]);
+  const idxSection = findColumnIndex(headers, [
+    'section/column', 'section', 'column', 'abschnitt/spalte', 'abschnitt', 'spalte',
+    'section/colonne', 'colonne', 'sezione/colonna', 'sezione', 'colonna', 'sección/columna', 'seccion/columna', 'sección', 'columna'
+  ]);
+  const idxAssignee = findColumnIndex(headers, [
+    'assignee', 'assignee email', 'assigned to', 'verantwortlich', 'zugewiesen an',
+    'responsable', 'assegnatario', 'incaricato', 'responsable de la tarea', 'asignado a'
+  ]);
+  const idxStartDate = findColumnIndex(headers, [
+    'start date', 'start_on', 'startdatum', 'date de début', 'date de debut', 'data di inizio', 'fecha de inicio'
+  ]);
+  const idxDueDate = findColumnIndex(headers, [
+    'due date', 'due_on', 'deadline', 'fälligkeitsdatum', 'faelligkeitsdatum',
+    'date d’échéance', "date d'échéance", "date d'echeance", 'data di scadenza', 'fecha de entrega', 'fecha de vencimiento'
+  ]);
+  const idxTags = findColumnIndex(headers, [
+    'tags', 'categories', 'labels', 'kategorien', 'étiquettes', 'etiquettes', 'etichette', 'etiquetas'
+  ]);
+  const idxNotes = findColumnIndex(headers, [
+    'notes', 'description', 'notizen', 'beschreibung', 'note', 'notas', 'descripción', 'descripcion'
+  ]);
+  const idxProjects = findColumnIndex(headers, [
+    'projects', 'project', 'projekte', 'projekt', 'projets', 'projet', 'progetti', 'progetto', 'proyectos', 'proyecto'
+  ]);
+  const idxParent = findColumnIndex(headers, [
+    'parent task', 'parent', 'parent id', 'übergeordnete aufgabe', 'uebergeordnete aufgabe',
+    'tâche parente', 'tache parente', 'attività principale', 'attivita principale', 'tarea principal', 'tarea superior'
+  ]);
 
   const cellAt = (row: readonly string[], idx: number): string =>
     idx >= 0 && idx < row.length ? row[idx].trim() : '';

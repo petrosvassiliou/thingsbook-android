@@ -741,3 +741,31 @@ test('End-to-end localDb.importExternalProject + localDb.exportProjectExternal a
   assert.equal(reimportedFromPlannerCsv.totalTaskCount, 3);
   assert.equal(reimportedFromPlannerCsv.phases[1].tasks[0].status, 'COMPLETED');
 });
+
+test('Localized German Asana CSV (Aufgaben-ID, Abschnitt/Spalte, Fälligkeitsdatum, Übergeordnete Aufgabe) imports sections, dates, notes, tags & subtasks', () => {
+  const germanAsanaCsv = [
+    '\uFEFFAufgaben-ID,Erstellt am,Abgeschlossen am,Zuletzt geändert,Name,Abschnitt/Spalte,Verantwortlich,Startdatum,Fälligkeitsdatum,Tags,Notizen,Projekte,Übergeordnete Aufgabe',
+    '9001,2026-11-01,,,Migrationskonzept,Planung,petros@corp.de,2026-11-22,2026-11-27,"IT, Infrastruktur",DFS & Exchange Umstellung,Informationsverbund 2.0,',
+    '9002,2026-11-02,2026-11-10,,DFS Migration,Planung,,,,,,Informationsverbund 2.0,Migrationskonzept',
+    '9003,2026-11-02,,,Client Umstellung,Planung,,,,,,Informationsverbund 2.0,9001',
+    '9004,2026-11-03,,,Kickoff-Protokoll,Unbenannter Abschnitt,,2026-11-20,,,,Informationsverbund 2.0,'
+  ].join('\n');
+
+  const parsed = importAsanaCsv(germanAsanaCsv);
+  assert.equal(parsed.title, 'Informationsverbund 2.0');
+  assert.equal(parsed.ungroupedTasks.length, 1);
+  assert.equal(parsed.ungroupedTasks[0].title, 'Kickoff-Protokoll');
+  assert.equal(parsed.phases.length, 1);
+  assert.equal(parsed.phases[0].title, 'Planung');
+  const mainTask = parsed.phases[0].tasks[0];
+  assert.equal(mainTask.title, 'Migrationskonzept');
+  assert.equal(mainTask.notes, 'DFS & Exchange Umstellung');
+  assert.equal(toIsoDateInputValue(mainTask.whenDate), '2026-11-22');
+  assert.equal(toIsoDateInputValue(mainTask.deadline), '2026-11-27');
+  assert.deepEqual(mainTask.tagNames, ['IT', 'Infrastruktur']);
+  assert.deepEqual(mainTask.checklistItems, [
+    { title: 'DFS Migration', isCompleted: true },
+    { title: 'Client Umstellung', isCompleted: false }
+  ]);
+});
+

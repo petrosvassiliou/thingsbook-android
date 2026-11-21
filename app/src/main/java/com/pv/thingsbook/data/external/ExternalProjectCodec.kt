@@ -301,7 +301,13 @@ object ExternalProjectCodec {
             )
         }
         val hasStrongAsana = lowerHeaders.any { h ->
-            h in setOf("section/column", "parent task", "projects")
+            h in setOf(
+                "section/column", "parent task", "projects",
+                "abschnitt/spalte", "übergeordnete aufgabe", "projekte",
+                "section/colonne", "tâche parente", "projets",
+                "sezione/colonna", "attività principale", "progetti",
+                "sección/columna", "tarea principal", "proyectos"
+            )
         }
         if (hasStrongPlanner && !hasStrongAsana) return true
         if (hasStrongAsana && !hasStrongPlanner) return false
@@ -464,7 +470,12 @@ object ExternalProjectCodec {
 
         val rawHeaders = rows.first().map { it.trim().lowercase(Locale.ROOT) }
         val hasHeader = rawHeaders.any { h ->
-            h in setOf("name", "task id", "section/column", "due date", "parent task", "title", "task name")
+            h in setOf(
+                "name", "task id", "section/column", "due date", "parent task", "title", "task name",
+                "aufgaben-id", "abschnitt/spalte", "fälligkeitsdatum", "übergeordnete aufgabe", "aufgabe", "aufgabenname",
+                "nom", "section/colonne", "tâche parente", "nome", "sezione/colonna", "attività principale",
+                "nombre", "sección/columna", "tarea principal"
+            )
         }
         val dataRows = if (hasHeader) rows.drop(1) else rows
 
@@ -473,17 +484,54 @@ object ExternalProjectCodec {
             return rawHeaders.indexOfFirst { h -> candidates.any { c -> c == h } }
         }
 
-        val idxTaskId = findCol("task id", "id", "gid", defaultIdx = 0)
-        val idxCompletedAt = findCol("completed at", "completed date", defaultIdx = 2)
-        val idxName = findCol("name", "task name", "title", defaultIdx = 4).let { if (it >= 0) it else 0 }
-        val idxSection = findCol("section/column", "section", "column", defaultIdx = 5)
-        val idxAssignee = findCol("assignee", "assignee email", "assigned to", defaultIdx = 6)
-        val idxStartDate = findCol("start date", defaultIdx = 7)
-        val idxDueDate = findCol("due date", "deadline", defaultIdx = 8)
-        val idxTags = findCol("tags", "categories", defaultIdx = 9)
-        val idxNotes = findCol("notes", "description", defaultIdx = 10)
-        val idxProjects = findCol("projects", "project", defaultIdx = 11)
-        val idxParent = findCol("parent task", "parent", "parent id", defaultIdx = 12)
+        val idxTaskId = findCol(
+            "task id", "id", "gid", "aufgaben-id", "id de la tâche", "id de la tache", "id attività", "id attivita", "id de tarea",
+            defaultIdx = 0
+        )
+        val idxCompletedAt = findCol(
+            "completed at", "completed date", "abgeschlossen am", "erledigt am", "terminé le", "termine le", "completato il", "completada el", "finalizado el",
+            defaultIdx = 2
+        )
+        val idxName = findCol(
+            "name", "task name", "title", "aufgabe", "aufgabenname", "nom", "nom de la tâche", "nome", "nombre", "nombre de la tarea",
+            defaultIdx = 4
+        ).let { if (it >= 0) it else 0 }
+        val idxSection = findCol(
+            "section/column", "section", "column", "abschnitt/spalte", "abschnitt", "spalte",
+            "section/colonne", "colonne", "sezione/colonna", "sezione", "colonna", "sección/columna", "seccion/columna", "sección", "columna",
+            defaultIdx = 5
+        )
+        val idxAssignee = findCol(
+            "assignee", "assignee email", "assigned to", "verantwortlich", "zugewiesen an",
+            "responsable", "assegnatario", "incaricato", "responsable de la tarea", "asignado a",
+            defaultIdx = 6
+        )
+        val idxStartDate = findCol(
+            "start date", "start_on", "startdatum", "date de début", "date de debut", "data di inizio", "fecha de inicio",
+            defaultIdx = 7
+        )
+        val idxDueDate = findCol(
+            "due date", "due_on", "deadline", "fälligkeitsdatum", "faelligkeitsdatum",
+            "date d’échéance", "date d'échéance", "date d'echeance", "data di scadenza", "fecha de entrega", "fecha de vencimiento",
+            defaultIdx = 8
+        )
+        val idxTags = findCol(
+            "tags", "categories", "labels", "kategorien", "étiquettes", "etiquettes", "etichette", "etiquetas",
+            defaultIdx = 9
+        )
+        val idxNotes = findCol(
+            "notes", "description", "notizen", "beschreibung", "note", "notas", "descripción", "descripcion",
+            defaultIdx = 10
+        )
+        val idxProjects = findCol(
+            "projects", "project", "projekte", "projekt", "projets", "projet", "progetti", "progetto", "proyectos", "proyecto",
+            defaultIdx = 11
+        )
+        val idxParent = findCol(
+            "parent task", "parent", "parent id", "übergeordnete aufgabe", "uebergeordnete aufgabe",
+            "tâche parente", "tache parente", "attività principale", "attivita principale", "tarea principal", "tarea superior",
+            defaultIdx = 12
+        )
 
         class MutableTaskEntry(
             val taskId: String,

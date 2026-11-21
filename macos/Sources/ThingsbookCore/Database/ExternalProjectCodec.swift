@@ -327,17 +327,17 @@ public enum ExternalProjectCodec {
             normalizedHeader.firstIndex(where: { candidates.contains($0) }) ?? -1
         }
 
-        let idxId = colIdx(["taskid", "id", "gid"])
-        let idxCompletedAt = colIdx(["completedat", "completed", "completeddate", "erledigtam"])
-        let idxName = colIdx(["name", "taskname", "title", "task", "aufgabe", "nom", "nombre", "nome"])
-        let idxSection = colIdx(["sectioncolumn", "section", "column", "abschnitt", "phase", "spalte"])
-        let idxAssignee = colIdx(["assignee", "assigneeemail", "assignedto", "verantwortlich"])
-        let idxStart = colIdx(["startdate", "starton", "start", "whendate"])
-        let idxDue = colIdx(["duedate", "dueon", "due", "deadline", "faelligkeitsdatum"])
-        let idxTags = colIdx(["tags", "tag", "categories", "labels", "kategorien"])
-        let idxNotes = colIdx(["notes", "description", "details", "notizen", "beschreibung"])
-        let idxProjects = colIdx(["projects", "project", "projekt", "projekte"])
-        let idxParent = colIdx(["parenttask", "parent", "parentid", "parenttaskid", "uebergeordneteaufgabe"])
+        let idxId = colIdx(["taskid", "id", "gid", "aufgabenid", "iddelatache", "idattivita", "iddetarea"])
+        let idxCompletedAt = colIdx(["completedat", "completed", "completeddate", "abgeschlossenam", "erledigtam", "terminele", "completatoil", "completadael", "finalizadoel"])
+        let idxName = colIdx(["name", "taskname", "title", "task", "aufgabe", "aufgabenname", "nom", "nomdelatache", "nombre", "nombredelatarea", "nome"])
+        let idxSection = colIdx(["sectioncolumn", "section", "column", "abschnittspalte", "abschnitt", "phase", "spalte", "sectioncolonne", "colonne", "sezionecolonna", "sezione", "colonna", "seccioncolumna", "seccion", "columna"])
+        let idxAssignee = colIdx(["assignee", "assigneeemail", "assignedto", "verantwortlich", "zugewiesenan", "responsable", "assegnatario", "incaricato", "asignadoa"])
+        let idxStart = colIdx(["startdate", "starton", "start", "whendate", "startdatum", "datededebut", "datadiinizio", "fechadeinicio"])
+        let idxDue = colIdx(["duedate", "dueon", "due", "deadline", "falligkeitsdatum", "faelligkeitsdatum", "datedecheance", "datadiscadenza", "fechadeentrega", "fechadevencimiento"])
+        let idxTags = colIdx(["tags", "tag", "categories", "labels", "kategorien", "etiquettes", "etichette", "etiquetas"])
+        let idxNotes = colIdx(["notes", "description", "details", "notizen", "beschreibung", "note", "notas", "descripcion"])
+        let idxProjects = colIdx(["projects", "project", "projekt", "projekte", "projets", "projet", "progetti", "progetto", "proyectos", "proyecto"])
+        let idxParent = colIdx(["parenttask", "parent", "parentid", "parenttaskid", "ubergeordneteaufgabe", "uebergeordneteaufgabe", "tacheparente", "attivitaprincipale", "tareaprincipale", "tareaprincipal", "tareasuperior"])
 
         guard idxName >= 0 else {
             throw ExternalProjectCodecError.invalidCsv("Missing 'Name' column in Asana CSV.")

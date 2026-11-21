@@ -33,6 +33,7 @@ public struct TaskBentoModalView: View {
     @State private var isHoveringDone = false
     @State private var isHoveringClose = false
     @State private var didCommitAndDismiss = false
+    @State private var measuredBodyHeight: CGFloat = 0
     @State private var draftSaveTask: Task<Void, Never>?
 
     @FocusState private var isTitleFocused: Bool
@@ -45,11 +46,22 @@ public struct TaskBentoModalView: View {
     }
 
     private var resolvedMaxModalHeight: CGFloat {
-        max(340, min(640, (availableHeight ?? 680) - 36))
+        max(340, min(650, (availableHeight ?? 680) - 36))
     }
 
     private var resolvedMaxBodyHeight: CGFloat {
-        max(210, resolvedMaxModalHeight - 114)
+        max(210, resolvedMaxModalHeight - 106)
+    }
+
+    private var needsVerticalScroll: Bool {
+        measuredBodyHeight > resolvedMaxBodyHeight + 1
+    }
+
+    private var effectiveBodyHeight: CGFloat {
+        guard measuredBodyHeight > 0 else {
+            return min(320, resolvedMaxBodyHeight)
+        }
+        return min(measuredBodyHeight, resolvedMaxBodyHeight)
     }
 
     private var latestTask: TaskItem {
@@ -65,7 +77,9 @@ public struct TaskBentoModalView: View {
                 .frame(width: 274, alignment: .topLeading)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 15)
+        .padding(.top, 12)
+        .padding(.bottom, 13)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     public var body: some View {
@@ -76,13 +90,20 @@ public struct TaskBentoModalView: View {
             Divider()
                 .opacity(0.65)
 
-            ViewThatFits(in: .vertical) {
+            ScrollView(.vertical, showsIndicators: needsVerticalScroll) {
                 modalBodyContent
-                ScrollView(.vertical, showsIndicators: true) {
-                    modalBodyContent
-                }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ModalBodyHeightPreferenceKey.self,
+                                value: ceil(geo.size.height)
+                            )
+                        }
+                    )
             }
-            .frame(maxHeight: resolvedMaxBodyHeight)
+            .scrollDisabled(!needsVerticalScroll)
+            .frame(height: effectiveBodyHeight)
 
             Divider()
                 .opacity(0.65)
@@ -91,7 +112,15 @@ public struct TaskBentoModalView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(width: 724)
-        .frame(maxHeight: resolvedMaxModalHeight)
+        .fixedSize(horizontal: false, vertical: true)
+        .onPreferenceChange(ModalBodyHeightPreferenceKey.self) { newHeight in
+            guard newHeight > 0, abs(newHeight - measuredBodyHeight) > 0.5 else { return }
+            var tx = Transaction()
+            tx.disablesAnimations = true
+            withTransaction(tx) {
+                measuredBodyHeight = newHeight
+            }
+        }
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(ThingsMacPalette.cardSurface)
@@ -239,13 +268,13 @@ public struct TaskBentoModalView: View {
             .thingsTooltip(store.tr("backup_close_dialog_tooltip"))
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Zone B1: Left Primary Content Column (~430 pt)
 
     private var leftPrimaryContentColumn: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 11) {
             if voiceController.isRecording {
                 HStack(spacing: 7) {
                     Circle()
@@ -274,8 +303,10 @@ public struct TaskBentoModalView: View {
         let hasNotes = !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let links = MarkdownNotesParser.extractDetectedLinks(from: draftNotes)
         let toggleLabel = isEditingNotes ? store.tr("macos_preview_markdown") : store.tr("macos_edit_markdown")
+        let noteLineCount = max(1, draftNotes.components(separatedBy: .newlines).count)
+        let notesEditorHeight = min(196, max(92, CGFloat(noteLineCount) * 20 + 20))
 
-        return VStack(alignment: .leading, spacing: 9) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "doc.text")
                     .font(.system(size: 11, weight: .semibold))
@@ -310,12 +341,12 @@ public struct TaskBentoModalView: View {
                     if hasNotes {
                         Text(MarkdownNotesParser.renderAttributed(draftNotes))
                             .font(.system(size: 13.5))
-                            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+                            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
                     } else {
                         Text(store.tr("placeholder_notes"))
                             .font(.system(size: 13.5))
                             .foregroundStyle(.tertiary)
-                            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+                            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
                     }
                 }
                 .padding(10)
@@ -349,7 +380,7 @@ public struct TaskBentoModalView: View {
                         .scrollContentBackground(.hidden)
                         .focused($isNotesFocused)
                         .padding(6)
-                        .frame(minHeight: 96, maxHeight: 196)
+                        .frame(height: notesEditorHeight)
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1473,3 +1504,11 @@ public struct TaskBentoModalView: View {
         return df.string(from: DateEpochConverter.date(fromMillis: millis))
     }
 }
+
+private struct ModalBodyHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+

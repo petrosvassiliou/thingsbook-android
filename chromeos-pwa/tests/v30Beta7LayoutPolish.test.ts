@@ -142,3 +142,20 @@ test('v3.0.0-beta.11 Balanced 3+3 Soft Bento Task Modal consolidates right-colum
   const inlineSubCss = css.match(/\.task-bento-inline-sub\s*\{([^}]*)\}/)?.[1] ?? '';
   assert.ok(inlineSubCss.includes('display: contents;'));
 });
+
+test('v3.0.0-beta.12 Task Modal eliminates vertical centering white gap between task title header and Bento body', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
+  const macModalSwift = fs.readFileSync(
+    path.resolve(SRC_DIR, '../../macos/Sources/ThingsbookMac/Views/TaskBentoModalView.swift'),
+    'utf8'
+  );
+
+  assert.ok(macModalSwift.includes('ModalBodyHeightPreferenceKey'));
+  assert.ok(macModalSwift.includes('.frame(height: effectiveBodyHeight)'));
+  assert.ok(macModalSwift.includes('.scrollDisabled(!needsVerticalScroll)'));
+  assert.ok(!macModalSwift.includes('ViewThatFits(in: .vertical)'));
+  assert.ok(!macModalSwift.includes('.frame(maxHeight: resolvedMaxModalHeight)'));
+
+  const modalBodyCss = css.match(/\.task-bento-modal-body\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(modalBodyCss.includes('padding: 12px 18px 14px;'));
+});

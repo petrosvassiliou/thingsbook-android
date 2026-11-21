@@ -32,19 +32,19 @@ import {
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v3.0.0-beta.11 build metadata constants are set to 3.0.0-beta.11 (Build 102, pre-release isolated from stable)', () => {
-  assert.equal(APP_VERSION, '3.0.0-beta.11');
-  assert.equal(APP_BUILD_CODE, 102);
-  assert.equal(versionFromUtils, '3.0.0-beta.11');
-  assert.equal(buildFromUtils, 102);
+test('v3.0.0-beta.12 build metadata constants are set to 3.0.0-beta.12 (Build 103, pre-release isolated from stable)', () => {
+  assert.equal(APP_VERSION, '3.0.0-beta.12');
+  assert.equal(APP_BUILD_CODE, 103);
+  assert.equal(versionFromUtils, '3.0.0-beta.12');
+  assert.equal(buildFromUtils, 103);
   assert.equal(isPrereleaseVersion(APP_VERSION), true);
   assert.equal(isPrereleaseVersion('2.5.0'), false);
   assert.equal(isPrereleaseVersion('2.1.4'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
-  assert.equal(isPrereleaseVersion('3.0.0-beta.11'), true);
-  assert.equal(compareSemver('3.0.0-beta.11', '2.5.0'), 1);
-  assert.equal(compareSemver('3.0.0-beta.11', '3.0.0-beta.10'), 1);
-  assert.equal(compareSemver('3.0.0', '3.0.0-beta.11'), 1);
+  assert.equal(isPrereleaseVersion('3.0.0-beta.12'), true);
+  assert.equal(compareSemver('3.0.0-beta.12', '2.5.0'), 1);
+  assert.equal(compareSemver('3.0.0-beta.12', '3.0.0-beta.11'), 1);
+  assert.equal(compareSemver('3.0.0', '3.0.0-beta.12'), 1);
   assert.equal(compareSemver, compareFromUtils);
   assert.equal(isEligibleReleasePayload, isEligibleFromUtils);
   assert.equal(selectLatestEligibleRelease, selectFromUtils);

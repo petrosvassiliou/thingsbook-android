@@ -118,9 +118,13 @@ class V3Beta7LayoutPolishTest {
         val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
         val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
 
-        // 1. macOS: ViewThatFits(in: .vertical) content-hugging height, 3 right-column cards, no duplicate header breadcrumb or footer attach button
+        // 1. macOS: Exact measured body height (ModalBodyHeightPreferenceKey + .frame(height: effectiveBodyHeight), never ViewThatFits vertical-centering gap), 3 right-column cards, no duplicate header breadcrumb or footer attach button
         val macModalSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/TaskBentoModalView.swift").readText()
-        assertTrue(macModalSwift.contains("ViewThatFits(in: .vertical)"))
+        assertTrue(macModalSwift.contains("ModalBodyHeightPreferenceKey"))
+        assertTrue(macModalSwift.contains(".frame(height: effectiveBodyHeight)"))
+        assertTrue(macModalSwift.contains(".scrollDisabled(!needsVerticalScroll)"))
+        assertFalse(macModalSwift.contains("ViewThatFits(in: .vertical)"))
+        assertFalse(macModalSwift.contains(".frame(maxHeight: resolvedMaxModalHeight)"))
         assertTrue(macModalSwift.contains("scheduleBentoCard"))
         assertTrue(macModalSwift.contains("focusAndDependenciesBentoCard"))
         assertTrue(macModalSwift.contains("organizationBentoCard"))

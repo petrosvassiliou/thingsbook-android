@@ -610,6 +610,54 @@ fun ThingsSmartViewScreen(
     }
 
     val context = LocalContext.current
+    val resolveSmartViewForKeyCode: (Int) -> SmartViewType? = { keyCode ->
+        when (keyCode) {
+            android.view.KeyEvent.KEYCODE_1, android.view.KeyEvent.KEYCODE_NUMPAD_1 -> SmartViewType.INBOX
+            android.view.KeyEvent.KEYCODE_2, android.view.KeyEvent.KEYCODE_NUMPAD_2 -> SmartViewType.TODAY
+            android.view.KeyEvent.KEYCODE_3, android.view.KeyEvent.KEYCODE_NUMPAD_3 -> SmartViewType.UPCOMING
+            android.view.KeyEvent.KEYCODE_4, android.view.KeyEvent.KEYCODE_NUMPAD_4 -> SmartViewType.ANYTIME
+            android.view.KeyEvent.KEYCODE_5, android.view.KeyEvent.KEYCODE_NUMPAD_5 -> SmartViewType.SOMEDAY
+            android.view.KeyEvent.KEYCODE_6, android.view.KeyEvent.KEYCODE_NUMPAD_6 -> SmartViewType.LOGBOOK
+            android.view.KeyEvent.KEYCODE_7, android.view.KeyEvent.KEYCODE_NUMPAD_7 -> SmartViewType.TRASH
+            else -> null
+        }
+    }
+    val tryTriggerTagShortcut: (android.view.KeyEvent) -> Boolean = { nativeEv ->
+        val targetIds = if (expandedTaskId != null) {
+            listOf(expandedTaskId!!)
+        } else {
+            selectedTaskIds.toList()
+        }
+        if (targetIds.isEmpty()) {
+            false
+        } else {
+            val isTextEditorFocused = context.findHostActivity()?.currentFocus?.onCheckIsTextEditor() == true
+            val keyChar: String? = when (nativeEv.keyCode) {
+                in android.view.KeyEvent.KEYCODE_A..android.view.KeyEvent.KEYCODE_Z ->
+                    ('a' + (nativeEv.keyCode - android.view.KeyEvent.KEYCODE_A)).toString()
+                in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 ->
+                    ('0' + (nativeEv.keyCode - android.view.KeyEvent.KEYCODE_0)).toString()
+                else -> nativeEv.displayLabel
+                    .takeIf { it != '\u0000' && !it.isWhitespace() }
+                    ?.lowercaseChar()
+                    ?.toString()
+            }
+            if (keyChar == null || (isTextEditorFocused && keyChar in setOf("c", "v", "x", "a", "z"))) {
+                false
+            } else {
+                val matchedTag = allTags.firstOrNull { tag ->
+                    !tag.isDeleted && tag.shortcut?.trim()?.equals(keyChar, ignoreCase = true) == true
+                }
+                if (matchedTag != null) {
+                    viewModel.toggleTagOnTaskIds(matchedTag.id, targetIds)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     val currentHardwareShortcutHandler by rememberUpdatedState<(android.view.KeyEvent) -> Boolean> { nativeEvent ->
         if (biometricAppLockEnabled && !isAppUnlocked) return@rememberUpdatedState false
         if (isEffectiveTimelineFullScreen) {
@@ -624,7 +672,23 @@ fun ThingsSmartViewScreen(
                 nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_SPACE
         }
         val ctrlOrMeta = nativeEvent.isCtrlPressed || nativeEvent.isMetaPressed
+        val smartViewShortcut = if (ctrlOrMeta && !nativeEvent.isShiftPressed && !nativeEvent.isAltPressed) {
+            resolveSmartViewForKeyCode(nativeEvent.keyCode)
+        } else {
+            null
+        }
         when {
+            smartViewShortcut != null -> {
+                isMobileDrawerOpen = false
+                viewModel.selectSmartView(smartViewShortcut)
+                true
+            }
+            ctrlOrMeta && nativeEvent.isShiftPressed && !nativeEvent.isAltPressed &&
+                nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_R -> {
+                isMobileDrawerOpen = false
+                viewModel.openWeeklyReviewModal()
+                true
+            }
             ctrlOrMeta && nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_N -> {
                 triggerCreateProjectShortcut()
                 true
@@ -703,6 +767,8 @@ fun ThingsSmartViewScreen(
                 viewModel.selectAllTasks(allVisibleTaskIds)
                 true
             }
+            ctrlOrMeta && !nativeEvent.isShiftPressed && !nativeEvent.isAltPressed &&
+                tryTriggerTagShortcut(nativeEvent) -> true
             !ctrlOrMeta && !nativeEvent.isShiftPressed && !nativeEvent.isAltPressed &&
                 (nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
                     nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
@@ -778,7 +844,22 @@ fun ThingsSmartViewScreen(
                         return@onPreviewKeyEvent false
                     }
                     val ctrlOrMeta = event.isCtrlPressed || event.isMetaPressed
+                    val smartViewPreviewTarget = if (ctrlOrMeta && !event.isShiftPressed && !event.isAltPressed) {
+                        resolveSmartViewForKeyCode(event.nativeKeyEvent.keyCode)
+                    } else {
+                        null
+                    }
                     when {
+                        smartViewPreviewTarget != null -> {
+                            isMobileDrawerOpen = false
+                            viewModel.selectSmartView(smartViewPreviewTarget)
+                            true
+                        }
+                        ctrlOrMeta && event.isShiftPressed && !event.isAltPressed && event.key == Key.R -> {
+                            isMobileDrawerOpen = false
+                            viewModel.openWeeklyReviewModal()
+                            true
+                        }
                         ctrlOrMeta && event.isShiftPressed && event.key == Key.N -> {
                             triggerCreateProjectShortcut()
                             true
@@ -855,6 +936,8 @@ fun ThingsSmartViewScreen(
                             viewModel.setGeminiModalOpen(true)
                             true
                         }
+                        ctrlOrMeta && !event.isShiftPressed && !event.isAltPressed &&
+                            tryTriggerTagShortcut(event.nativeKeyEvent) -> true
                         event.key == Key.Escape -> when {
                             showPerspectiveEditorDialog -> {
                                 showPerspectiveEditorDialog = false
@@ -906,13 +989,17 @@ fun ThingsSmartViewScreen(
                     false
                 }
             }
-            // Tap outside an expanded card collapses it smoothly
+            // Tap outside an expanded card collapses it smoothly; tap empty space clears single/multi task selection
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {
-                    if (!(biometricAppLockEnabled && !isAppUnlocked) && expandedTaskId != null) {
-                        viewModel.collapseExpandedTask()
+                    if (!(biometricAppLockEnabled && !isAppUnlocked)) {
+                        if (expandedTaskId != null) {
+                            viewModel.collapseExpandedTask()
+                        } else if (selectedTaskIds.isNotEmpty()) {
+                            viewModel.clearTaskSelection()
+                        }
                     }
                 }
             )
@@ -1009,34 +1096,56 @@ fun ThingsSmartViewScreen(
                 contentAlignment = Alignment.TopStart
             ) {
                 Column(
-                    modifier = Modifier
-                        .padding(
-                            start = if (showSidebar) 4.dp else 0.dp,
-                            end = if (showSidebar) 16.dp else 0.dp
-                        )
-                        .widthIn(
-                            max = when {
-                                isEffectiveTimelineFullScreen -> 4000.dp
-                                isExpandedProjectWorkspace -> 2400.dp
-                                isWideScreen -> 1040.dp
-                                else -> 2000.dp
-                            }
-                        )
-                        .fillMaxSize()
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     if (!isEffectiveTimelineFullScreen) {
-                        ThingsTopHeaderAndQuickFindSection(
-                            viewModel = viewModel,
+                        val topSyncStatus by viewModel.syncStatus.collectAsState()
+                        TopThingsbookBar(
                             isWideScreen = isWideScreen,
-                            isSidebarVisible = isSidebarVisible,
-                            isMobileDrawerOpen = isMobileDrawerOpen,
-                            onToggleMobileDrawer = { isMobileDrawerOpen = !isMobileDrawerOpen },
+                            isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
                             isQuickFindOpen = isQuickFindOpen,
-                            areas = areas,
-                            activeProjects = activeProjects,
-                            activeLocale = activeLocale
+                            syncStatus = topSyncStatus,
+                            onToggleSidebar = {
+                                if (isWideScreen) {
+                                    viewModel.toggleSidebarVisible()
+                                } else {
+                                    isMobileDrawerOpen = !isMobileDrawerOpen
+                                }
+                            },
+                            onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
+                            onOpenVoiceCapture = { viewModel.openVoiceQuickCapture() },
+                            onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
+                            onManualSync = { viewModel.setAuthModalOpen(true) },
+                            onOpenSettings = { viewModel.setSettingsModalOpen(true) }
                         )
+                        HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                     }
+
+                    Column(
+                        modifier = Modifier
+                            .padding(
+                                start = if (showSidebar) 4.dp else 0.dp,
+                                end = if (showSidebar) 16.dp else 0.dp
+                            )
+                            .widthIn(
+                                max = when {
+                                    isEffectiveTimelineFullScreen -> 4000.dp
+                                    isExpandedProjectWorkspace -> 2400.dp
+                                    isWideScreen -> 1040.dp
+                                    else -> 2000.dp
+                                }
+                            )
+                            .fillMaxSize()
+                    ) {
+                        if (!isEffectiveTimelineFullScreen) {
+                            ThingsTopHeaderAndQuickFindSection(
+                                viewModel = viewModel,
+                                isQuickFindOpen = isQuickFindOpen,
+                                areas = areas,
+                                activeProjects = activeProjects,
+                                activeLocale = activeLocale
+                            )
+                        }
 
                     if (!isEffectiveTimelineFullScreen) {
                         focusTimerState?.let { timerState ->
@@ -1312,6 +1421,7 @@ fun ThingsSmartViewScreen(
                             .fillMaxSize()
                             .weight(1f)
                     )
+                    }
                 }
             }
         }
@@ -2183,16 +2293,11 @@ private fun ThingsAutoUpdateBanner(
 @Composable
 private fun ThingsTopHeaderAndQuickFindSection(
     viewModel: ThingsbookViewModel,
-    isWideScreen: Boolean,
-    isSidebarVisible: Boolean,
-    isMobileDrawerOpen: Boolean,
-    onToggleMobileDrawer: () -> Unit,
     isQuickFindOpen: Boolean,
     areas: List<Area>,
     activeProjects: List<Project>,
     activeLocale: Locale
 ) {
-    val syncStatus by viewModel.syncStatus.collectAsState()
     val quickFindQuery by viewModel.quickFindQuery.collectAsState()
     val quickFindFilter by viewModel.quickFindFilter.collectAsState()
     val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
@@ -2203,26 +2308,6 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
     val currentUserIdentifier by viewModel.currentUserIdentifier.collectAsState()
     val appUpdateState by viewModel.appUpdateState.collectAsState()
-
-    // Calm Single-Row Top Bar (Sidebar/Hamburger Toggle + Quick Find on Left; Voice 🎙️, Gemini ✨, Cloud Sync ☁️, Settings ⚙️ on Right)
-    TopThingsbookBar(
-        isWideScreen = isWideScreen,
-        isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
-        isQuickFindOpen = isQuickFindOpen,
-        syncStatus = syncStatus,
-        onToggleSidebar = {
-            if (isWideScreen) {
-                viewModel.toggleSidebarVisible()
-            } else {
-                onToggleMobileDrawer()
-            }
-        },
-        onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
-        onOpenVoiceCapture = { viewModel.openVoiceQuickCapture() },
-        onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
-        onManualSync = { viewModel.setAuthModalOpen(true) },
-        onOpenSettings = { viewModel.setSettingsModalOpen(true) }
-    )
 
     val showAutoUpdateBanner = when (val st = appUpdateState) {
         is AppUpdateUiState.UpdateAvailable -> st.showPromptBanner
@@ -2373,6 +2458,7 @@ private fun ThingsTaskRowItem(
             isSelected = task.id in selectedTaskIds,
             isSelectionModeActive = selectedTaskIds.isNotEmpty(),
             suppressContextMenuExternal = activeModalTaskId != null || isQuickFindOpen,
+            onSelectSingle = { viewModel.selectSingleTask(task.id) },
             onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
             onRangeSelect = { viewModel.selectTaskRange(allVisibleTaskIds, task.id) },
             isGeneratingMagicBreakdown = magicBreakdownTaskId == task.id,
@@ -2626,6 +2712,9 @@ private fun ThingsMainTaskLazyList(
                 },
                 onOpenTaskEditor = { taskId ->
                     viewModel.expandTask(taskId)
+                },
+                onSelectSingleTask = { taskId ->
+                    viewModel.selectSingleTask(taskId)
                 },
                 onToggleTaskSelection = { taskId ->
                     viewModel.toggleTaskSelection(taskId)
@@ -7814,7 +7903,8 @@ private fun ThingsChromebookSidebar(
         Spacer(modifier = Modifier.height(2.dp))
 
         // Perspectives Soft Bento Card + Explicit Areas -> Projects Hierarchy
-        val unassignedProjects = projects.filter { it.areaId == null }
+        val validAreaIds = remember(areas) { areas.mapTo(HashSet()) { it.id } }
+        val unassignedProjects = projects.filter { proj -> proj.areaId == null || proj.areaId !in validAreaIds }
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)

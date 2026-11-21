@@ -184,9 +184,6 @@ public struct TaskRowCardView: View {
                     }
                     .buttonStyle(.plain)
                     .thingsTooltip(blockedBadge)
-                    .popover(isPresented: $isCollapsedDependenciesPopoverOpen) {
-                        DependenciesPopoverView(store: store, task: latestTask)
-                    }
                 }
 
                 if let effort = task.resolvedEffort {
@@ -278,14 +275,6 @@ public struct TaskRowCardView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .thingsTooltip("\(store.tr("v30_duration_label")): \(durPill)")
-                    .popover(isPresented: $isCollapsedCustomDurationPopoverOpen) {
-                        CustomDurationPopoverView(
-                            store: store,
-                            currentDurationMinutes: latestTask.durationMinutes
-                        ) { customMins in
-                            store.setTaskStandaloneDuration(latestTask.id, durationMinutes: customMins)
-                        }
-                    }
                 }
 
                 if let rem = task.reminderTime {
@@ -437,6 +426,26 @@ public struct TaskRowCardView: View {
                         : (isHoveringRow ? Color.primary.opacity(0.04) : Color.clear)
                 )
         )
+        .background(alignment: .trailing) {
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isCollapsedDependenciesPopoverOpen) {
+                        DependenciesPopoverView(store: store, task: latestTask)
+                    }
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isCollapsedCustomDurationPopoverOpen) {
+                        CustomDurationPopoverView(
+                            store: store,
+                            currentDurationMinutes: latestTask.durationMinutes
+                        ) { customMins in
+                            store.setTaskStandaloneDuration(latestTask.id, durationMinutes: customMins)
+                        }
+                    }
+            }
+            .padding(.trailing, 24)
+        }
         .contentShape(Rectangle())
         .onHover { hovering in
             isHoveringRow = hovering
@@ -551,6 +560,11 @@ public struct TaskRowCardView: View {
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
             }
+            Button {
+                store.copySelectedTasksToPasteboard()
+            } label: {
+                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
+            }
             Divider()
             Button(role: .destructive) {
                 store.deleteSelectedTasks()
@@ -585,22 +599,13 @@ public struct TaskRowCardView: View {
             }
             Divider()
             Button(store.tr("view_today")) {
-                var copy = latestTask
-                copy.scheduleState = .today
-                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                store.updateTask(copy)
+                store.scheduleTasks([latestTask.id], to: .today)
             }
             Button(store.tr("view_this_evening")) {
-                var copy = latestTask
-                copy.scheduleState = .thisEvening
-                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                store.updateTask(copy)
+                store.scheduleTasks([latestTask.id], to: .thisEvening)
             }
             Button(store.tr("view_someday")) {
-                var copy = latestTask
-                copy.scheduleState = .someday
-                copy.whenDate = nil
-                store.updateTask(copy)
+                store.scheduleTasks([latestTask.id], to: .someday)
             }
             Menu(store.tr("v30_duration_label")) {
                 durationMenuItems(for: latestTask)
@@ -616,7 +621,7 @@ public struct TaskRowCardView: View {
                 Button("11:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 11 * 60, durationMinutes: 45) }
                 Button("14:00 · 60m") { store.setTaskTimeblock(latestTask.id, startMinutes: 14 * 60, durationMinutes: 60) }
                 Button("16:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 16 * 60, durationMinutes: 45) }
-                if latestTask.scheduledStartMinutes != nil || latestTask.durationMinutes != nil {
+                if latestTask.scheduledStartMinutes != nil {
                     Divider()
                     Button(store.tr("v2_timeblock_clear"), role: .destructive) {
                         store.setTaskTimeblock(latestTask.id, startMinutes: nil, durationMinutes: nil)
@@ -632,6 +637,11 @@ public struct TaskRowCardView: View {
             }
             Button(store.tr("action_duplicate_todo")) {
                 _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            }
+            Button {
+                store.copyTaskToPasteboard(latestTask)
+            } label: {
+                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
             }
             Button(store.tr("context_select_task")) {
                 store.selectedTaskIds.insert(task.id)
@@ -662,7 +672,7 @@ public struct TaskRowCardView: View {
         }
         Divider()
         Button(store.tr("v30_duration_custom")) {
-            if targetTask.durationMinutes != nil {
+            if targetTask.id == task.id {
                 isCollapsedCustomDurationPopoverOpen = true
             } else {
                 store.openTaskModal(targetTask.id)

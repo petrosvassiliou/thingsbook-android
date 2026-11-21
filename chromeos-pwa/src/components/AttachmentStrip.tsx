@@ -130,7 +130,8 @@ export const AttachmentPreviewModal: React.FC<{
                 <button
                   type="button"
                   className="icon-btn"
-                  title="Zoom Out"
+                  title={t.attachmentsZoomOut}
+                  aria-label={t.attachmentsZoomOut}
                   onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.25).toFixed(2))))}
                 >
                   <ZoomOut size={16} />
@@ -138,7 +139,8 @@ export const AttachmentPreviewModal: React.FC<{
                 <button
                   type="button"
                   className="icon-btn"
-                  title="Zoom In"
+                  title={t.attachmentsZoomIn}
+                  aria-label={t.attachmentsZoomIn}
                   onClick={() => setZoom((z) => Math.min(3, Number((z + 0.25).toFixed(2))))}
                 >
                   <ZoomIn size={16} />

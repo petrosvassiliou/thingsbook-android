@@ -568,7 +568,7 @@
     <string name="v30_export_planner_xlsx">Esporta progetto in Planner (.xlsx)</string>
     <string name="v30_export_planner_csv">Esporta progetto in Planner CSV</string>
     <string name="v30_external_import_success">Progetto \"%1$s\" importato (%2$d attività)</string>
-    <string name="v30_external_import_section">Importa file di progetto (100% offline)</string>
+    <string name="v30_external_import_section" formatted="false">Importa file di progetto (100% offline)</string>
     <string name="v30_external_import_desc">Associa sezioni e bucket alle fasi, sottoattività ed elementi elenco alle checklist, date di inizio/scadenza e tag/etichette alle categorie.</string>
     <string name="v30_external_export_section">Esporta progetto esistente</string>
     <string name="v30_external_select_project">Progetto da esportare</string>
@@ -584,4 +584,15 @@
     <string name="v30_duration_days_short">Giorni</string>
     <string name="v30_duration_hours_short">Ore</string>
     <string name="v30_duration_minutes_short">Min</string>
+    <string name="action_copy_todo">Copia attività</string>
+    <string name="repeat_ends_until_date">Data di fine ripetizione</string>
+    <string name="v2_review_inbox_zero">Entrata vuota!</string>
+    <string name="area_suggestion_work">Lavoro</string>
+    <string name="area_suggestion_home">Casa</string>
+    <string name="area_suggestion_finance">Finanze</string>
+    <string name="area_suggestion_health">Salute</string>
+    <string name="area_suggestion_family">Famiglia</string>
+    <string name="area_suggestion_study">Studio</string>
+    <string name="area_suggestion_sport">Sport</string>
+    <string name="area_suggestion_hobby">Hobby</string>
 </resources>

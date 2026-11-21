@@ -68,7 +68,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
       onToast(`${parsed.length} ${t.entityTodos}`);
       onClose();
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Gemini error');
+      onToast(err instanceof Error ? err.message : t.geminiErrorFallback);
     } finally {
       setLoading(false);
     }
@@ -88,7 +88,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
       onNavigateProject(projectId);
       onClose();
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Gemini error');
+      onToast(err instanceof Error ? err.message : t.geminiErrorFallback);
     } finally {
       setLoading(false);
     }
@@ -148,14 +148,14 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
                 marginBottom: 4
               }}
             >
-              {t.entityArea} (optional)
+              {t.geminiAreaOptionalLabel}
             </label>
             <select
               className="text-field"
               value={selectedAreaId}
               onChange={(e) => setSelectedAreaId(e.target.value)}
             >
-              <option value="">— {t.viewInbox} / Unassigned —</option>
+              <option value="">— {t.viewInbox} / {t.noProjectNoArea} —</option>
               {activeAreas.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.title}

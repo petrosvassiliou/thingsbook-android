@@ -724,9 +724,6 @@ private struct KanbanTaskCardView: View {
                             .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
                         }
                         .buttonStyle(.plain)
-                        .popover(isPresented: $isDependenciesPopoverOpen) {
-                            DependenciesPopoverView(store: store, task: latestTask)
-                        }
                     }
 
                     if let effort = task.resolvedEffort {
@@ -823,6 +820,14 @@ private struct KanbanTaskCardView: View {
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .thingsCardSurface(cornerRadius: 11, isSelected: isSelected)
+        .background(alignment: .bottomLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .padding(.leading, 16)
+                .popover(isPresented: $isDependenciesPopoverOpen) {
+                    DependenciesPopoverView(store: store, task: latestTask)
+                }
+        }
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .onHover { hovering in
             isHovering = hovering
@@ -948,6 +953,11 @@ private struct KanbanTaskCardView: View {
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
             }
+            Button {
+                store.copySelectedTasksToPasteboard()
+            } label: {
+                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
+            }
             Divider()
             Button(role: .destructive) {
                 store.deleteSelectedTasks()
@@ -969,22 +979,13 @@ private struct KanbanTaskCardView: View {
             }
             Divider()
             Button(store.tr("view_today")) {
-                var copy = latestTask
-                copy.scheduleState = .today
-                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                store.updateTask(copy)
+                store.scheduleTasks([latestTask.id], to: .today)
             }
             Button(store.tr("view_this_evening")) {
-                var copy = latestTask
-                copy.scheduleState = .thisEvening
-                copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                store.updateTask(copy)
+                store.scheduleTasks([latestTask.id], to: .thisEvening)
             }
             Button(store.tr("view_someday")) {
-                var copy = latestTask
-                copy.scheduleState = .someday
-                copy.whenDate = nil
-                store.updateTask(copy)
+                store.scheduleTasks([latestTask.id], to: .someday)
             }
             Menu(store.tr("v30_duration_label")) {
                 ForEach(TaskItem.standaloneDurationPresets + [960, 1440, 2400], id: \.self) { mins in
@@ -1020,6 +1021,11 @@ private struct KanbanTaskCardView: View {
             }
             Button(store.tr("action_duplicate_todo")) {
                 _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            }
+            Button {
+                store.copyTaskToPasteboard(latestTask)
+            } label: {
+                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
             }
             Button(store.tr("context_select_task")) {
                 store.selectedTaskIds.insert(task.id)

@@ -1345,7 +1345,9 @@ object StarterProjectTemplates {
 
 object ProjectOutlineImporter {
     private val bulletRegex = Regex("""^([-*+]|\d+\.)\s+(?:\[[ xX]?]\s+)?(.+)$""")
-    private val durationSuffixRegex = Regex("""(?:\s+|\()(\d{1,3})\s*m(?:in)?\)?$""", RegexOption.IGNORE_CASE)
+    private val parenDurationSuffixRegex = Regex("""\(([^()]+)\)\s*$""")
+    private val atDurationSuffixRegex = Regex("""(?:^|\s)@([^\s@]+(?:\s+\d+(?:[.,]\d+)?[a-zA-Zäöüßáéíóúàèìòù]+)*)\s*$""")
+    private val plainMinSuffixRegex = Regex("""\s+(\d{1,4})\s*m(?:in)?$""", RegexOption.IGNORE_CASE)
     private val startTimeTokenRegex = Regex("""(?:^|\s)@(\d{1,2}):(\d{2})(?=\s|$)""")
 
     fun parseOutline(rawInput: String, fallbackTitle: String = "Imported Project"): ProjectTemplateBlueprint {
@@ -1470,12 +1472,36 @@ object ProjectOutlineImporter {
             }
         }
 
-        val durMatch = durationSuffixRegex.find(working)
-        if (durMatch != null && rawTitle.endsWith(")")) {
-            val d = durMatch.groupValues[1].toIntOrNull()
-            if (d != null && d in 5..720) {
-                durationMinutes = d
-                working = working.substring(0, durMatch.range.first).trimEnd('(', ' ').trim()
+        val atDurMatch = atDurationSuffixRegex.find(working)
+        if (atDurMatch != null) {
+            val token = atDurMatch.groupValues[1].trim()
+            val parsed = if (token.any { it.isLetter() }) parseCustomDurationMinutes(token) else null
+            if (parsed != null && parsed in 1..MAX_TASK_DURATION_MINUTES) {
+                durationMinutes = parsed
+                working = working.substring(0, atDurMatch.range.first).trim()
+            }
+        }
+
+        if (durationMinutes == null) {
+            val parenMatch = parenDurationSuffixRegex.find(working)
+            if (parenMatch != null) {
+                val inner = parenMatch.groupValues[1].trim()
+                val parsed = if (inner.any { it.isLetter() }) parseCustomDurationMinutes(inner) else null
+                if (parsed != null && parsed in 1..MAX_TASK_DURATION_MINUTES) {
+                    durationMinutes = parsed
+                    working = working.substring(0, parenMatch.range.first).trim()
+                }
+            }
+        }
+
+        if (durationMinutes == null) {
+            val plainMatch = plainMinSuffixRegex.find(working)
+            if (plainMatch != null) {
+                val d = plainMatch.groupValues[1].toIntOrNull()
+                if (d != null && d in 1..MAX_TASK_DURATION_MINUTES) {
+                    durationMinutes = d
+                    working = working.substring(0, plainMatch.range.first).trim()
+                }
             }
         }
 
@@ -1639,10 +1665,20 @@ object TimeblockScheduleUtils {
     }
 
     fun formatTimeblockRange(startMinutes: Int, durationMinutes: Int?): String {
-        val dur = (durationMinutes ?: DEFAULT_TIMEBLOCK_DURATION_MINUTES).coerceIn(5, 720)
+        val dur = (durationMinutes ?: DEFAULT_TIMEBLOCK_DURATION_MINUTES).coerceIn(1, MAX_TASK_DURATION_MINUTES)
         val startStr = formatMinutesAsHm(startMinutes)
-        val endStr = formatMinutesAsHm((startMinutes + dur).coerceAtMost(24 * 60 - 1))
-        return "$startStr–$endStr (${dur}m)"
+        val compactDur = formatDurationCompact(dur)
+        if (dur >= 480) {
+            return "$startStr ($compactDur)"
+        }
+        val endTotal = startMinutes + dur
+        val dayRollover = endTotal / 1440
+        val endStr = formatMinutesAsHm(endTotal)
+        return if (dayRollover > 0) {
+            "$startStr–$endStr +${dayRollover}d ($compactDur)"
+        } else {
+            "$startStr–$endStr ($compactDur)"
+        }
     }
 
     fun formatTimeblockBadge(startMinutes: Int, durationMinutes: Int?): String {
@@ -1708,7 +1744,7 @@ object TimeblockScheduleUtils {
 
         for (task in scheduledTasks) {
             val start = (task.scheduledStartMinutes ?: continue).coerceIn(0, 1439)
-            val dur = (task.durationMinutes ?: DEFAULT_TIMEBLOCK_DURATION_MINUTES).coerceIn(5, 720)
+            val dur = (task.durationMinutes ?: DEFAULT_TIMEBLOCK_DURATION_MINUTES).coerceIn(1, MAX_TASK_DURATION_MINUTES)
             val end = (start + dur).coerceAtMost(1440)
             rawSlots.add(
                 RawSlot(

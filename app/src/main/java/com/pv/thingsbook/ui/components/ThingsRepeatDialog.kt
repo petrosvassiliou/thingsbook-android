@@ -466,7 +466,7 @@ fun ThingsRepeatDialog(
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         val lastDayText = stringResource(R.string.repeat_last_day)
-                        val monthDays = listOf(1, 5, 10, 15, 20, 25, -1)
+                        val monthDays = (1..31).toList() + (-1)
                         monthDays.forEach { dom ->
                             val isSelected = selectedDayOfMonth == dom
                             val label = if (dom == -1) lastDayText else "$dom."
@@ -619,7 +619,8 @@ fun ThingsRepeatDialog(
             onApplyDeadline = { chosen ->
                 endDateEpochMillis = chosen
             },
-            onDismiss = { showEndDatePicker = false }
+            onDismiss = { showEndDatePicker = false },
+            titleText = stringResource(R.string.repeat_ends_until_date)
         )
     }
 }

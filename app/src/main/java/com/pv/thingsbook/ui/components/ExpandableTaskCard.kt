@@ -2,6 +2,7 @@ package com.pv.thingsbook.ui.components
 
 import android.app.Activity
 import android.content.Intent
+import android.os.SystemClock
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +35,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -70,6 +72,7 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Timer
@@ -86,12 +89,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -128,16 +134,23 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.ParentDataModifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -210,6 +223,7 @@ fun ExpandableTaskCard(
     isSelected: Boolean = false,
     isSelectionModeActive: Boolean = false,
     suppressContextMenuExternal: Boolean = false,
+    onSelectSingle: (() -> Unit)? = null,
     onToggleSelection: (() -> Unit)? = null,
     onRangeSelect: (() -> Unit)? = null,
     isGeneratingMagicBreakdown: Boolean,
@@ -253,7 +267,10 @@ fun ExpandableTaskCard(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val clipboardManager = LocalClipboardManager.current
     val currentOnStatusChange by rememberUpdatedState(onStatusChange)
+    val fallbackCopyTitle = stringResource(R.string.placeholder_todo_title)
+    var lastPlainTapUptimeMs by remember(task.id) { mutableLongStateOf(0L) }
 
     // Focus tracking across all text inputs inside this card so right-click NEVER hijacks native text editing
     var isInlineQuickEditing by remember(task.id) { mutableStateOf(false) }
@@ -408,7 +425,29 @@ fun ExpandableTaskCard(
         }
     }
 
+    var newChecklistField by remember(task.id) {
+        mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
+    }
+    val flushPendingChecklistIfNeeded = {
+        val cleaned = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
+        if (cleaned.isNotEmpty()) {
+            onAddChecklistItem(cleaned)
+            newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
+        }
+    }
+    val flushPendingTitleNotesIfNeeded = {
+        val sanitizedTitle = editedTitleField.text.replace("\r", "").replace("\n", " ")
+        val curNotes = editedNotesField.text
+        if (sanitizedTitle != task.title || curNotes != task.notes) {
+            onTitleNotesChange(sanitizedTitle, curNotes)
+        }
+    }
+
     val handleStatusRequest: (TaskStatus) -> Unit = { requestedStatus ->
+        if (isExpanded || isInlineQuickEditing) {
+            flushPendingTitleNotesIfNeeded()
+            flushPendingChecklistIfNeeded()
+        }
         if (task.status == TaskStatus.OPEN && requestedStatus == TaskStatus.COMPLETED && !isCompletingAnim && !isCompletedPendingCommit) {
             if (isExpanded) {
                 onStatusChange(TaskStatus.COMPLETED)
@@ -668,12 +707,23 @@ fun ExpandableTaskCard(
                     indication = null,
                     onClick = {
                         if (isCompletingAnim || isInlineQuickEditing) return@combinedClickable
-                        if (isSelectionModeActive && !isExpanded && onToggleSelection != null) {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onToggleSelection()
-                        } else if (!isExpanded) {
+                        val now = SystemClock.uptimeMillis()
+                        if (!isExpanded && lastPlainTapUptimeMs > 0L && (now - lastPlainTapUptimeMs) <= 380L) {
+                            lastPlainTapUptimeMs = 0L
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onExpandToggle()
+                        } else if (!isExpanded) {
+                            lastPlainTapUptimeMs = now
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (isSelectionModeActive && onToggleSelection != null) {
+                                onToggleSelection()
+                            } else if (onSelectSingle != null) {
+                                onSelectSingle()
+                            } else if (onToggleSelection != null) {
+                                onToggleSelection()
+                            } else {
+                                onExpandToggle()
+                            }
                         }
                     },
                     onLongClick = if (isExpanded || isInlineQuickEditing) {
@@ -742,6 +792,12 @@ fun ExpandableTaskCard(
                     onNotesFocusChanged = { focused ->
                         isNotesFocused = focused
                         if (focused) onRequestEnsureVisible?.invoke(false)
+                    },
+                    newChecklistField = newChecklistField,
+                    onNewChecklistFieldChange = { newChecklistField = it },
+                    onFlushPendingEdits = {
+                        flushPendingTitleNotesIfNeeded()
+                        flushPendingChecklistIfNeeded()
                     },
                     onNewChecklistFocusChanged = { focused ->
                         isNewChecklistFocused = focused
@@ -993,6 +1049,30 @@ fun ExpandableTaskCard(
                                 }
                             }
 
+                            if (!isCompletingAnim) {
+                                Spacer(modifier = Modifier.width(2.dp))
+                                val openDetailsLabel = stringResource(R.string.v30_open_details_action)
+                                ThingsHoverTooltip(
+                                    text = openDetailsLabel,
+                                    enableTouchLongPress = false
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onExpandToggle()
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.OpenInFull,
+                                            contentDescription = openDetailsLabel,
+                                            tint = colors.secondaryText.copy(alpha = 0.72f),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+                            }
+
                             if (collapsedTrailingContent != null && !isCompletingAnim) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 collapsedTrailingContent()
@@ -1130,6 +1210,7 @@ fun ExpandableTaskCard(
                 task = task,
                 isSelected = isSelected,
                 offset = contextMenuOffsetDp,
+                onOpenDetails = if (!isCompletingAnim) ({ onExpandToggle() }) else null,
                 onStartInlineQuickEdit = if (!isCompletingAnim) ({ startInlineQuickEdit() }) else null,
                 onToggleSelection = onToggleSelection,
                 onStatusChange = handleStatusRequest,
@@ -1146,6 +1227,11 @@ fun ExpandableTaskCard(
                 onStartFocusTimer = onStartFocusTimer,
                 onTogglePin = onTogglePin,
                 onDuplicateTask = onDuplicateTask,
+                onCopyTaskMarkdown = {
+                    clipboardManager.setText(
+                        AnnotatedString(formatTaskMarkdownForClipboard(task, fallbackCopyTitle))
+                    )
+                },
                 onDeleteTask = onDeleteTask,
                 onDismiss = { showContextMenu = false }
             )
@@ -1678,6 +1764,276 @@ internal const val SOFT_BENTO_MODAL_WIDE_BREAKPOINT_DP = 600
 internal fun isWideSoftBentoTaskModal(maxWidthDp: Float): Boolean =
     maxWidthDp >= SOFT_BENTO_MODAL_WIDE_BREAKPOINT_DP
 
+internal fun computeBentoAlignedColumnCardHeights(
+    leftNaturalHeights: List<Int>,
+    rightNaturalHeights: List<Int>,
+    verticalSpacingPx: Int
+): Pair<List<Int>, List<Int>> {
+    val safeSpacing = verticalSpacingPx.coerceAtLeast(0)
+    val leftNatTotal = leftNaturalHeights.sum() + safeSpacing * (leftNaturalHeights.size - 1).coerceAtLeast(0)
+    val rightNatTotal = rightNaturalHeights.sum() + safeSpacing * (rightNaturalHeights.size - 1).coerceAtLeast(0)
+    val targetTotal = maxOf(leftNatTotal, rightNatTotal)
+
+    val leftAdjusted = if (leftNaturalHeights.isNotEmpty() && leftNatTotal < targetTotal) {
+        val surplus = targetTotal - leftNatTotal
+        leftNaturalHeights.mapIndexed { idx, h -> if (idx == 0) h + surplus else h }
+    } else {
+        leftNaturalHeights
+    }
+
+    val rightAdjusted = if (rightNaturalHeights.isNotEmpty() && rightNatTotal < targetTotal) {
+        val surplus = targetTotal - rightNatTotal
+        val count = rightNaturalHeights.size
+        val baseShare = surplus / count
+        val rem = surplus % count
+        rightNaturalHeights.mapIndexed { idx, h -> h + baseShare + (if (idx < rem) 1 else 0) }
+    } else {
+        rightNaturalHeights
+    }
+
+    return leftAdjusted to rightAdjusted
+}
+
+private val LocalInWideBentoTwoColumn = compositionLocalOf { false }
+
+private data class BentoCardParentData(
+    val column: Int,
+    val columnWeight: Float,
+    val cardOrder: Int,
+    val isBackground: Boolean
+)
+
+private class BentoCardParentDataModifier(
+    private val data: BentoCardParentData
+) : ParentDataModifier {
+    override fun Density.modifyParentData(parentData: Any?): Any = data
+}
+
+private data class BentoColumnWeightModifier(val weight: Float) : Modifier.Element
+
+private class BentoTwoColumnScope {
+    fun Modifier.weight(weight: Float): Modifier =
+        this.then(BentoColumnWeightModifier(weight))
+}
+
+private fun Modifier.extractBentoWeight(defaultWeight: Float): Float {
+    var resolved = defaultWeight
+    foldIn(Unit) { _, element ->
+        if (element is BentoColumnWeightModifier) {
+            resolved = element.weight
+        }
+    }
+    return resolved
+}
+
+@Composable
+private fun SoftBentoCardSlot(
+    column: Int,
+    columnWeight: Float,
+    cardOrder: Int,
+    fillColor: Color,
+    border: BorderStroke,
+    cornerRadius: Dp = 14.dp,
+    onBackgroundClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    val shape = RoundedCornerShape(cornerRadius)
+    if (LocalInWideBentoTwoColumn.current) {
+        Surface(
+            modifier = Modifier.then(
+                BentoCardParentDataModifier(
+                    BentoCardParentData(
+                        column = column,
+                        columnWeight = columnWeight,
+                        cardOrder = cardOrder,
+                        isBackground = true
+                    )
+                )
+            ),
+            shape = shape,
+            color = fillColor,
+            border = border
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (onBackgroundClick != null) {
+                            Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = onBackgroundClick
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
+            )
+        }
+        Box(
+            modifier = Modifier
+                .then(
+                    BentoCardParentDataModifier(
+                        BentoCardParentData(
+                            column = column,
+                            columnWeight = columnWeight,
+                            cardOrder = cardOrder,
+                            isBackground = false
+                        )
+                    )
+                )
+                .clip(shape),
+            contentAlignment = Alignment.TopStart
+        ) {
+            content()
+        }
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = shape,
+            color = fillColor,
+            border = border
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (onBackgroundClick != null) {
+                            Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = onBackgroundClick
+                            )
+                        } else {
+                            Modifier
+                        }
+                    ),
+                contentAlignment = Alignment.TopStart
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+private fun BentoAlignedTwoColumnRow(
+    modifier: Modifier = Modifier,
+    horizontalGap: Dp = 16.dp,
+    verticalSpacing: Dp = 12.dp,
+    content: @Composable BentoTwoColumnScope.() -> Unit
+) {
+    val scope = remember { BentoTwoColumnScope() }
+    CompositionLocalProvider(LocalInWideBentoTwoColumn provides true) {
+        Layout(
+            modifier = modifier,
+            content = { scope.content() }
+        ) { measurables, constraints ->
+            val gapPx = horizontalGap.roundToPx()
+            val vSpacingPx = verticalSpacing.roundToPx()
+            val totalW = constraints.maxWidth.coerceAtLeast(0)
+            val availW = (totalW - gapPx).coerceAtLeast(0)
+
+            val tagged = measurables.mapNotNull { m ->
+                val pd = m.parentData as? BentoCardParentData
+                if (pd != null) pd to m else null
+            }
+            val leftWeight = tagged.firstOrNull { it.first.column == 0 }?.first?.columnWeight ?: 1.35f
+            val rightWeight = tagged.firstOrNull { it.first.column == 1 }?.first?.columnWeight ?: 1f
+            val weightSum = (leftWeight + rightWeight).coerceAtLeast(0.01f)
+            val leftW = ((availW * leftWeight) / weightSum).roundToInt().coerceIn(0, availW)
+            val rightW = (availW - leftW).coerceAtLeast(0)
+
+            val leftOrders = tagged
+                .filter { it.first.column == 0 && !it.first.isBackground }
+                .sortedBy { it.first.cardOrder }
+            val rightOrders = tagged
+                .filter { it.first.column == 1 && !it.first.isBackground }
+                .sortedBy { it.first.cardOrder }
+
+            val leftBgsByOrder = tagged
+                .filter { it.first.column == 0 && it.first.isBackground }
+                .associate { it.first.cardOrder to it.second }
+            val rightBgsByOrder = tagged
+                .filter { it.first.column == 1 && it.first.isBackground }
+                .associate { it.first.cardOrder to it.second }
+
+            val leftContentPlaceables = leftOrders.map { (pd, m) ->
+                pd.cardOrder to m.measure(
+                    Constraints(
+                        minWidth = leftW,
+                        maxWidth = leftW,
+                        minHeight = 0,
+                        maxHeight = Constraints.Infinity
+                    )
+                )
+            }
+            val rightContentPlaceables = rightOrders.map { (pd, m) ->
+                pd.cardOrder to m.measure(
+                    Constraints(
+                        minWidth = rightW,
+                        maxWidth = rightW,
+                        minHeight = 0,
+                        maxHeight = Constraints.Infinity
+                    )
+                )
+            }
+
+            val (leftCardHeights, rightCardHeights) = computeBentoAlignedColumnCardHeights(
+                leftNaturalHeights = leftContentPlaceables.map { it.second.height },
+                rightNaturalHeights = rightContentPlaceables.map { it.second.height },
+                verticalSpacingPx = vSpacingPx
+            )
+
+            val leftBgPlaceables = leftContentPlaceables.mapIndexed { idx, (order, _) ->
+                leftBgsByOrder[order]?.measure(Constraints.fixed(leftW, leftCardHeights[idx]))
+            }
+            val rightBgPlaceables = rightContentPlaceables.mapIndexed { idx, (order, _) ->
+                rightBgsByOrder[order]?.measure(Constraints.fixed(rightW, rightCardHeights[idx]))
+            }
+
+            val leftTotalH = leftCardHeights.sum() + vSpacingPx * (leftCardHeights.size - 1).coerceAtLeast(0)
+            val rightTotalH = rightCardHeights.sum() + vSpacingPx * (rightCardHeights.size - 1).coerceAtLeast(0)
+            val finalHeight = maxOf(leftTotalH, rightTotalH).coerceAtLeast(constraints.minHeight)
+
+            layout(totalW, finalHeight) {
+                var yLeft = 0
+                leftContentPlaceables.forEachIndexed { idx, (_, contentPl) ->
+                    leftBgPlaceables[idx]?.placeRelative(0, yLeft)
+                    contentPl.placeRelative(0, yLeft)
+                    yLeft += leftCardHeights[idx] + vSpacingPx
+                }
+
+                val rightX = leftW + gapPx
+                var yRight = 0
+                rightContentPlaceables.forEachIndexed { idx, (_, contentPl) ->
+                    rightBgPlaceables[idx]?.placeRelative(rightX, yRight)
+                    contentPl.placeRelative(rightX, yRight)
+                    yRight += rightCardHeights[idx] + vSpacingPx
+                }
+            }
+        }
+    }
+}
+
+private fun formatTaskMarkdownForClipboard(task: TaskItem, fallbackTitle: String): String {
+    val box = when (task.status) {
+        TaskStatus.COMPLETED -> "[x]"
+        TaskStatus.CANCELED -> "[-]"
+        TaskStatus.OPEN -> "[ ]"
+    }
+    return buildString {
+        append("- ").append(box).append(' ').append(task.title.ifBlank { fallbackTitle })
+        if (task.notes.isNotBlank()) {
+            append('\n').append(task.notes.trim())
+        }
+        task.checklistItems.forEach { sub ->
+            val subBox = if (sub.isCompleted) "[x]" else "[ ]"
+            append("\n  - ").append(subBox).append(' ').append(sub.title)
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SoftBentoPropertyGroup(
@@ -1725,6 +2081,9 @@ private fun ExpandedTaskCardBody(
     editedNotesField: TextFieldValue,
     onNotesFieldChange: (TextFieldValue) -> Unit,
     onNotesFocusChanged: (Boolean) -> Unit,
+    newChecklistField: TextFieldValue,
+    onNewChecklistFieldChange: (TextFieldValue) -> Unit,
+    onFlushPendingEdits: () -> Unit,
     onNewChecklistFocusChanged: (Boolean) -> Unit,
     onSubtaskFocusDelta: (Int) -> Unit,
     onRequestEnsureVisible: ((Boolean) -> Unit)? = null,
@@ -1759,21 +2118,14 @@ private fun ExpandedTaskCardBody(
     onDoneCollapse: () -> Unit
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
+    val notesFocusRequester = remember(task.id) { FocusRequester() }
     val newChecklistFocusRequester = remember(task.id) { FocusRequester() }
     var pendingAutoFocusSubtaskId by remember(task.id) { mutableStateOf<String?>(null) }
-    var newChecklistField by remember(task.id) {
-        mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
-    }
-    val flushPendingChecklistIfNeeded = {
-        val cleaned = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
-        if (cleaned.isNotEmpty()) {
-            onAddChecklistItem(cleaned)
-            newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
-        }
-    }
+    val flushPendingChecklistIfNeeded = onFlushPendingEdits
     val tooLargeMsg = stringResource(R.string.attachment_too_large)
     val importErrorMsg = stringResource(R.string.attachment_import_error)
     val voicePromptMsg = stringResource(R.string.voice_capture_prompt)
@@ -1990,23 +2342,25 @@ private fun ExpandedTaskCardBody(
     }
 
     val renderContentZone: @Composable (Modifier) -> Unit = { zoneModifier ->
-        Column(
-            modifier = zoneModifier,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-
-            // Soft Bento Notes Container (Markdown notes + detected URL / Email / Phone / Map chips)
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = bentoZoneFill,
-                border = bentoZoneBorder
+        val colWeight = zoneModifier.extractBentoWeight(1.35f)
+        val emitLeftCards: @Composable () -> Unit = {
+            // 1. Soft Bento Notes Container (Markdown notes + detected URL / Email / Phone / Map chips)
+            SoftBentoCardSlot(
+                column = 0,
+                columnWeight = colWeight,
+                cardOrder = 0,
+                fillColor = bentoZoneFill,
+                border = bentoZoneBorder,
+                cornerRadius = 14.dp,
+                onBackgroundClick = {
+                    runCatching { notesFocusRequester.requestFocus() }
+                }
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 14.dp, vertical = 11.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Top)
                 ) {
                     BasicTextField(
                         value = editedNotesField,
@@ -2020,6 +2374,7 @@ private fun ExpandedTaskCardBody(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 68.dp)
+                            .focusRequester(notesFocusRequester)
                             .pointerInput(task.id) {
                                 awaitPointerEventScope {
                                     while (true) {
@@ -2034,7 +2389,10 @@ private fun ExpandedTaskCardBody(
                                 onNotesFocusChanged(focusState.isFocused)
                             },
                         decorationBox = { innerTextField ->
-                            Box(modifier = Modifier.fillMaxWidth()) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.TopStart
+                            ) {
                                 if (editedNotesField.text.isEmpty()) {
                                     Text(
                                         text = stringResource(R.string.placeholder_notes),
@@ -2051,12 +2409,14 @@ private fun ExpandedTaskCardBody(
                 }
             }
 
-            // Soft Bento Checklist Container (progress count + ✨ Gemini Magic Breakdown + rows + add item field)
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = bentoZoneFill,
-                border = bentoZoneBorder
+            // 2. Soft Bento Checklist Container (progress count + ✨ Gemini Magic Breakdown + rows + add item field)
+            SoftBentoCardSlot(
+                column = 0,
+                columnWeight = colWeight,
+                cardOrder = 1,
+                fillColor = bentoZoneFill,
+                border = bentoZoneBorder,
+                cornerRadius = 14.dp
             ) {
                 Column(
                     modifier = Modifier
@@ -2195,7 +2555,7 @@ private fun ExpandedTaskCardBody(
                             if (cleaned.isNotEmpty()) {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onAddChecklistItem(cleaned)
-                                newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
+                                onNewChecklistFieldChange(TextFieldValue(text = "", selection = TextRange(0)))
                                 runCatching { newChecklistFocusRequester.requestFocus() }
                             }
                         }
@@ -2236,12 +2596,14 @@ private fun ExpandedTaskCardBody(
                                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         }
                                         val trailing = parts.last()
-                                        newChecklistField = TextFieldValue(
-                                            text = trailing,
-                                            selection = TextRange(trailing.length)
+                                        onNewChecklistFieldChange(
+                                            TextFieldValue(
+                                                text = trailing,
+                                                selection = TextRange(trailing.length)
+                                            )
                                         )
                                     } else {
-                                        newChecklistField = incoming
+                                        onNewChecklistFieldChange(incoming)
                                     }
                                 },
                                 singleLine = true,
@@ -2316,19 +2678,21 @@ private fun ExpandedTaskCardBody(
                 }
             }
 
-            // Soft Bento Attachments Strip
+            // 3. Soft Bento Attachments Strip (or slim empty bar for 3+3 Soft Bento parity)
             if (task.attachments.isNotEmpty()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = bentoZoneFill,
-                    border = bentoZoneBorder
+                SoftBentoCardSlot(
+                    column = 0,
+                    columnWeight = colWeight,
+                    cardOrder = 2,
+                    fillColor = bentoZoneFill,
+                    border = bentoZoneBorder,
+                    cornerRadius = 14.dp
                 ) {
                     TaskAttachmentsStrip(
                         attachments = task.attachments,
                         onDeleteAttachment = { attId -> onDeleteTaskAttachment?.invoke(attId) },
                         onAttachFileClick = if (onAddTaskAttachment != null) {
-                            { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
+                            { filePickerLauncher.launch(arrayOf("*/*")) }
                         } else null,
                         onTakePhotoClick = if (onAddTaskAttachment != null) {
                             { cameraLauncher.launch(null) }
@@ -2336,309 +2700,414 @@ private fun ExpandedTaskCardBody(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                     )
                 }
+            } else if (onAddTaskAttachment != null) {
+                SoftBentoCardSlot(
+                    column = 0,
+                    columnWeight = colWeight,
+                    cardOrder = 2,
+                    fillColor = bentoZoneFill,
+                    border = bentoZoneBorder,
+                    cornerRadius = 14.dp,
+                    onBackgroundClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        filePickerLauncher.launch(arrayOf("*/*"))
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                filePickerLauncher.launch(arrayOf("*/*"))
+                            }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AttachFile,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.attachments_section_title),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.secondaryText
+                            )
+                        }
+                        Text(
+                            text = "+ ${stringResource(R.string.action_attach_file)}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue
+                        )
+                    }
+                }
+            }
+        }
+
+        if (LocalInWideBentoTwoColumn.current) {
+            emitLeftCards()
+        } else {
+            Column(
+                modifier = zoneModifier,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                emitLeftCards()
             }
         }
     }
 
     val renderPropertiesZone: @Composable (Modifier) -> Unit = { zoneModifier ->
-        Surface(
-            modifier = zoneModifier,
-            shape = RoundedCornerShape(16.dp),
-            color = bentoZoneFill,
-            border = bentoZoneBorder
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 13.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        val colWeight = zoneModifier.extractBentoWeight(1f)
+        val emitRightCards: @Composable () -> Unit = {
+            // 1. Schedule: When + Today This Evening + Reminder + Timeblock + Deadline + Repeat
+            SoftBentoCardSlot(
+                column = 1,
+                columnWeight = colWeight,
+                cardOrder = 0,
+                fillColor = bentoZoneFill,
+                border = bentoZoneBorder,
+                cornerRadius = 14.dp
             ) {
-                // 1. Schedule: When + Today This Evening + Reminder + Timeblock + Deadline + Repeat
-                SoftBentoPropertyGroup(
-                    label = "${stringResource(R.string.action_when)} · ${stringResource(R.string.action_deadline)}"
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.TopStart
                 ) {
-                    ThingsWhenBadge(
-                        scheduleState = task.scheduleState,
-                        whenDateEpochMillis = task.whenDate,
-                        locale = locale,
-                        onClick = onOpenWhenDialog
-                    )
-
-                    if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
-                        val eveningLabel = stringResource(R.string.view_this_evening)
-                        ThingsHoverTooltip(text = eveningLabel) {
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
-                                    .border(
-                                        width = 0.75.dp,
-                                        color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        flushPendingChecklistIfNeeded()
-                                        onQuickThisEveningAndClose()
-                                    }
-                                    .padding(horizontal = 9.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Bedtime,
-                                    contentDescription = eveningLabel,
-                                    tint = colors.eveningMoonIndigo,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = eveningLabel,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = colors.eveningMoonIndigo
-                                )
-                            }
-                        }
-                    }
-
-                    task.reminderTime?.let { rt ->
-                        ThingsReminderBadge(
-                            reminderEpochMillis = rt,
+                    SoftBentoPropertyGroup(
+                        label = "${stringResource(R.string.action_when)} · ${stringResource(R.string.action_deadline)}"
+                    ) {
+                        ThingsWhenBadge(
+                            scheduleState = task.scheduleState,
+                            whenDateEpochMillis = task.whenDate,
+                            locale = locale,
                             onClick = onOpenWhenDialog
                         )
-                    }
 
-                    if (task.scheduledStartMinutes != null) {
-                        ThingsTagPill(
-                            title = TimeblockScheduleUtils.formatTimeblockBadge(
-                                task.scheduledStartMinutes,
-                                task.durationMinutes
-                            ),
-                            onClick = onOpenTimeblockDialog
-                        )
-                    } else if (onOpenTimeblockDialog != null) {
-                        ThingsTagPill(
-                            title = "⏱️ ${stringResource(R.string.v2_timeblock_title)}",
-                            onClick = onOpenTimeblockDialog
-                        )
-                    }
-
-                    if (task.deadline != null) {
-                        ThingsDeadlineBadge(
-                            deadlineEpochMillis = task.deadline,
-                            locale = locale,
-                            onClick = onOpenDeadlineDialog
-                        )
-                    } else {
-                        ThingsTagPill(
-                            title = "🏁 ${stringResource(R.string.action_deadline)}",
-                            onClick = onOpenDeadlineDialog
-                        )
-                    }
-
-                    if (task.recurrenceRule != null) {
-                        ThingsRepeatBadge(
-                            rule = task.recurrenceRule,
-                            onClick = onOpenRepeatDialog
-                        )
-                    } else {
-                        ThingsTagPill(
-                            title = "🔁 ${stringResource(R.string.action_repeat)}",
-                            onClick = onOpenRepeatDialog
-                        )
-                    }
-                }
-
-                // 2. Focus & Dependencies: Duration, Effort & Waiting On
-                if (onUpdateStandaloneDuration != null || onUpdateEffortLevel != null || onOpenDependenciesDialog != null) {
-                    HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
-                    SoftBentoPropertyGroup(
-                        label = "${stringResource(R.string.v30_duration_label)} · ${stringResource(R.string.v30_effort_label)}"
-                    ) {
-                        if (onUpdateStandaloneDuration != null) {
-                            var showDurationPickerMenu by remember(task.id) { mutableStateOf(false) }
-                            var showCustomDurationDialog by remember(task.id) { mutableStateOf(false) }
-                            val durText = formatDurationCompact(task.durationMinutes)
-                            Box {
-                                ThingsTagPill(
-                                    title = if (durText != null) {
-                                        "⏱ $durText"
-                                    } else {
-                                        "⏱ ${stringResource(R.string.v30_duration_label)}"
-                                    },
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        showDurationPickerMenu = true
-                                    }
-                                )
-                                DropdownMenu(
-                                    expanded = showDurationPickerMenu,
-                                    onDismissRequest = { showDurationPickerMenu = false },
-                                    modifier = Modifier.background(colors.cardElevatedSurface)
-                                ) {
-                                    STANDALONE_DURATION_PRESETS.forEach { mins ->
-                                        val label = formatDurationCompact(mins)
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    text = label,
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontWeight = if (task.durationMinutes == mins) FontWeight.Bold else FontWeight.Normal
-                                                    ),
-                                                    color = if (task.durationMinutes == mins) colors.thingsBlue else colors.primaryText
-                                                )
-                                            },
-                                            onClick = {
-                                                showDurationPickerMenu = false
-                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                onUpdateStandaloneDuration(mins)
-                                            }
+                        if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
+                            val eveningLabel = stringResource(R.string.view_this_evening)
+                            ThingsHoverTooltip(text = eveningLabel) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
+                                        .border(
+                                            width = 0.75.dp,
+                                            color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
+                                            shape = RoundedCornerShape(8.dp)
                                         )
-                                    }
-                                    HorizontalDivider(color = colors.hairlineDivider)
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = stringResource(R.string.v30_duration_custom),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = colors.primaryText
-                                            )
-                                        },
-                                        onClick = {
-                                            showDurationPickerMenu = false
+                                        .clickable {
                                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            showCustomDurationDialog = true
+                                            flushPendingChecklistIfNeeded()
+                                            onQuickThisEveningAndClose()
                                         }
-                                    )
-                                    if (task.durationMinutes != null) {
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    text = stringResource(R.string.v30_duration_clear),
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = colors.secondaryText
-                                                )
-                                            },
-                                            onClick = {
-                                                showDurationPickerMenu = false
-                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                onUpdateStandaloneDuration(null)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                            if (showCustomDurationDialog) {
-                                ThingsCustomDurationDialog(
-                                    currentDurationMinutes = task.durationMinutes,
-                                    onApply = { customMins ->
-                                        showCustomDurationDialog = false
-                                        onUpdateStandaloneDuration(customMins)
-                                    },
-                                    onDismiss = { showCustomDurationDialog = false }
-                                )
-                            }
-                        }
-
-                        if (onUpdateEffortLevel != null) {
-                            var showEffortPickerMenu by remember(task.id) { mutableStateOf(false) }
-                            val normalizedEffort = EffortLevel.normalize(task.effortLevel)
-                            val effortPillTitle = when (normalizedEffort) {
-                                EffortLevel.QUICK_WIN -> "⚡ ${stringResource(R.string.v30_effort_quick_win)}"
-                                EffortLevel.MEDIUM -> "◐ ${stringResource(R.string.v30_effort_medium)}"
-                                EffortLevel.DEEP_FOCUS -> "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
-                                else -> "⚡ ${stringResource(R.string.v30_effort_label)}"
-                            }
-                            Box {
-                                ThingsTagPill(
-                                    title = effortPillTitle,
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        showEffortPickerMenu = true
-                                    }
-                                )
-                                DropdownMenu(
-                                    expanded = showEffortPickerMenu,
-                                    onDismissRequest = { showEffortPickerMenu = false },
-                                    modifier = Modifier.background(colors.cardElevatedSurface)
+                                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    val effortOptions: List<Pair<String?, String>> = listOf(
-                                        null to stringResource(R.string.v30_effort_none),
-                                        EffortLevel.QUICK_WIN to "⚡ ${stringResource(R.string.v30_effort_quick_win)}",
-                                        EffortLevel.MEDIUM to "◐ ${stringResource(R.string.v30_effort_medium)}",
-                                        EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                                    Icon(
+                                        imageVector = Icons.Outlined.Bedtime,
+                                        contentDescription = eveningLabel,
+                                        tint = colors.eveningMoonIndigo,
+                                        modifier = Modifier.size(14.dp)
                                     )
-                                    effortOptions.forEach { (key, label) ->
-                                        val selected = normalizedEffort == key
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    text = label,
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                                    ),
-                                                    color = if (selected) colors.thingsBlue else colors.primaryText
-                                                )
-                                            },
-                                            onClick = {
-                                                showEffortPickerMenu = false
-                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                onUpdateEffortLevel(key)
-                                            }
-                                        )
-                                    }
+                                    Text(
+                                        text = eveningLabel,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.eveningMoonIndigo
+                                    )
                                 }
                             }
                         }
 
-                        if (onOpenDependenciesDialog != null) {
-                            val activeBlockerCount = remember(task.blockedByTaskIds, openTaskIds) {
-                                task.blockedByTaskIds.count { it in openTaskIds }
-                            }
-                            val depLabel = if (activeBlockerCount > 0) {
-                                "⏳ " + stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)
-                            } else {
-                                "⏳ " + stringResource(R.string.v30_blocked_by_action)
-                            }
+                        task.reminderTime?.let { rt ->
+                            ThingsReminderBadge(
+                                reminderEpochMillis = rt,
+                                onClick = onOpenWhenDialog
+                            )
+                        }
+
+                        if (task.scheduledStartMinutes != null) {
                             ThingsTagPill(
-                                title = depLabel,
-                                onClick = {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onOpenDependenciesDialog()
-                                }
+                                title = TimeblockScheduleUtils.formatTimeblockBadge(
+                                    task.scheduledStartMinutes,
+                                    task.durationMinutes
+                                ),
+                                onClick = onOpenTimeblockDialog
+                            )
+                        } else if (onOpenTimeblockDialog != null) {
+                            ThingsTagPill(
+                                title = "⏱️ ${stringResource(R.string.v2_timeblock_title)}",
+                                onClick = onOpenTimeblockDialog
+                            )
+                        }
+
+                        if (task.deadline != null) {
+                            ThingsDeadlineBadge(
+                                deadlineEpochMillis = task.deadline,
+                                locale = locale,
+                                onClick = onOpenDeadlineDialog
+                            )
+                        } else {
+                            ThingsTagPill(
+                                title = "🏁 ${stringResource(R.string.action_deadline)}",
+                                onClick = onOpenDeadlineDialog
+                            )
+                        }
+
+                        if (task.recurrenceRule != null) {
+                            ThingsRepeatBadge(
+                                rule = task.recurrenceRule,
+                                onClick = onOpenRepeatDialog
+                            )
+                        } else {
+                            ThingsTagPill(
+                                title = "🔁 ${stringResource(R.string.action_repeat)}",
+                                onClick = onOpenRepeatDialog
                             )
                         }
                     }
                 }
+            }
 
-                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
-
-                // 3. Organization: Project / Area & Categories
-                SoftBentoPropertyGroup(
-                    label = "${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)} · ${stringResource(R.string.action_tags)}"
+            // 2. Focus & Dependencies: Duration, Effort & Waiting On
+            if (onUpdateStandaloneDuration != null || onUpdateEffortLevel != null || onOpenDependenciesDialog != null) {
+                SoftBentoCardSlot(
+                    column = 1,
+                    columnWeight = colWeight,
+                    cardOrder = 1,
+                    fillColor = bentoZoneFill,
+                    border = bentoZoneBorder,
+                    cornerRadius = 14.dp
                 ) {
-                    val containerLabel = when {
-                        assignedProject != null && assignedHeading != null && assignedHeading.title.isNotBlank() ->
-                            "📁 ${assignedProject.title} › ${assignedHeading.title}"
-                        assignedProject != null -> "📁 ${assignedProject.title}"
-                        assignedArea != null -> "📦 ${assignedArea.title}"
-                        else -> "📁 ${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
-                    }
-                    ThingsTagPill(
-                        title = containerLabel,
-                        onClick = onOpenMoveDialog
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.TopStart
+                    ) {
+                        SoftBentoPropertyGroup(
+                            label = "${stringResource(R.string.v30_duration_label)} · ${stringResource(R.string.v30_effort_label)}"
+                        ) {
+                            if (onUpdateStandaloneDuration != null) {
+                                var showDurationPickerMenu by remember(task.id) { mutableStateOf(false) }
+                                var showCustomDurationDialog by remember(task.id) { mutableStateOf(false) }
+                                val durText = formatDurationCompact(task.durationMinutes)
+                                Box {
+                                    ThingsTagPill(
+                                        title = if (durText != null) {
+                                            "⏱ $durText"
+                                        } else {
+                                            "⏱ ${stringResource(R.string.v30_duration_label)}"
+                                        },
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            showDurationPickerMenu = true
+                                        }
+                                    )
+                                    DropdownMenu(
+                                        expanded = showDurationPickerMenu,
+                                        onDismissRequest = { showDurationPickerMenu = false },
+                                        modifier = Modifier.background(colors.cardElevatedSurface)
+                                    ) {
+                                        STANDALONE_DURATION_PRESETS.forEach { mins ->
+                                            val label = formatDurationCompact(mins)
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = label,
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontWeight = if (task.durationMinutes == mins) FontWeight.Bold else FontWeight.Normal
+                                                        ),
+                                                        color = if (task.durationMinutes == mins) colors.thingsBlue else colors.primaryText
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showDurationPickerMenu = false
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onUpdateStandaloneDuration(mins)
+                                                }
+                                            )
+                                        }
+                                        HorizontalDivider(color = colors.hairlineDivider)
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = stringResource(R.string.v30_duration_custom),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = colors.primaryText
+                                                )
+                                            },
+                                            onClick = {
+                                                showDurationPickerMenu = false
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                showCustomDurationDialog = true
+                                            }
+                                        )
+                                        if (task.durationMinutes != null) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = stringResource(R.string.v30_duration_clear),
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = colors.secondaryText
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showDurationPickerMenu = false
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onUpdateStandaloneDuration(null)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                                if (showCustomDurationDialog) {
+                                    ThingsCustomDurationDialog(
+                                        currentDurationMinutes = task.durationMinutes,
+                                        onApply = { customMins ->
+                                            showCustomDurationDialog = false
+                                            onUpdateStandaloneDuration(customMins)
+                                        },
+                                        onDismiss = { showCustomDurationDialog = false }
+                                    )
+                                }
+                            }
 
-                    task.tags.forEach { tag ->
+                            if (onUpdateEffortLevel != null) {
+                                var showEffortPickerMenu by remember(task.id) { mutableStateOf(false) }
+                                val normalizedEffort = EffortLevel.normalize(task.effortLevel)
+                                val effortPillTitle = when (normalizedEffort) {
+                                    EffortLevel.QUICK_WIN -> "⚡ ${stringResource(R.string.v30_effort_quick_win)}"
+                                    EffortLevel.MEDIUM -> "◐ ${stringResource(R.string.v30_effort_medium)}"
+                                    EffortLevel.DEEP_FOCUS -> "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                                    else -> "⚡ ${stringResource(R.string.v30_effort_label)}"
+                                }
+                                Box {
+                                    ThingsTagPill(
+                                        title = effortPillTitle,
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            showEffortPickerMenu = true
+                                        }
+                                    )
+                                    DropdownMenu(
+                                        expanded = showEffortPickerMenu,
+                                        onDismissRequest = { showEffortPickerMenu = false },
+                                        modifier = Modifier.background(colors.cardElevatedSurface)
+                                    ) {
+                                        val effortOptions: List<Pair<String?, String>> = listOf(
+                                            null to stringResource(R.string.v30_effort_none),
+                                            EffortLevel.QUICK_WIN to "⚡ ${stringResource(R.string.v30_effort_quick_win)}",
+                                            EffortLevel.MEDIUM to "◐ ${stringResource(R.string.v30_effort_medium)}",
+                                            EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
+                                        )
+                                        effortOptions.forEach { (key, label) ->
+                                            val selected = normalizedEffort == key
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = label,
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                                        ),
+                                                        color = if (selected) colors.thingsBlue else colors.primaryText
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showEffortPickerMenu = false
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onUpdateEffortLevel(key)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (onOpenDependenciesDialog != null) {
+                                val activeBlockerCount = remember(task.blockedByTaskIds, openTaskIds) {
+                                    task.blockedByTaskIds.count { it in openTaskIds }
+                                }
+                                val depLabel = if (activeBlockerCount > 0) {
+                                    "⏳ " + stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)
+                                } else {
+                                    "⏳ " + stringResource(R.string.v30_blocked_by_action)
+                                }
+                                ThingsTagPill(
+                                    title = depLabel,
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onOpenDependenciesDialog()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Organization: Project / Area & Categories
+            SoftBentoCardSlot(
+                column = 1,
+                columnWeight = colWeight,
+                cardOrder = 2,
+                fillColor = bentoZoneFill,
+                border = bentoZoneBorder,
+                cornerRadius = 14.dp
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    val tagsPrefix = stringResource(R.string.action_tags)
+                    SoftBentoPropertyGroup(
+                        label = "${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)} · $tagsPrefix"
+                    ) {
+                        val containerLabel = when {
+                            assignedProject != null && assignedHeading != null && assignedHeading.title.isNotBlank() ->
+                                "📁 ${assignedProject.title} › ${assignedHeading.title}"
+                            assignedProject != null -> "📁 ${assignedProject.title}"
+                            assignedArea != null -> "📦 ${assignedArea.title}"
+                            else -> "📁 ${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
+                        }
                         ThingsTagPill(
-                            title = tag.title,
+                            title = containerLabel,
+                            onClick = onOpenMoveDialog
+                        )
+
+                        task.tags.forEach { tag ->
+                            ThingsTagPill(
+                                title = tag.title,
+                                tooltipText = "$tagsPrefix: ${tag.title}",
+                                onClick = onOpenTagPickerDialog
+                            )
+                        }
+                        ThingsTagPill(
+                            title = "+ $tagsPrefix",
                             onClick = onOpenTagPickerDialog
                         )
                     }
-                    ThingsTagPill(
-                        title = "+ " + stringResource(R.string.action_tags),
-                        onClick = onOpenTagPickerDialog
-                    )
                 }
+            }
+        }
+
+        if (LocalInWideBentoTwoColumn.current) {
+            emitRightCards()
+        } else {
+            Column(
+                modifier = zoneModifier,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                emitRightCards()
             }
         }
     }
@@ -2670,10 +3139,10 @@ private fun ExpandedTaskCardBody(
                     .verticalScroll(bodyScrollState)
             ) {
                 if (isWideModal) {
-                    Row(
+                    BentoAlignedTwoColumnRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.Top
+                        horizontalGap = 16.dp,
+                        verticalSpacing = 12.dp
                     ) {
                         renderContentZone(Modifier.weight(1.35f))
                         renderPropertiesZone(Modifier.weight(1f))
@@ -2715,7 +3184,7 @@ private fun ExpandedTaskCardBody(
                     if (onAddTaskAttachment != null) {
                         ThingsTagPill(
                             title = "📎 ${stringResource(R.string.action_attach_file)}",
-                            onClick = { filePickerLauncher.launch(arrayOf("image/*", "application/pdf")) }
+                            onClick = { filePickerLauncher.launch(arrayOf("*/*")) }
                         )
                     }
                 }
@@ -2829,7 +3298,7 @@ private fun ExpandedTaskCardBody(
                                     },
                                     onClick = {
                                         showInlineMoreMenu = false
-                                        filePickerLauncher.launch(arrayOf("image/*", "application/pdf"))
+                                        filePickerLauncher.launch(arrayOf("*/*"))
                                     }
                                 )
                                 DropdownMenuItem(
@@ -2906,6 +3375,38 @@ private fun ExpandedTaskCardBody(
                                     }
                                 )
                             }
+
+                            val fallbackModalCopyTitle = stringResource(R.string.placeholder_todo_title)
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.action_copy_todo),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.primaryText
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ContentCopy,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showInlineMoreMenu = false
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    val latestSnapshot = task.copy(
+                                        title = editedTitleField.text,
+                                        notes = editedNotesField.text
+                                    )
+                                    clipboardManager.setText(
+                                        AnnotatedString(
+                                            formatTaskMarkdownForClipboard(latestSnapshot, fallbackModalCopyTitle)
+                                        )
+                                    )
+                                }
+                            )
 
                             if (onDuplicateTask != null) {
                                 DropdownMenuItem(
@@ -3023,6 +3524,7 @@ private fun TaskContextDropdownMenu(
     task: TaskItem,
     isSelected: Boolean,
     offset: DpOffset,
+    onOpenDetails: (() -> Unit)? = null,
     onStartInlineQuickEdit: (() -> Unit)? = null,
     onToggleSelection: (() -> Unit)?,
     onStatusChange: (TaskStatus) -> Unit,
@@ -3039,6 +3541,7 @@ private fun TaskContextDropdownMenu(
     onStartFocusTimer: (() -> Unit)? = null,
     onTogglePin: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
+    onCopyTaskMarkdown: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -3075,6 +3578,30 @@ private fun TaskContextDropdownMenu(
             )
         }
         HorizontalDivider(color = colors.hairlineDivider)
+
+        if (onOpenDetails != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.v30_open_details_action),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.OpenInFull,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onOpenDetails()
+                }
+            )
+        }
 
         if (onStartInlineQuickEdit != null) {
             DropdownMenuItem(
@@ -3148,11 +3675,11 @@ private fun TaskContextDropdownMenu(
                 }
             )
         }
-        val isCompleted = task.status == TaskStatus.COMPLETED
+        val isClosed = task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED
         DropdownMenuItem(
             text = {
                 Text(
-                    text = if (isCompleted) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
+                    text = if (isClosed) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.primaryText
                 )
@@ -3167,7 +3694,7 @@ private fun TaskContextDropdownMenu(
             },
             onClick = {
                 onDismiss()
-                onStatusChange(if (isCompleted) TaskStatus.OPEN else TaskStatus.COMPLETED)
+                onStatusChange(if (isClosed) TaskStatus.OPEN else TaskStatus.COMPLETED)
             }
         )
         DropdownMenuItem(
@@ -3397,6 +3924,29 @@ private fun TaskContextDropdownMenu(
                 }
             )
         }
+        if (onCopyTaskMarkdown != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.action_copy_todo),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.ContentCopy,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onCopyTaskMarkdown()
+                }
+            )
+        }
         if (onDuplicateTask != null) {
             DropdownMenuItem(
                 text = {
@@ -3442,17 +3992,20 @@ private fun TaskContextDropdownMenu(
             }
         )
         HorizontalDivider(color = colors.hairlineDivider)
+        val isAlreadyCanceled = task.status == TaskStatus.CANCELED
         DropdownMenuItem(
             text = {
                 Text(
-                    text = stringResource(R.string.action_cancel_todo),
+                    text = stringResource(
+                        if (isAlreadyCanceled) R.string.action_reopen_todo else R.string.action_cancel_todo
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.secondaryText
                 )
             },
             leadingIcon = {
                 Icon(
-                    imageVector = Icons.Outlined.Close,
+                    imageVector = if (isAlreadyCanceled) Icons.Outlined.Check else Icons.Outlined.Close,
                     contentDescription = null,
                     tint = colors.secondaryText,
                     modifier = Modifier.size(18.dp)
@@ -3460,7 +4013,7 @@ private fun TaskContextDropdownMenu(
             },
             onClick = {
                 onDismiss()
-                onStatusChange(TaskStatus.CANCELED)
+                onStatusChange(if (isAlreadyCanceled) TaskStatus.OPEN else TaskStatus.CANCELED)
             }
         )
         DropdownMenuItem(

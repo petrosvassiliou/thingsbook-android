@@ -792,7 +792,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     (bid) => bid && bid !== task.id
   ).length;
   const focusDurationMins =
-    task.durationMinutes != null && task.durationMinutes > 0 ? task.durationMinutes : 25;
+    task.durationMinutes != null && task.durationMinutes > 0
+      ? Math.min(720, task.durationMinutes)
+      : 25;
 
   const formatReminderClock = (ms: number) => {
     const d = new Date(ms);
@@ -1054,6 +1056,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <MarkdownNotesField
                   value={notesDraft}
                   rows={4}
+                  t={t}
                   onChange={(nextNotes) => {
                     setNotesDraft(nextNotes);
                     void localDb.upsertTask({ id: task.id, notes: nextNotes });
@@ -1423,17 +1426,17 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         ))}
                       </div>
 
-                      {(task.scheduledStartMinutes != null || task.durationMinutes != null) && (
+                      {task.scheduledStartMinutes != null && (
                         <button
                           type="button"
                           className="chip-btn urgent"
+                          data-testid="task-timeblock-clear-btn"
                           style={{ marginLeft: 'auto' }}
                           title={t.timeblockClear}
                           onClick={() =>
                             void localDb.upsertTask({
                               id: task.id,
-                              scheduledStartMinutes: null,
-                              durationMinutes: null
+                              scheduledStartMinutes: null
                             })
                           }
                         >
@@ -1699,7 +1702,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   onStartFocusTimer(
                     task.id,
                     titleDraft || task.title,
-                    task.durationMinutes ?? 25
+                    focusDurationMins
                   );
                 }}
               >
@@ -2370,8 +2373,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                 setCollapsedBadgePopover(null);
                                 void localDb.upsertTask({
                                   id: task.id,
-                                  scheduledStartMinutes: null,
-                                  durationMinutes: null
+                                  scheduledStartMinutes: null
                                 });
                               }}
                             >
@@ -2951,7 +2953,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   className="context-menu-item"
                   onClick={() => {
                     setCtxMenu(null);
-                    onStartFocusTimer(task.id, task.title, task.durationMinutes ?? 25);
+                    onStartFocusTimer(task.id, task.title, focusDurationMins);
                   }}
                 >
                   <Timer size={14} style={{ color: 'var(--things-blue)' }} />

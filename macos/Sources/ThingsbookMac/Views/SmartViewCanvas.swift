@@ -2132,7 +2132,7 @@ private struct TodayDailyTimelineView: View {
             let eComps = cal.dateComponents([.hour, .minute], from: endDate)
             let sMins = ((sComps.hour ?? 0) * 60) + (sComps.minute ?? 0)
             let rawEndMins = clampedEnd >= eodMillis ? 1440 : (((eComps.hour ?? 0) * 60) + (eComps.minute ?? 0))
-            let eMins = max(sMins + 15, rawEndMins)
+            let eMins = min(1440, max(sMins + 15, rawEndMins))
             slots.append(
                 TimedScheduleSlot(
                     id: "ev_\(ev.id)",
@@ -2144,13 +2144,13 @@ private struct TodayDailyTimelineView: View {
         }
 
         for task in scheduledTasks {
-            let sMins = task.scheduledStartMinutes ?? 540
+            let sMins = min(1435, max(0, task.scheduledStartMinutes ?? 540))
             let eMins = min(1440, sMins + task.effectiveDurationMinutes)
             slots.append(
                 TimedScheduleSlot(
                     id: "task_\(task.id)",
                     startMinutes: sMins,
-                    endMinutes: max(sMins + 5, eMins),
+                    endMinutes: min(1440, max(sMins + 5, eMins)),
                     kind: .task(task)
                 )
             )
@@ -2160,6 +2160,13 @@ private struct TodayDailyTimelineView: View {
             if lhs.startMinutes != rhs.startMinutes { return lhs.startMinutes < rhs.startMinutes }
             return lhs.endMinutes < rhs.endMinutes
         }
+    }
+
+    private func formatTimelineEndMinutes(_ endMinutes: Int) -> String {
+        if endMinutes >= 1440 {
+            return "24:00"
+        }
+        return TaskItem.formatMinutesOfDay(endMinutes)
     }
 
     private var conflictingSlotIds: Set<String> {
@@ -2261,7 +2268,7 @@ private struct TodayDailyTimelineView: View {
             AppleCalendarService.shared.openEventInAppleCalendar(ev)
         } label: {
             HStack(spacing: 10) {
-                Text("\(TaskItem.formatMinutesOfDay(startMinutes))–\(TaskItem.formatMinutesOfDay(endMinutes % 1440))")
+                Text("\(TaskItem.formatMinutesOfDay(startMinutes))–\(formatTimelineEndMinutes(endMinutes))")
                     .font(.system(size: CGFloat(MacCalendarAppointmentStyleMetrics.eventTimeFontSize), weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .frame(width: 98, alignment: .leading)
@@ -2348,6 +2355,11 @@ private struct TodayDailyTimelineView: View {
                     Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
                         store.toggleTaskCompletion(task)
                     }
+                    Button {
+                        store.copyTaskToPasteboard(task)
+                    } label: {
+                        Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
+                    }
                     Divider()
                     Button(role: .destructive) {
                         store.deleteTask(task)
@@ -2366,7 +2378,8 @@ private struct TodayDailyTimelineView: View {
         hasConflict: Bool
     ) -> some View {
         let isFullScreen = store.isTimelineFullScreen
-        let timeLabelText = "\(TaskItem.formatMinutesOfDay(startMinutes))–\(TaskItem.formatMinutesOfDay(endMinutes % 1440))"
+        let timeLabelText = "\(TaskItem.formatMinutesOfDay(startMinutes))–\(formatTimelineEndMinutes(endMinutes))"
+        let focusMinutes = min(max(1, task.durationMinutes ?? 25), 120)
         let isPopoverPresented = Binding<Bool>(
             get: { !isFullScreen && activePopoverTaskId == task.id },
             set: { open in activePopoverTaskId = (open && !isFullScreen) ? task.id : nil }
@@ -2421,7 +2434,7 @@ private struct TodayDailyTimelineView: View {
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
 
-                    Text("\(task.effectiveDurationMinutes)m")
+                    Text(TaskItem.formatCompactDuration(task.effectiveDurationMinutes))
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
@@ -2459,7 +2472,7 @@ private struct TodayDailyTimelineView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 9.5))
-                            Text("\(task.durationMinutes ?? 25)m")
+                            Text(TaskItem.formatCompactDuration(focusMinutes))
                                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                         }
                         .fixedSize(horizontal: true, vertical: false)
@@ -2478,7 +2491,7 @@ private struct TodayDailyTimelineView: View {
                     }
 
                     Button {
-                        store.setTaskTimeblock(task.id, startMinutes: nil, durationMinutes: nil)
+                        store.setTaskTimeblock(task.id, startMinutes: nil, durationMinutes: task.durationMinutes)
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))

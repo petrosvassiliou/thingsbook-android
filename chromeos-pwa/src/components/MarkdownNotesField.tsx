@@ -5,6 +5,7 @@ import {
   stripTrailingPunctuation,
   type DetectedNotesLink
 } from '../domain/powerUtils';
+import type { TranslationStrings } from '../i18n/translations';
 
 export const DetectedNotesLinksRow: React.FC<{
   links: DetectedNotesLink[];
@@ -180,6 +181,7 @@ export const MarkdownNotesField: React.FC<{
   rows?: number;
   className?: string;
   showDetectedLinks?: boolean;
+  t?: TranslationStrings;
   onFocusChange?: (focused: boolean) => void;
 }> = ({
   value,
@@ -188,6 +190,7 @@ export const MarkdownNotesField: React.FC<{
   rows = 2,
   className = 'task-notes-editor',
   showDetectedLinks = true,
+  t,
   onFocusChange
 }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -251,7 +254,7 @@ export const MarkdownNotesField: React.FC<{
           <button
             type="button"
             className="md-fmt-btn"
-            title="Heading (#)"
+            title={t?.mdHeadingTooltip ?? 'Heading (#)'}
             onClick={() => insertSnippet('# ')}
           >
             H1
@@ -259,7 +262,7 @@ export const MarkdownNotesField: React.FC<{
           <button
             type="button"
             className="md-fmt-btn"
-            title="Bold (**text**)"
+            title={t?.mdBoldTooltip ?? 'Bold (**text**)'}
             onClick={() => insertSnippet('**', '**')}
           >
             <strong>B</strong>
@@ -267,7 +270,7 @@ export const MarkdownNotesField: React.FC<{
           <button
             type="button"
             className="md-fmt-btn"
-            title="Italic (*text*)"
+            title={t?.mdItalicTooltip ?? 'Italic (*text*)'}
             onClick={() => insertSnippet('*', '*')}
           >
             <em>I</em>
@@ -275,7 +278,7 @@ export const MarkdownNotesField: React.FC<{
           <button
             type="button"
             className="md-fmt-btn"
-            title="Inline Code (`code`)"
+            title={t?.mdCodeTooltip ?? 'Inline Code (`code`)'}
             onClick={() => insertSnippet('`', '`')}
           >
             {'<>'}
@@ -283,15 +286,15 @@ export const MarkdownNotesField: React.FC<{
           <button
             type="button"
             className="md-fmt-btn"
-            title="Bullet List (- )"
+            title={t?.mdListTooltip ?? 'Bullet List (- )'}
             onClick={() => insertSnippet('- ')}
           >
-            • List
+            • {t?.mdListBtn ?? 'List'}
           </button>
           <button
             type="button"
             className="md-fmt-btn"
-            title="Markdown Checkbox (- [ ] )"
+            title={t?.mdCheckboxTooltip ?? 'Markdown Checkbox (- [ ] )'}
             onClick={() => insertSnippet('- [ ] ')}
           >
             ☑
@@ -300,7 +303,8 @@ export const MarkdownNotesField: React.FC<{
             <button
               type="button"
               className="md-fmt-btn preview-toggle"
-              title="Preview Notes"
+              title={t?.mdPreviewTooltip ?? 'Preview Notes'}
+              aria-label={t?.mdPreviewTooltip ?? 'Preview Notes'}
               onClick={() => {
                 setIsEditing(false);
                 onFocusChange?.(false);

@@ -166,6 +166,8 @@ data class TaskItem(
     val isDeleted: Boolean = false
 )
 
+const val MAX_TASK_DURATION_MINUTES = 48_000
+
 val STANDALONE_DURATION_PRESETS: List<Int> = listOf(5, 15, 30, 60, 120, 240, 480)
 
 fun formatDurationCompact(minutes: Int): String {
@@ -215,7 +217,7 @@ fun parseCustomDurationMinutes(rawInput: String): Int? {
         val mm = colonParts[1].trim().toIntOrNull()
         if (hh != null && mm != null && hh >= 0 && mm in 0..59) {
             val total = hh * 60 + mm
-            return if (total > 0) total.coerceAtMost(48_000) else null
+            return if (total > 0) total.coerceAtMost(MAX_TASK_DURATION_MINUTES) else null
         }
         return null
     }
@@ -224,7 +226,7 @@ fun parseCustomDurationMinutes(rawInput: String): Int? {
         val plain = normalized.toDoubleOrNull()
         if (plain != null && plain.isFinite()) {
             val rounded = kotlin.math.round(plain).toInt()
-            return if (rounded > 0) rounded.coerceAtMost(48_000) else null
+            return if (rounded > 0) rounded.coerceAtMost(MAX_TASK_DURATION_MINUTES) else null
         }
     }
 
@@ -250,7 +252,7 @@ fun parseCustomDurationMinutes(rawInput: String): Int? {
     }
 
     val rounded = kotlin.math.round(totalMinutes).toInt()
-    return if (rounded > 0) rounded.coerceAtMost(48_000) else null
+    return if (rounded > 0) rounded.coerceAtMost(MAX_TASK_DURATION_MINUTES) else null
 }
 
 fun wouldCreateDependencyCycle(

@@ -9,9 +9,9 @@ public struct FirebaseConfig: Codable, Equatable, Sendable {
     public var appId: String
 
     public init(projectId: String, apiKey: String, appId: String) {
-        self.projectId = projectId
-        self.apiKey = apiKey
-        self.appId = appId
+        self.projectId = projectId.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.appId = appId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static let defaultProduction = FirebaseConfig(
@@ -28,24 +28,35 @@ public struct FirebaseConfig: Codable, Equatable, Sendable {
 
     public static func loadActive(defaults: UserDefaults = .standard) -> FirebaseConfig {
         guard let data = defaults.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode(FirebaseConfig.self, from: data),
-              !decoded.projectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !decoded.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              let decoded = try? JSONDecoder().decode(FirebaseConfig.self, from: data) else {
             return .defaultProduction
         }
-        return decoded
+        let normalized = FirebaseConfig(
+            projectId: decoded.projectId,
+            apiKey: decoded.apiKey,
+            appId: decoded.appId
+        )
+        guard !normalized.projectId.isEmpty, !normalized.apiKey.isEmpty else {
+            return .defaultProduction
+        }
+        return normalized
     }
 
     public static func saveCustom(_ config: FirebaseConfig?, defaults: UserDefaults = .standard) {
-        if let config,
-           !config.projectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let data = try? JSONEncoder().encode(config) {
-                defaults.set(data, forKey: storageKey)
+        if let config {
+            let normalized = FirebaseConfig(
+                projectId: config.projectId,
+                apiKey: config.apiKey,
+                appId: config.appId
+            )
+            if !normalized.projectId.isEmpty, !normalized.apiKey.isEmpty {
+                if let data = try? JSONEncoder().encode(normalized) {
+                    defaults.set(data, forKey: storageKey)
+                }
+                return
             }
-        } else {
-            defaults.removeObject(forKey: storageKey)
         }
+        defaults.removeObject(forKey: storageKey)
     }
 }
 
@@ -437,7 +448,9 @@ public actor FirebaseCloudSyncService {
             throw CloudSyncError.invalidCredentials("Please enter your email address first.")
         }
         let config = FirebaseConfig.loadActive()
-        let url = URL(string: "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=\(config.apiKey)")!
+        guard let url = URL(string: "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=\(config.apiKey)") else {
+            throw CloudSyncError.networkFailure("Invalid Firebase configuration URL.")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -908,7 +921,9 @@ public actor FirebaseCloudSyncService {
         do {
             let validToken = try await validIdToken()
             let config = FirebaseConfig.loadActive()
-            let pulseURL = URL(string: "https://firestore.googleapis.com/v1/projects/\(config.projectId)/databases/(default)/documents/users/\(current.uid)/sync_meta/pulse")!
+            guard let pulseURL = URL(string: "https://firestore.googleapis.com/v1/projects/\(config.projectId)/databases/(default)/documents/users/\(current.uid)/sync_meta/pulse") else {
+                throw CloudSyncError.networkFailure("Invalid Firebase configuration URL.")
+            }
             var req = URLRequest(url: pulseURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4.0)
             req.httpMethod = "GET"
             req.setValue("Bearer \(validToken)", forHTTPHeaderField: "Authorization")
@@ -1269,7 +1284,9 @@ public actor FirebaseCloudSyncService {
             ]
         )
 
-        let commitURL = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectId)/databases/(default)/documents:commit")!
+        guard let commitURL = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectId)/databases/(default)/documents:commit") else {
+            throw CloudSyncError.networkFailure("Invalid Firebase configuration URL.")
+        }
         if !writes.isEmpty {
             let chunkSize = 449
             var idx = 0
@@ -1843,7 +1860,9 @@ public actor FirebaseCloudSyncService {
         collection: String,
         since: Int64
     ) async throws -> [[String: Any]] {
-        let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectId)/databases/(default)/documents/users/\(uid):runQuery")!
+        guard let url = URL(string: "https://firestore.googleapis.com/v1/projects/\(projectId)/databases/(default)/documents/users/\(uid):runQuery") else {
+            throw CloudSyncError.networkFailure("Invalid Firebase configuration URL.")
+        }
         var structuredQuery: [String: Any] = [
             "from": [["collectionId": collection]]
         ]
@@ -2153,7 +2172,9 @@ public actor FirebaseCloudSyncService {
     }
 
     private func callAuthEndpoint(endpoint: String, apiKey: String, body: [String: Any]) async throws -> AuthTokenResponse {
-        let url = URL(string: "https://identitytoolkit.googleapis.com/v1/\(endpoint)?key=\(apiKey)")!
+        guard let url = URL(string: "https://identitytoolkit.googleapis.com/v1/\(endpoint)?key=\(apiKey)") else {
+            throw CloudSyncError.networkFailure("Invalid Firebase configuration URL.")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -2179,7 +2200,9 @@ public actor FirebaseCloudSyncService {
         }
 
         let config = FirebaseConfig.loadActive()
-        let url = URL(string: "https://securetoken.googleapis.com/v1/token?key=\(config.apiKey)")!
+        guard let url = URL(string: "https://securetoken.googleapis.com/v1/token?key=\(config.apiKey)") else {
+            throw CloudSyncError.networkFailure("Invalid Firebase configuration URL.")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")

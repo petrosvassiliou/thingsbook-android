@@ -311,7 +311,7 @@ export const QuickShareModal: React.FC<{
                         scheduleState
                       });
                     } catch (err) {
-                      const msg = err instanceof Error ? err.message : 'Smart Parse failed';
+                      const msg = err instanceof Error ? err.message : t.geminiErrorFallback;
                       setParseError(msg);
                       onToast?.(`⚠️ ${msg}`);
                     } finally {
@@ -333,6 +333,7 @@ export const QuickShareModal: React.FC<{
             <div className="quick-share-notes-box">
               <MarkdownNotesField
                 value={notes}
+                t={t}
                 onChange={(next) => {
                   setNotes(next);
                   if (parseError) setParseError(null);
@@ -556,7 +557,8 @@ export const UndoSnackbarBanner: React.FC<{
           type="button"
           className="undo-snackbar-close"
           onClick={onDismiss}
-          aria-label="Dismiss"
+          title={t.actionClose}
+          aria-label={t.actionClose}
         >
           <X size={14} />
         </button>
@@ -896,6 +898,8 @@ export const ActionableReminderBanner: React.FC<{
           type="button"
           className="icon-btn"
           style={{ height: 24, minWidth: 24, padding: 0 }}
+          title={t.actionClose}
+          aria-label={t.actionClose}
           onClick={() => onDismiss(active.taskId)}
         >
           <X size={14} />

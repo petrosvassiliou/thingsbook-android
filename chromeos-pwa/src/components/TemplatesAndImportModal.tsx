@@ -567,6 +567,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
               <button
                 type="button"
                 className="chip-btn"
+                data-testid="templates-load-sample-btn"
                 onClick={() => setOutlineText(sampleMarkdownOutline)}
               >
                 <Sparkles size={12} />

@@ -21,6 +21,7 @@ import {
   TIMEBLOCK_DURATION_PRESETS,
   buildDailyTimeline,
   formatMinutesAsClock,
+  formatStandaloneDuration,
   parseClockToMinutes
 } from '../domain/v2Utils';
 import { localDb } from '../data/localDb';
@@ -176,6 +177,7 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                         : undefined
                     }
                     title={isFullScreen ? undefined : t.actionComplete}
+                    aria-label={t.actionComplete}
                     onClick={() => {
                       if (isFullScreen) return;
                       void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
@@ -225,7 +227,7 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                           void localDb.upsertTask({
                             id: tk.id,
                             scheduledStartMinutes: Math.min(1425, item.startMinutes + 15),
-                            durationMinutes: item.durationMinutes
+                            durationMinutes: tk.durationMinutes ?? item.durationMinutes
                           })
                         }
                       >
@@ -234,27 +236,31 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                       <button
                         type="button"
                         className="chip-btn active"
-                        title={t.actionFocusTimerMinutes(tk.durationMinutes ?? item.durationMinutes)}
+                        title={t.actionFocusTimerMinutes(
+                          Math.min(720, tk.durationMinutes ?? item.durationMinutes)
+                        )}
                         onClick={() =>
                           onStartFocusTimer(
                             tk.id,
                             tk.title || t.placeholderTodoTitle,
-                            tk.durationMinutes ?? item.durationMinutes
+                            Math.min(720, tk.durationMinutes ?? item.durationMinutes)
                           )
                         }
                       >
                         <Timer size={12.5} />
-                        <span>{tk.durationMinutes ?? item.durationMinutes}m</span>
+                        <span>
+                          {formatStandaloneDuration(tk.durationMinutes ?? item.durationMinutes)}
+                        </span>
                       </button>
                       <button
                         type="button"
                         className="icon-btn"
                         title={t.timeblockClear}
+                        aria-label={t.timeblockClear}
                         onClick={() =>
                           void localDb.upsertTask({
                             id: tk.id,
-                            scheduledStartMinutes: null,
-                            durationMinutes: null
+                            scheduledStartMinutes: null
                           })
                         }
                       >
@@ -310,6 +316,8 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                   <button
                     type="button"
                     className="things-checkbox"
+                    aria-label={t.actionComplete}
+                    title={t.actionComplete}
                     onClick={() => void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })}
                   />
                   <div

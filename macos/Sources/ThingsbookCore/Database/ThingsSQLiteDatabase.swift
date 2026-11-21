@@ -1147,23 +1147,44 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         try queue.sync {
             let now = nowMillis()
             let normalizedStart = scheduledStartMinutes.map { (($0 % 1440) + 1440) % 1440 }
-            let normalizedDuration: Int? = {
-                if let d = durationMinutes, d > 0 { return min(d, 720) }
-                if normalizedStart != nil { return 30 }
-                return nil
-            }()
-            let stmt = try prepareLocked("""
-                UPDATE tasks
-                SET scheduled_start_minutes = ?, duration_minutes = ?, updated_at = ?, is_dirty = 1
-                WHERE id = ?;
-            """)
-            defer { sqlite3_finalize(stmt) }
-            bindInt64(stmt, 1, normalizedStart.map(Int64.init))
-            bindInt64(stmt, 2, normalizedDuration.map(Int64.init))
-            bindInt64(stmt, 3, now)
-            bindText(stmt, 4, taskId)
-            if sqlite3_step(stmt) != SQLITE_DONE {
-                throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
+            if normalizedStart == nil && durationMinutes == nil {
+                let stmt = try prepareLocked("""
+                    UPDATE tasks
+                    SET scheduled_start_minutes = NULL,
+                        updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END,
+                        is_dirty = 1
+                    WHERE id = ?;
+                """)
+                defer { sqlite3_finalize(stmt) }
+                bindInt64(stmt, 1, now)
+                bindInt64(stmt, 2, now)
+                bindText(stmt, 3, taskId)
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
+                }
+            } else {
+                let normalizedDuration: Int? = {
+                    if let d = durationMinutes, d > 0 { return min(d, 48_000) }
+                    if normalizedStart != nil { return 30 }
+                    return nil
+                }()
+                let stmt = try prepareLocked("""
+                    UPDATE tasks
+                    SET scheduled_start_minutes = ?,
+                        duration_minutes = ?,
+                        updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END,
+                        is_dirty = 1
+                    WHERE id = ?;
+                """)
+                defer { sqlite3_finalize(stmt) }
+                bindInt64(stmt, 1, normalizedStart.map(Int64.init))
+                bindInt64(stmt, 2, normalizedDuration.map(Int64.init))
+                bindInt64(stmt, 3, now)
+                bindInt64(stmt, 4, now)
+                bindText(stmt, 5, taskId)
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
+                }
             }
         }
         notifyMutation()
@@ -1209,7 +1230,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let now = nowMillis()
             let normalizedEffort = TaskEffortLevel.normalized(effortLevel)?.rawValue
             let normalizedDuration: Int? = {
-                if let d = durationMinutes, d > 0 { return min(d, 720) }
+                if let d = durationMinutes, d > 0 { return min(d, 48_000) }
                 return nil
             }()
             let stmt = try prepareLocked("""
@@ -3458,7 +3479,12 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 if isIndented && appendSubtaskOrNote(subtask: itemText, note: nil) {
                     continue
                 }
-                let spec = TemplateTaskSpec(title: itemText)
+                let meta = extractOutlineTaskInlineMetadata(itemText)
+                let spec = TemplateTaskSpec(
+                    title: meta.cleanTitle,
+                    scheduledStartMinutes: meta.scheduledStartMinutes,
+                    durationMinutes: meta.durationMinutes
+                )
                 if let hIdx = currentHeadingIndex {
                     headings[hIdx].tasks.append(spec)
                 } else {
@@ -3473,16 +3499,101 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
             if projectTitle != nil && headings.isEmpty && unheadedTasks.isEmpty {
                 projectNotesLines.append(cleanLine)
-            } else if let hIdx = currentHeadingIndex {
-                headings[hIdx].tasks.append(TemplateTaskSpec(title: cleanLine))
             } else {
-                unheadedTasks.append(TemplateTaskSpec(title: cleanLine))
+                let meta = extractOutlineTaskInlineMetadata(cleanLine)
+                let spec = TemplateTaskSpec(
+                    title: meta.cleanTitle,
+                    scheduledStartMinutes: meta.scheduledStartMinutes,
+                    durationMinutes: meta.durationMinutes
+                )
+                if let hIdx = currentHeadingIndex {
+                    headings[hIdx].tasks.append(spec)
+                } else {
+                    unheadedTasks.append(spec)
+                }
             }
         }
 
         let resolvedTitle = (projectTitle?.isEmpty == false) ? projectTitle! : defaultTitle
         let resolvedNotes = projectNotesLines.joined(separator: "\n")
         return (resolvedTitle, resolvedNotes, ProjectTemplateBlueprint(unheadedTasks: unheadedTasks, headings: headings))
+    }
+
+    private static func extractOutlineTaskInlineMetadata(
+        _ rawTitle: String
+    ) -> (cleanTitle: String, scheduledStartMinutes: Int?, durationMinutes: Int?) {
+        var working = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        var startMinutes: Int? = nil
+        var durationMinutes: Int? = nil
+
+        // 1. Trailing @<duration> token (e.g. "@45m", "@1d", "@2.5d", "@1h30m"), requiring a unit letter so "@123" is untouched
+        if let atDurRegex = try? NSRegularExpression(pattern: #"\s+@([^\s]+)$"#) {
+            let nsRange = NSRange(working.startIndex..<working.endIndex, in: working)
+            if let match = atDurRegex.firstMatch(in: working, range: nsRange),
+               let tokenRange = Range(match.range(at: 1), in: working),
+               let fullRange = Range(match.range(at: 0), in: working) {
+                let token = String(working[tokenRange])
+                let isClockStart = token.range(of: #"^\d{1,2}:\d{2}$"#, options: .regularExpression) != nil
+                let hasUnitLetter = token.range(of: #"[a-zA-Zäöüßáéíóúàèìòù]"#, options: .regularExpression) != nil
+                if !isClockStart && hasUnitLetter, let parsedDur = TaskItem.parseCustomDurationMinutes(token) {
+                    durationMinutes = parsedDur
+                    working = String(working[..<fullRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
+
+        // 2. Inline @HH:MM start time token (e.g. "@09:00", "@14:30")
+        if let timeRegex = try? NSRegularExpression(pattern: #"(?:^|\s)@(\d{1,2}):(\d{2})(?=\s|$)"#) {
+            let nsRange = NSRange(working.startIndex..<working.endIndex, in: working)
+            if let match = timeRegex.firstMatch(in: working, range: nsRange),
+               let hRange = Range(match.range(at: 1), in: working),
+               let mRange = Range(match.range(at: 2), in: working),
+               let fullRange = Range(match.range(at: 0), in: working),
+               let h = Int(working[hRange]),
+               let m = Int(working[mRange]),
+               (0...23).contains(h), (0...59).contains(m) {
+                startMinutes = h * 60 + m
+                let prefix = String(working[..<fullRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let suffix = String(working[fullRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                working = [prefix, suffix].filter { !$0.isEmpty }.joined(separator: " ")
+            }
+        }
+
+        // 3. Re-check trailing @<duration> or (<duration>) in case @HH:MM came after @<duration> or title ended with "(45m)" / "(1d)"
+        if durationMinutes == nil {
+            if let atDurRegex = try? NSRegularExpression(pattern: #"\s+@([^\s]+)$"#) {
+                let nsRange = NSRange(working.startIndex..<working.endIndex, in: working)
+                if let match = atDurRegex.firstMatch(in: working, range: nsRange),
+                   let tokenRange = Range(match.range(at: 1), in: working),
+                   let fullRange = Range(match.range(at: 0), in: working) {
+                    let token = String(working[tokenRange])
+                    let hasUnitLetter = token.range(of: #"[a-zA-Zäöüßáéíóúàèìòù]"#, options: .regularExpression) != nil
+                    if hasUnitLetter, let parsedDur = TaskItem.parseCustomDurationMinutes(token) {
+                        durationMinutes = parsedDur
+                        working = String(working[..<fullRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                    }
+                }
+            }
+        }
+
+        if durationMinutes == nil {
+            if let parenRegex = try? NSRegularExpression(pattern: #"\s+\(([^()]+)\)$"#) {
+                let nsRange = NSRange(working.startIndex..<working.endIndex, in: working)
+                if let match = parenRegex.firstMatch(in: working, range: nsRange),
+                   let tokenRange = Range(match.range(at: 1), in: working),
+                   let fullRange = Range(match.range(at: 0), in: working) {
+                    let token = String(working[tokenRange])
+                    let hasUnitLetter = token.range(of: #"[a-zA-Zäöüßáéíóúàèìòù]"#, options: .regularExpression) != nil
+                    if hasUnitLetter, let parsedDur = TaskItem.parseCustomDurationMinutes(token) {
+                        durationMinutes = parsedDur
+                        working = String(working[..<fullRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                    }
+                }
+            }
+        }
+
+        let clean = working.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (clean.isEmpty ? rawTitle.trimmingCharacters(in: .whitespacesAndNewlines) : clean, startMinutes, durationMinutes)
     }
 
     @discardableResult

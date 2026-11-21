@@ -491,62 +491,71 @@ public struct SettingsWindowView: View {
                                 .foregroundStyle(.red)
                         }
 
-                        HStack(spacing: 8) {
-                            Button(store.tr("auth_login_email")) {
-                                performAuth {
-                                    store.preferences.localOnlyDbMode = false
-                                    _ = try await store.cloudSync.signInEmail(
-                                        email: emailInput,
-                                        password: passwordInput,
-                                        mergeLocalTasks: mergeLocalOnLogin,
-                                        localOnlyMode: false
-                                    )
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(isAuthBusy || emailInput.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                            Button(store.tr("auth_register_account")) {
-                                performAuth {
-                                    store.preferences.localOnlyDbMode = false
-                                    _ = try await store.cloudSync.registerEmail(
-                                        email: emailInput,
-                                        password: passwordInput,
-                                        mergeLocalTasks: mergeLocalOnLogin,
-                                        localOnlyMode: false
-                                    )
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(isAuthBusy || emailInput.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                            Button(store.tr("macos_instant_sync_btn")) {
-                                performAuth {
-                                    store.preferences.localOnlyDbMode = false
-                                    _ = try await store.cloudSync.signInInstantEmail(
-                                        email: emailInput,
-                                        mergeLocalTasks: mergeLocalOnLogin,
-                                        localOnlyMode: false
-                                    )
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(isAuthBusy || emailInput.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                            Spacer()
-
-                            Button(store.tr("auth_forgot_password")) {
-                                performAuth {
-                                    try await store.cloudSync.sendPasswordResetEmail(email: emailInput)
-                                    await MainActor.run {
-                                        authMessage = store.tr("macos_reset_email_sent")
+                        VStack(alignment: .leading, spacing: 8) {
+                            let isEmailEmpty = emailInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ThingsFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                                Button(store.tr("auth_login_email")) {
+                                    performAuth {
+                                        store.preferences.localOnlyDbMode = false
+                                        _ = try await store.cloudSync.signInEmail(
+                                            email: emailInput,
+                                            password: passwordInput,
+                                            mergeLocalTasks: mergeLocalOnLogin,
+                                            localOnlyMode: false
+                                        )
                                     }
                                 }
+                                .buttonStyle(.bordered)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .disabled(isAuthBusy || isEmailEmpty)
+
+                                Button(store.tr("auth_register_account")) {
+                                    performAuth {
+                                        store.preferences.localOnlyDbMode = false
+                                        _ = try await store.cloudSync.registerEmail(
+                                            email: emailInput,
+                                            password: passwordInput,
+                                            mergeLocalTasks: mergeLocalOnLogin,
+                                            localOnlyMode: false
+                                        )
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .disabled(isAuthBusy || isEmailEmpty)
+
+                                Button(store.tr("macos_instant_sync_btn")) {
+                                    performAuth {
+                                        store.preferences.localOnlyDbMode = false
+                                        _ = try await store.cloudSync.signInInstantEmail(
+                                            email: emailInput,
+                                            mergeLocalTasks: mergeLocalOnLogin,
+                                            localOnlyMode: false
+                                        )
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .disabled(isAuthBusy || isEmailEmpty)
                             }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(ThingsMacPalette.accentBlue)
-                            .disabled(emailInput.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                            HStack {
+                                Button(store.tr("auth_forgot_password")) {
+                                    performAuth {
+                                        try await store.cloudSync.sendPasswordResetEmail(email: emailInput)
+                                        await MainActor.run {
+                                            authMessage = store.tr("macos_reset_email_sent")
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .disabled(isEmailEmpty)
+
+                                Spacer(minLength: 0)
+                            }
                         }
                     }
                     .padding(14)
@@ -563,18 +572,27 @@ public struct SettingsWindowView: View {
                             .textFieldStyle(.roundedBorder)
                         HStack {
                             Button(store.tr("auth_firebase_apply")) {
+                                let trimmedProjectId = customProjectId.trimmingCharacters(in: .whitespacesAndNewlines)
+                                let trimmedApiKey = customApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                let trimmedAppId = customAppId.trimmingCharacters(in: .whitespacesAndNewlines)
+                                customProjectId = trimmedProjectId
+                                customApiKey = trimmedApiKey
+                                customAppId = trimmedAppId
                                 FirebaseConfig.saveCustom(
                                     FirebaseConfig(
-                                        projectId: customProjectId,
-                                        apiKey: customApiKey,
-                                        appId: customAppId
+                                        projectId: trimmedProjectId,
+                                        apiKey: trimmedApiKey,
+                                        appId: trimmedAppId
                                     )
                                 )
                                 store.showToast(store.tr("macos_firebase_saved_toast"))
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
-                            .disabled(customProjectId.isEmpty || customApiKey.isEmpty)
+                            .disabled(
+                                customProjectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    || customApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            )
 
                             Button(store.tr("macos_firebase_reset_default")) {
                                 FirebaseConfig.saveCustom(nil)

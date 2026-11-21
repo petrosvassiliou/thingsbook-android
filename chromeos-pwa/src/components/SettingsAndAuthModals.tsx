@@ -91,7 +91,7 @@ const BackupCreateModal: React.FC<BackupCreateModalProps> = ({
       const file = new File([copy.buffer], filename, { type: 'application/octet-stream' });
       return { file, filename };
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Backup failed');
+      onToast(err instanceof Error ? err.message : t.backupFailedToast);
       return null;
     } finally {
       setBusy(false);
@@ -179,6 +179,8 @@ const BackupCreateModal: React.FC<BackupCreateModalProps> = ({
           <button
             type="button"
             className={`toggle-switch ${encrypt ? 'on' : ''}`}
+            aria-label={t.backupPasswordProtect}
+            aria-pressed={encrypt}
             onClick={() => setEncrypt((v) => !v)}
           >
             <span className="toggle-switch-knob" />
@@ -199,6 +201,8 @@ const BackupCreateModal: React.FC<BackupCreateModalProps> = ({
                 type="button"
                 className="icon-btn"
                 style={{ position: 'absolute', right: 4, top: 3 }}
+                aria-label={t.backupPasswordLabel}
+                title={t.backupPasswordLabel}
                 onClick={() => setShowPw((v) => !v)}
               >
                 {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -335,10 +339,10 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
         onRestoredPrefs(restoredPatch);
       }
 
-      onToast(`✓ Restored ${result.summary.tasksCount} ${t.entityTodos}`);
+      onToast(t.backupRestoredToast(result.summary.tasksCount));
       onClose();
     } catch (err) {
-      setErrMsg(err instanceof Error ? err.message : 'Invalid password or backup file');
+      setErrMsg(err instanceof Error ? err.message : t.backupInvalidFileOrPassword);
     } finally {
       setBusy(false);
     }
@@ -397,6 +401,8 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
               type="button"
               className="icon-btn"
               style={{ position: 'absolute', right: 4, top: 3 }}
+              aria-label={t.backupPasswordLabel}
+              title={t.backupPasswordLabel}
               onClick={() => setShowPw((v) => !v)}
             >
               {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -418,6 +424,8 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
             <button
               type="button"
               className={`toggle-switch ${syncAfter ? 'on' : ''}`}
+              aria-label={t.backupSyncAfterRestore}
+              aria-pressed={syncAfter}
               onClick={() => setSyncAfter((v) => !v)}
             >
               <span className="toggle-switch-knob" />
@@ -543,7 +551,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const text = await file.text();
       await onImportIcsFile(text, file.name);
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Invalid .ics calendar file');
+      onToast(err instanceof Error ? err.message : t.calendarInvalidIcsError);
     }
   };
 
@@ -557,7 +565,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const inspection = await localDb.inspectBackupFile(bytes);
       setRestoreTarget({ bytes, name: file.name, inspection });
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'Invalid .tbbackup file');
+      onToast(err instanceof Error ? err.message : t.backupInvalidFileOrPassword);
     }
   };
 
@@ -590,7 +598,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       URL.revokeObjectURL(url);
       onToast(`✓ ${filename}`);
     } catch (err) {
-      onToast(`⚠️ ${err instanceof Error ? err.message : 'CSV export failed'}`);
+      onToast(`⚠️ ${err instanceof Error ? err.message : t.csvExportFailedToast}`);
     }
   };
 
@@ -601,9 +609,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const text = await file.text();
       const count = await localDb.importCsv(text);
-      onToast(`✓ Imported ${count} ${t.entityTodos}`);
+      onToast(t.csvImportedToast(count));
     } catch (err) {
-      onToast(`⚠️ ${err instanceof Error ? err.message : 'Invalid CSV file'}`);
+      onToast(`⚠️ ${err instanceof Error ? err.message : t.csvImportFailedToast}`);
     }
   };
 
@@ -1046,6 +1054,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <button
                           type="button"
                           className="chip-btn"
+                          title={t.actionRefresh}
+                          aria-label={t.actionRefresh}
                           onClick={() => void onRefreshCalendars()}
                         >
                           <RefreshCw size={12.5} />
@@ -1116,7 +1126,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <button
                             type="button"
                             className="chip-btn"
-                            title="Refresh"
+                            title={t.actionRefresh}
+                            aria-label={t.actionRefresh}
                             onClick={() => void onRefreshCalendars()}
                           >
                             <RefreshCw size={12.5} />
@@ -1216,6 +1227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   type="button"
                                   className="icon-btn"
                                   title={t.actionDelete}
+                                  aria-label={t.actionDelete}
                                   style={{ color: 'var(--deadline-red)', flexShrink: 0 }}
                                   onClick={() => onRemoveImportedCalendar(cal.id)}
                                 >
@@ -1257,7 +1269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     syncState.userId && !prefs.localOnlyDbMode
                   );
                   await localDb.purgeSampleDataLocally(false, shouldTombstoneInCloud);
-                  onToast('✓ Sample tasks removed');
+                  onToast(t.sampleTasksRemovedToast);
                 }}
               >
                 <Trash2 size={13.5} />
@@ -1293,6 +1305,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 className={`toggle-switch ${prefs.autoCheckUpdatesEnabled ? 'on' : ''}`}
+                aria-label={t.settingsAutoUpdateLabel}
+                aria-pressed={prefs.autoCheckUpdatesEnabled}
                 onClick={() =>
                   onUpdatePrefs({ autoCheckUpdatesEnabled: !prefs.autoCheckUpdatesEnabled })
                 }
@@ -1321,6 +1335,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 data-testid="settings-include-beta-toggle"
                 className={`toggle-switch ${effectiveIncludeBeta ? 'on' : ''}`}
                 disabled={isBetaBuild}
+                aria-label={t.settingsIncludeBetaTitle}
+                aria-pressed={effectiveIncludeBeta}
                 title={isBetaBuild ? t.betaChannelBadge : t.settingsIncludeBetaTitle}
                 onClick={() => {
                   const nextIncludeBeta = !prefs.includeBetaUpdates;
@@ -1695,6 +1711,8 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
             <button
               type="button"
               className="icon-btn"
+              title={t.actionCancel}
+              aria-label={t.actionCancel}
               onClick={() => setPendingMergeAction(null)}
             >
               <X size={18} />
@@ -1901,7 +1919,7 @@ export const AuthSyncModal: React.FC<AuthSyncModalProps> = ({
               onClick={async () => {
                 try {
                   await cloudSync.sendResetEmail(email);
-                  onToast('✓ Password reset email sent');
+                  onToast(t.authResetEmailSentToast);
                 } catch (err) {
                   setError(formatAuthErrorMessage(err));
                 }

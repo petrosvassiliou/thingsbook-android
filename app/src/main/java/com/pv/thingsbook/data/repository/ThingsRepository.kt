@@ -39,6 +39,7 @@ import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.ChecklistItem
 import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
+import com.pv.thingsbook.domain.model.MAX_TASK_DURATION_MINUTES
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectOutlineImporter
 import com.pv.thingsbook.domain.model.ProjectStatus
@@ -57,6 +58,7 @@ import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TemplateHeadingBlueprint
 import com.pv.thingsbook.domain.model.TemplateTaskBlueprint
+import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.wouldCreateDependencyCycle
 import com.pv.thingsbook.domain.util.runCatchingCancellable
 import com.pv.thingsbook.ui.components.SmartViewType
@@ -486,7 +488,7 @@ class ThingsRepository @Inject constructor(
             deadline = deadline,
             reminderTime = reminderTime,
             scheduledStartMinutes = resolvedStartMins?.takeIf { it in 0..1439 },
-            durationMinutes = resolvedDurationMins?.takeIf { it in 1..1440 },
+            durationMinutes = resolvedDurationMins?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
             completedAt = completedAt,
             projectId = projectId,
             headingId = headingId,
@@ -565,7 +567,7 @@ class ThingsRepository @Inject constructor(
         val existing = database.taskDao().getById(taskId) ?: return
         if (existing.isDeleted) return
         val nextEffort = if (updateEffort) EffortLevel.normalize(effortLevel) else existing.effortLevel
-        val nextDuration = if (updateDuration) durationMinutes?.takeIf { it > 0 }?.coerceIn(1, 1440) else existing.durationMinutes
+        val nextDuration = if (updateDuration) durationMinutes?.takeIf { it > 0 }?.coerceIn(1, MAX_TASK_DURATION_MINUTES) else existing.durationMinutes
         if (nextEffort == existing.effortLevel && nextDuration == existing.durationMinutes) return
         val now = System.currentTimeMillis()
         database.taskDao().upsert(
@@ -1945,10 +1947,12 @@ class ThingsRepository @Inject constructor(
         val existing = database.taskDao().getById(taskId) ?: return
         val now = System.currentTimeMillis()
         val cleanStart = scheduledStartMinutes?.takeIf { it in 0..1439 }
-        val cleanDuration = if (cleanStart == null && durationMinutes == null) {
-            null
-        } else {
-            durationMinutes?.coerceIn(5, 720) ?: existing.durationMinutes ?: 30
+        val resolvedDuration = when {
+            cleanStart == null && durationMinutes == null -> existing.durationMinutes
+            cleanStart == null -> durationMinutes?.coerceIn(1, MAX_TASK_DURATION_MINUTES)
+            else -> durationMinutes?.coerceIn(1, MAX_TASK_DURATION_MINUTES)
+                ?: existing.durationMinutes?.coerceIn(1, MAX_TASK_DURATION_MINUTES)
+                ?: TimeblockScheduleUtils.DEFAULT_TIMEBLOCK_DURATION_MINUTES
         }
         val zone = ZoneId.systemDefault()
         val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -1970,7 +1974,7 @@ class ThingsRepository @Inject constructor(
                 scheduleState = updatedSchedule,
                 whenDate = updatedWhen,
                 scheduledStartMinutes = cleanStart,
-                durationMinutes = if (cleanStart != null) cleanDuration else durationMinutes?.coerceIn(5, 720),
+                durationMinutes = resolvedDuration,
                 updatedAt = now,
                 isDirty = true
             )
@@ -3695,7 +3699,7 @@ class ThingsRepository @Inject constructor(
                     deadline = taskDeadline,
                     reminderTime = null,
                     scheduledStartMinutes = taskBp.scheduledStartMinutes?.takeIf { it in 0..1439 },
-                    durationMinutes = taskBp.durationMinutes?.takeIf { it in 1..1440 },
+                    durationMinutes = taskBp.durationMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
                     completedAt = null,
                     projectId = projectId,
                     headingId = headingId,
@@ -4937,7 +4941,7 @@ class ThingsRepository @Inject constructor(
                     deadline = t.deadline,
                     reminderTime = t.reminderTime,
                     scheduledStartMinutes = t.scheduledStartMinutes?.takeIf { it in 0..1439 },
-                    durationMinutes = t.durationMinutes?.takeIf { it in 1..1440 },
+                    durationMinutes = t.durationMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
                     isPinned = t.isPinned,
                     effortLevel = EffortLevel.normalize(t.effortLevel),
                     blockedByJson = json.encodeToString(cleanBlockedByIds),

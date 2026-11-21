@@ -257,9 +257,17 @@ fun ThingsNotificationSettingsModal(
                             initialMinute = selectedMinute.coerceIn(0, 59),
                             is24Hour = true
                         )
+                        var didInitCustomTime by remember { mutableStateOf(false) }
                         LaunchedEffect(timeState.hour, timeState.minute) {
-                            selectedHour = timeState.hour.coerceIn(0, 23)
-                            selectedMinute = timeState.minute.coerceIn(0, 59)
+                            val nextHour = timeState.hour.coerceIn(0, 23)
+                            val nextMinute = timeState.minute.coerceIn(0, 59)
+                            val changed = nextHour != selectedHour || nextMinute != selectedMinute
+                            selectedHour = nextHour
+                            selectedMinute = nextMinute
+                            if (didInitCustomTime && changed) {
+                                onSaveDailyDigestConfig(enabled, nextHour, nextMinute)
+                            }
+                            didInitCustomTime = true
                         }
                         Box(
                             modifier = Modifier.fillMaxWidth(),

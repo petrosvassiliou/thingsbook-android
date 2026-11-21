@@ -161,11 +161,18 @@ export function formatTimeblockRange(
 ): string {
   const dur =
     durationMinutes != null && Number.isFinite(durationMinutes) && durationMinutes > 0
-      ? Math.max(5, Math.min(720, Math.trunc(durationMinutes)))
+      ? Math.max(1, Math.min(48_000, Math.trunc(durationMinutes)))
       : DEFAULT_TIMEBLOCK_DURATION_MINUTES;
-  const startClock = formatMinutesAsClock(scheduledStartMinutes);
-  const endClock = formatMinutesAsClock(scheduledStartMinutes + dur);
-  return `${startClock}–${endClock} · ${dur}m`;
+  const startMin = Math.max(0, Math.min(1439, Math.trunc(scheduledStartMinutes)));
+  const startClock = formatMinutesAsClock(startMin);
+  const durLabel = formatStandaloneDuration(dur);
+  if (dur >= DEFAULT_DAILY_CAPACITY_MINUTES) {
+    return `${startClock} · ${durLabel}`;
+  }
+  const rawEnd = startMin + dur;
+  const endClock = formatMinutesAsClock(rawEnd);
+  const nextDaySuffix = rawEnd > 1440 ? ' +1d' : '';
+  return `${startClock}–${endClock}${nextDaySuffix} · ${durLabel}`;
 }
 
 export interface DailyTimelineItem {
@@ -221,7 +228,7 @@ export function buildDailyTimeline(
       startMinutes: startMin,
       endMinutes: endMin,
       durationMinutes: durMin,
-      rangeLabel: `${formatMinutesAsClock(startMin)}–${formatMinutesAsClock(endMin)} · ${durMin}m`,
+      rangeLabel: `${formatMinutesAsClock(startMin)}–${formatMinutesAsClock(endMin)} · ${formatStandaloneDuration(durMin)}`,
       hasConflict: false,
       conflictTitles: [],
       calendarEvent: ev
@@ -235,19 +242,19 @@ export function buildDailyTimeline(
       continue;
     }
     const startMin = Math.max(0, Math.min(1439, Math.trunc(task.scheduledStartMinutes)));
-    const durMin =
+    const rawDur =
       task.durationMinutes != null && Number.isFinite(task.durationMinutes) && task.durationMinutes > 0
-        ? Math.max(5, Math.min(720, Math.trunc(task.durationMinutes)))
+        ? Math.max(1, Math.min(48_000, Math.trunc(task.durationMinutes)))
         : DEFAULT_TIMEBLOCK_DURATION_MINUTES;
-    const endMin = Math.min(1440, startMin + durMin);
+    const endMinutes = Math.min(1440, startMin + rawDur);
     rawTimed.push({
       id: `task:${task.id}`,
       kind: 'task',
       title: task.title,
       startMinutes: startMin,
-      endMinutes: endMin,
-      durationMinutes: durMin,
-      rangeLabel: formatTimeblockRange(startMin, durMin),
+      endMinutes,
+      durationMinutes: rawDur,
+      rangeLabel: formatTimeblockRange(startMin, rawDur),
       hasConflict: false,
       conflictTitles: [],
       task
@@ -1782,7 +1789,7 @@ function normalizeBlueprintTask(raw: unknown): ProjectTemplateTaskBlueprint | nu
       : null;
   const durationMinutes =
     typeof r.durationMinutes === 'number' && Number.isFinite(r.durationMinutes) && r.durationMinutes > 0
-      ? Math.max(5, Math.min(720, Math.trunc(r.durationMinutes)))
+      ? Math.max(1, Math.min(48_000, Math.trunc(r.durationMinutes)))
       : null;
 
   const validStates = new Set<ScheduleState>([
@@ -1997,7 +2004,21 @@ export function parseProjectOutlineInput(
         if (!lastTask.checklistItems) lastTask.checklistItems = [];
         lastTask.checklistItems.push(itemText);
       } else {
-        const newTask: ProjectTemplateTaskBlueprint = { title: itemText };
+        let taskTitle = itemText;
+        let parsedDuration: number | undefined;
+        const durTokenMatch = /\s+@(\S+)$/.exec(itemText);
+        if (durTokenMatch) {
+          const candidateMins = parseCustomDurationMinutes(durTokenMatch[1]);
+          const strippedTitle = itemText.slice(0, durTokenMatch.index).trim();
+          if (candidateMins != null && strippedTitle.length > 0) {
+            taskTitle = strippedTitle;
+            parsedDuration = candidateMins;
+          }
+        }
+        const newTask: ProjectTemplateTaskBlueprint = {
+          title: taskTitle,
+          ...(parsedDuration != null ? { durationMinutes: parsedDuration } : {})
+        };
         if (currentHeading) {
           currentHeading.tasks.push(newTask);
         } else {

@@ -2,11 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { IDBPDatabase } from 'idb';
 import {
   STANDALONE_DURATION_PRESETS,
+  buildDailyTimeline,
   formatStandaloneDuration,
-  parseCustomDurationMinutes
+  formatTimeblockRange,
+  parseCustomDurationMinutes,
+  parseProjectOutlineInput
 } from '../src/domain/v2Utils.ts';
+import {
+  buildProjectRoadmapLayout,
+  generateRoadmapPdfBytes
+} from '../src/domain/v30Roadmap.ts';
+import { ThingsLocalDb } from '../src/data/localDb.ts';
+import { TRANSLATIONS } from '../src/i18n/translations.ts';
 
 const SRC_DIR = path.resolve(import.meta.dirname, '../src');
 
@@ -229,3 +239,249 @@ test('v3.0.0-beta.13 subtle pill hover, 1-day & custom durations, 0ms macOS task
   assert.ok(pwaFaviconSvg.includes('width="504" height="504"'));
   assert.ok(androidFgXml.includes('android:scaleX="1.18"'));
 });
+
+function createInMemoryIdb(): () => Promise<IDBPDatabase> {
+  type StoreMap = Map<string, unknown>;
+  const stores = new Map<string, StoreMap>([
+    ['areas', new Map()],
+    ['projects', new Map()],
+    ['headings', new Map()],
+    ['tasks', new Map()],
+    ['checklist_items', new Map()],
+    ['tags', new Map()],
+    ['attachments', new Map()],
+    ['meta', new Map([['initial_seeded', true]])],
+    ['projectTemplates', new Map()]
+  ]);
+  const getStoreMap = (name: string): StoreMap => {
+    let m = stores.get(name);
+    if (!m) {
+      m = new Map();
+      stores.set(name, m);
+    }
+    return m;
+  };
+  const makeObjectStore = (name: string) => {
+    const map = getStoreMap(name);
+    return {
+      async get(key: string) {
+        const val = map.get(key);
+        return val === undefined ? undefined : structuredClone(val);
+      },
+      async getAll() {
+        return Array.from(map.values()).map((v) => structuredClone(v));
+      },
+      async put(value: unknown, explicitKey?: string) {
+        const k =
+          explicitKey ??
+          (typeof value === 'object' && value !== null && 'id' in value
+            ? String((value as { id: string }).id)
+            : '');
+        map.set(k, structuredClone(value));
+        return k;
+      },
+      async delete(key: string) {
+        map.delete(key);
+      },
+      async clear() {
+        map.clear();
+      },
+      async count() {
+        return map.size;
+      }
+    };
+  };
+  const dbFake = {
+    async get(storeName: string, key: string) {
+      return makeObjectStore(storeName).get(key);
+    },
+    async getAll(storeName: string) {
+      return makeObjectStore(storeName).getAll();
+    },
+    async put(storeName: string, value: unknown, key?: string) {
+      return makeObjectStore(storeName).put(value, key);
+    },
+    async count(storeName: string) {
+      return makeObjectStore(storeName).count();
+    },
+    transaction(storeNames: string | string[]) {
+      const allowed = new Set(Array.isArray(storeNames) ? storeNames : [storeNames]);
+      return {
+        store: !Array.isArray(storeNames) ? makeObjectStore(storeNames) : undefined,
+        objectStore(name: string) {
+          assert.ok(allowed.has(name), `Store "${name}" not included in transaction`);
+          return makeObjectStore(name);
+        },
+        done: Promise.resolve()
+      };
+    }
+  } as unknown as IDBPDatabase;
+
+  return async () => dbFake;
+}
+
+test('Soft Bento Task Modal aligns Left and Right column gray frames top & bottom via align-items: stretch and defines --shadow-xs/--shadow-sm', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
+
+  assert.ok(!css.includes('container-type:'), 'index.css must contain zero container-type rules');
+  assert.ok(css.includes('--shadow-xs:'), ':root must define --shadow-xs');
+  assert.ok(css.includes('--shadow-sm:'), ':root must define --shadow-sm');
+
+  const bentoGridBlock = css.match(/\.task-bento-modal-grid\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(
+    bentoGridBlock.includes('align-items: stretch;'),
+    '.task-bento-modal-grid must stretch left and right columns to identical total height'
+  );
+
+  const propTileBlock = css.match(/\.task-bento-prop-tile\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(propTileBlock.includes('border-radius: 14px;'));
+  assert.ok(propTileBlock.includes('padding: 12px 14px;'));
+  assert.ok(propTileBlock.includes('flex: 1 0 auto;'));
+  assert.ok(propTileBlock.includes('justify-content: flex-start;'));
+
+  assert.ok(
+    css.includes('.task-bento-main-col > [data-testid="task-bento-notes-card"]'),
+    'Notes card must flex-fill when Right column exceeds Left column'
+  );
+  assert.ok(
+    css.includes('.task-bento-main-col > [data-testid="task-bento-notes-card"] .md-rendered-body'),
+    'Formatted Markdown preview must also flex-fill inside Notes card'
+  );
+});
+
+test('Multi-day 2400m (5d) duration persists across localDb, .tbbackup round-trip, and non-destructive Timeblock clear', async () => {
+  const db1 = new ThingsLocalDb(createInMemoryIdb());
+  await db1.initialize('de');
+
+  const created = await db1.upsertTask({
+    title: 'Migrationskonzept',
+    scheduleState: 'TODAY',
+    whenDate: new Date(2026, 10, 21, 0, 0, 0, 0).getTime(),
+    durationMinutes: 2400,
+    scheduledStartMinutes: 9 * 60
+  });
+  assert.equal(created.durationMinutes, 2400);
+  assert.equal(created.scheduledStartMinutes, 540);
+  assert.equal(formatTimeblockRange(540, 2400), '09:00 · 5d');
+  assert.equal(formatTimeblockRange(23 * 60 + 30, 60), '23:30–00:30 +1d · 1h');
+
+  const timeline = buildDailyTimeline([created], [], new Date(2026, 10, 21, 0, 0, 0, 0).getTime());
+  assert.equal(timeline.timedItems.length, 1);
+  assert.equal(timeline.timedItems[0].durationMinutes, 2400);
+  assert.equal(timeline.timedItems[0].endMinutes, 1440);
+  assert.equal(timeline.timedItems[0].rangeLabel, '09:00 · 5d');
+
+  // Non-destructive Timeblock clear preserves standalone durationMinutes (2400m = 5d)
+  const afterClearTb = await db1.upsertTask({
+    id: created.id,
+    scheduledStartMinutes: null
+  });
+  assert.equal(afterClearTb.scheduledStartMinutes, null);
+  assert.equal(afterClearTb.durationMinutes, 2400);
+
+  // Verify TaskItem.tsx & TodayTimelineView.tsx never wipe durationMinutes when clearing Timeblock
+  const taskItemSrc = fs.readFileSync(path.join(SRC_DIR, 'components/TaskItem.tsx'), 'utf8');
+  const timelineSrc = fs.readFileSync(
+    path.join(SRC_DIR, 'components/TodayTimelineView.tsx'),
+    'utf8'
+  );
+  assert.ok(!taskItemSrc.includes('scheduledStartMinutes: null,\n                              durationMinutes: null'));
+  assert.ok(!timelineSrc.includes('scheduledStartMinutes: null,\n                            durationMinutes: null'));
+
+  // .tbbackup round-trip preserves 2400m (5d) without clamping to 720m
+  const { bytes } = await db1.createBackupBytes(null, {
+    language: 'de',
+    themeMode: 'light',
+    sidebarVisible: true,
+    localOnlyDbMode: true,
+    geminiApiKey: '',
+    dailyDigestEnabled: false,
+    dailyDigestHour: 8,
+    dailyDigestMinute: 30,
+    autoCheckUpdatesEnabled: true,
+    includeBetaUpdates: true,
+    calendarEventsEnabled: false,
+    selectedCalendarIds: [],
+    calendarIdsInitialized: false,
+    groupTodayByProjectOrArea: true,
+    biometricAppLockEnabled: false,
+    appLockPinHash: '',
+    webAuthnCredId: '',
+    lastWeeklyReviewAt: 0,
+    tagSortMode: 'alpha',
+    viewSortMode: 'manual',
+    savedPerspectives: [
+      {
+        id: 'persp-multi-day',
+        title: 'Multi-Day Sprint',
+        categoryIds: [],
+        effortLevel: null,
+        maxDurationMinutes: 2400,
+        dueWindow: 'ANY',
+        areaId: null,
+        actionableOnly: true,
+        sortOrder: 100
+      }
+    ]
+  });
+
+  const db2 = new ThingsLocalDb(createInMemoryIdb());
+  await db2.initialize('en');
+  const restored = await db2.restoreBackupFromBytes(bytes, null, false);
+  const restoredTask = db2.getSnapshot().tasks.find((t) => t.id === created.id);
+  assert.ok(restoredTask, 'Restored task must exist');
+  assert.equal(restoredTask.durationMinutes, 2400, '.tbbackup restore must preserve 2400m (5d)');
+  assert.equal(
+    JSON.parse(restored.preferences?.savedPerspectivesJson || '[]')[0]?.maxDurationMinutes,
+    2400
+  );
+});
+
+test('parseProjectOutlineInput parses trailing @<duration> tokens and localization covers repeatClearBtn & Roadmap PDF headers', () => {
+  const outline = `# Q4 Website Redesign
+Modernize landing pages.
+
+## Research & Architecture
+- [ ] Audit analytics & conversion funnel @45m
+  - [ ] Export top 20 landing pages
+- [ ] Architecture workshop @1d
+- [ ] Deep dive performance @1.5h`;
+
+  const parsed = parseProjectOutlineInput(outline);
+  assert.equal(parsed.title, 'Q4 Website Redesign');
+  assert.equal(parsed.blueprint.headings.length, 1);
+  const tasks = parsed.blueprint.headings[0].tasks;
+  assert.equal(tasks.length, 3);
+  assert.equal(tasks[0].title, 'Audit analytics & conversion funnel');
+  assert.equal(tasks[0].durationMinutes, 45);
+  assert.deepEqual(tasks[0].checklistItems, ['Export top 20 landing pages']);
+  assert.equal(tasks[1].title, 'Architecture workshop');
+  assert.equal(tasks[1].durationMinutes, 480);
+  assert.equal(tasks[2].title, 'Deep dive performance');
+  assert.equal(tasks[2].durationMinutes, 90);
+
+  // Localization checks
+  assert.equal(TRANSLATIONS.fr.repeatClearBtn, 'Désactivé');
+  assert.equal(TRANSLATIONS.it.repeatClearBtn, 'Disattivo');
+  assert.equal(TRANSLATIONS.en.actionFocusTimerMinutes(480), 'Start Focus Timer (1d)');
+  assert.equal(TRANSLATIONS.de.actionFocusTimerMinutes(480), 'Fokus-Timer starten (1d)');
+  assert.equal(TRANSLATIONS.de.actionFocusTimerMinutes(25), 'Fokus-Timer starten (25m)');
+
+  // Localized German Roadmap PDF header
+  const today = new Date(2026, 2, 1, 0, 0, 0, 0).getTime(); // Mar 1 -> Mär in de
+  const layout = buildProjectRoadmapLayout(
+    { id: 'p-de', title: 'Migrationskonzept', deadline: null },
+    [],
+    [],
+    today,
+    'Allgemein'
+  );
+  const pdfBytes = generateRoadmapPdfBytes(layout, 'Migrationskonzept', {
+    lang: 'de',
+    ungroupedTitle: 'Allgemein'
+  });
+  const pdfAscii = new TextDecoder('ascii').decode(pdfBytes);
+  assert.ok(pdfAscii.includes('Phase / Aufgabe'), 'German PDF must localize Phase / To-Do header');
+  assert.ok(pdfAscii.includes('M\\344r'), 'German PDF must localize March as Mär (WinAnsi octal \\344)');
+});
+

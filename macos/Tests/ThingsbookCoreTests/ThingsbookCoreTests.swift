@@ -4984,6 +4984,172 @@ final class ThingsbookCoreTests: XCTestCase {
             }
         }
     }
+
+    func testMultiDayDurationNonDestructiveTimeblockClearAndPillFormatting() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let task = try db.createTask(
+            title: "Architecture Migration",
+            notes: "Phase 1 rollout\nPhase 2 verification",
+            scheduleState: .today,
+            whenDate: DateEpochConverter.startOfDayMillis(for: Date()),
+            checklistTitles: ["Draft RFC", "Run load tests"]
+        )
+
+        // 1. Multi-day standalone duration (2400m = 5d) must persist without 720m clamping
+        try db.setTaskEffortAndDuration(
+            taskId: task.id,
+            effortLevel: TaskEffortLevel.deepFocus.rawValue,
+            durationMinutes: 2400
+        )
+        var snap = try db.loadWorkspaceSnapshot()
+        var loaded = try XCTUnwrap(snap.allOpenTasks.first { $0.id == task.id })
+        XCTAssertEqual(loaded.durationMinutes, 2400)
+        XCTAssertEqual(loaded.formattedStandaloneDurationPill, "5d")
+        XCTAssertEqual(loaded.formattedTimeblockPill, "5d")
+
+        // 2. Timeblocking at 09:00 with 2400m preserves 2400m, and clearing timeblock with (nil, nil) keeps 2400m intact
+        try db.setTaskTimeblock(
+            taskId: task.id,
+            scheduledStartMinutes: 9 * 60,
+            durationMinutes: 2400
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        loaded = try XCTUnwrap(snap.allOpenTasks.first { $0.id == task.id })
+        XCTAssertEqual(loaded.scheduledStartMinutes, 540)
+        XCTAssertEqual(loaded.durationMinutes, 2400)
+        XCTAssertEqual(loaded.formattedTimeblockPill, "09:00 · 5d")
+
+        try db.setTaskTimeblock(
+            taskId: task.id,
+            scheduledStartMinutes: nil,
+            durationMinutes: nil
+        )
+        snap = try db.loadWorkspaceSnapshot()
+        loaded = try XCTUnwrap(snap.allOpenTasks.first { $0.id == task.id })
+        XCTAssertNil(loaded.scheduledStartMinutes)
+        XCTAssertEqual(loaded.durationMinutes, 2400, "Clearing timeblock must preserve standalone duration_minutes")
+
+        // 3. Upper bound clamping at 48_000m (100 workdays)
+        try db.setTaskEffortAndDuration(taskId: task.id, effortLevel: nil, durationMinutes: 60_000)
+        snap = try db.loadWorkspaceSnapshot()
+        loaded = try XCTUnwrap(snap.allOpenTasks.first { $0.id == task.id })
+        XCTAssertEqual(loaded.durationMinutes, 48_000)
+
+        // 4. formattedTimeblockPill across <60m, multi-hour, overnight rollover, 1d (480m), and 2d (960m)
+        let pill45 = TaskItem(
+            id: "p-45",
+            title: "Sync",
+            scheduledStartMinutes: 540,
+            durationMinutes: 45,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        XCTAssertEqual(pill45.formattedTimeblockPill, "09:00–09:45 · 45m")
+
+        let pill90 = TaskItem(
+            id: "p-90",
+            title: "Design Review",
+            scheduledStartMinutes: 540,
+            durationMinutes: 90,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        XCTAssertEqual(pill90.formattedTimeblockPill, "09:00–10:30 · 1h 30m")
+
+        let pillOvernight = TaskItem(
+            id: "p-overnight",
+            title: "Late Deploy",
+            scheduledStartMinutes: 23 * 60 + 30,
+            durationMinutes: 60,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        XCTAssertEqual(pillOvernight.formattedTimeblockPill, "23:30–00:30 +1d · 1h")
+
+        let pill1d = TaskItem(
+            id: "p-480",
+            title: "Sprint Day",
+            scheduledStartMinutes: 540,
+            durationMinutes: 480,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        XCTAssertEqual(pill1d.formattedTimeblockPill, "09:00 · 1d")
+
+        let pill2d = TaskItem(
+            id: "p-960",
+            title: "Offsite",
+            scheduledStartMinutes: 540,
+            durationMinutes: 960,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        XCTAssertEqual(pill2d.formattedTimeblockPill, "09:00 · 2d")
+
+        // 5. FocusTimerState HH:MM:SS formatting for >= 1h
+        let shortTimer = FocusTimerState(taskId: "t-short", taskTitle: "Quick", remainingSeconds: 750, totalSeconds: 1500)
+        XCTAssertEqual(shortTimer.formattedCountdown, "12:30")
+
+        let hourTimer = FocusTimerState(taskId: "t-hour", taskTitle: "Deep", remainingSeconds: 3600, totalSeconds: 3600)
+        XCTAssertEqual(hourTimer.formattedCountdown, "01:00:00")
+
+        let multiHourTimer = FocusTimerState(taskId: "t-long", taskTitle: "Workshop", remainingSeconds: 5432, totalSeconds: 7200)
+        XCTAssertEqual(multiHourTimer.formattedCountdown, "01:30:32")
+
+        // 6. Markdown Copy To-Do formatting & Outline @duration parsing
+        let md = TaskItem.formatMarkdown(loaded)
+        XCTAssertTrue(md.hasPrefix("- [ ] Architecture Migration\n"))
+        XCTAssertTrue(md.contains("  Phase 1 rollout"))
+        XCTAssertTrue(md.contains("  - [ ] Draft RFC"))
+
+        let outline = """
+        # Launch Plan
+        ## Engineering
+        - [ ] API audit @45m
+        - [ ] Security hardening @09:30 @1d
+        """
+        let parsedOutline = ThingsSQLiteDatabase.parseOutlineToBlueprint(outline)
+        XCTAssertEqual(parsedOutline.title, "Launch Plan")
+        XCTAssertEqual(parsedOutline.blueprint.headings.count, 1)
+        let importedTasks = parsedOutline.blueprint.headings[0].tasks
+        XCTAssertEqual(importedTasks.count, 2)
+        XCTAssertEqual(importedTasks[0].title, "API audit")
+        XCTAssertEqual(importedTasks[0].durationMinutes, 45)
+        XCTAssertEqual(importedTasks[1].title, "Security hardening")
+        XCTAssertEqual(importedTasks[1].scheduledStartMinutes, 9 * 60 + 30)
+        XCTAssertEqual(importedTasks[1].durationMinutes, 480)
+    }
+
+    func testFirebaseConfigTrimsWhitespaceAndNewlines() throws {
+        let suiteName = "com.pv.thingsbook.tests.firebase.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let dirty = FirebaseConfig(
+            projectId: "  my-custom-proj \n",
+            apiKey: "\tAIzaCustomKey123  \r\n",
+            appId: "  1:999:web:abc123 \n"
+        )
+        XCTAssertEqual(dirty.projectId, "my-custom-proj")
+        XCTAssertEqual(dirty.apiKey, "AIzaCustomKey123")
+        XCTAssertEqual(dirty.appId, "1:999:web:abc123")
+
+        FirebaseConfig.saveCustom(dirty, defaults: defaults)
+        let loaded = FirebaseConfig.loadActive(defaults: defaults)
+        XCTAssertEqual(loaded, FirebaseConfig(projectId: "my-custom-proj", apiKey: "AIzaCustomKey123", appId: "1:999:web:abc123"))
+
+        // Even legacy raw JSON in UserDefaults with untrimmed whitespace must normalize cleanly on loadActive
+        let legacyRaw = #"{"projectId":"  legacy-proj\n","apiKey":" key-xyz ","appId":" app-1 "}"#
+        defaults.set(Data(legacyRaw.utf8), forKey: "thingsbook_macos_custom_firebase_v1")
+        let normalizedLegacy = FirebaseConfig.loadActive(defaults: defaults)
+        XCTAssertEqual(normalizedLegacy.projectId, "legacy-proj")
+        XCTAssertEqual(normalizedLegacy.apiKey, "key-xyz")
+        XCTAssertEqual(normalizedLegacy.appId, "app-1")
+
+        // Whitespace-only custom config falls back to defaultProduction
+        FirebaseConfig.saveCustom(FirebaseConfig(projectId: "   ", apiKey: "\n", appId: ""), defaults: defaults)
+        XCTAssertEqual(FirebaseConfig.loadActive(defaults: defaults), .defaultProduction)
+    }
 }
 
 

@@ -814,7 +814,7 @@ export function safeParseSavedPerspectives(raw: unknown): SavedPerspective[] {
       typeof rec.maxDurationMinutes === 'number' &&
       Number.isFinite(rec.maxDurationMinutes) &&
       rec.maxDurationMinutes > 0
-        ? Math.max(5, Math.min(720, Math.trunc(rec.maxDurationMinutes)))
+        ? Math.max(1, Math.min(48_000, Math.trunc(rec.maxDurationMinutes)))
         : null;
     const rawDue = typeof rec.dueWindow === 'string' ? rec.dueWindow.trim().toUpperCase() : 'ANY';
     const dueWindow: SavedPerspective['dueWindow'] =
@@ -1013,7 +1013,7 @@ export function normalizeBackupPayloadToEntities(
           : null;
       const durationMinutes =
         t.durationMinutes != null && Number.isFinite(t.durationMinutes) && t.durationMinutes > 0
-          ? Math.max(5, Math.min(720, Math.trunc(t.durationMinutes)))
+          ? Math.max(1, Math.min(48_000, Math.trunc(t.durationMinutes)))
           : null;
 
       const rawCandidates = safeParseBlockedByTaskIds(

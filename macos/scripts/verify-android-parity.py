@@ -108,14 +108,18 @@ def main() -> int:
     android_version_code = int(v_code_match.group(1))
 
     manifest = json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
-    if manifest.get("syncedAndroidVersionName") != android_version_name:
-        fail(
-            f"Version mismatch! Android is {android_version_name}, macOS PARITY_MANIFEST is {manifest.get('syncedAndroidVersionName')}. "
-            "Port the new Android changes from main to macOS and update PARITY_MANIFEST.json."
-        )
+    for ver_field in ("syncedAndroidVersionName", "macosVersion", "macosMarketingVersion"):
+        if manifest.get(ver_field) != android_version_name:
+            fail(
+                f"Version mismatch! Android is {android_version_name}, macOS PARITY_MANIFEST.{ver_field} is {manifest.get(ver_field)}."
+            )
     if manifest.get("syncedAndroidVersionCode") != android_version_code:
         fail(
-            f"Build number mismatch! Android versionCode is {android_version_code}, macOS PARITY_MANIFEST is {manifest.get('syncedAndroidVersionCode')}."
+            f"Build number mismatch! Android versionCode is {android_version_code}, macOS PARITY_MANIFEST.syncedAndroidVersionCode is {manifest.get('syncedAndroidVersionCode')}."
+        )
+    if str(manifest.get("macosBuildNumber")) != str(android_version_code):
+        fail(
+            f"Build number mismatch! Android versionCode is {android_version_code}, macOS PARITY_MANIFEST.macosBuildNumber is {manifest.get('macosBuildNumber')}."
         )
 
     if INFO_PLIST.is_file():
@@ -128,6 +132,38 @@ def main() -> int:
             fail(
                 f"Info.plist CFBundleVersion ({plist.get('CFBundleVersion')}) != Android ({android_version_code})"
             )
+        if manifest.get("bundleIdentifier") != plist.get("CFBundleIdentifier"):
+            fail(
+                f"PARITY_MANIFEST bundleIdentifier ({manifest.get('bundleIdentifier')}) != Info.plist CFBundleIdentifier ({plist.get('CFBundleIdentifier')})"
+            )
+
+    app_update_swift = REPO_ROOT / "macos" / "Sources" / "ThingsbookCore" / "System" / "AppUpdateService.swift"
+    if app_update_swift.is_file():
+        update_src = app_update_swift.read_text(encoding="utf-8")
+        cur_ver = re.search(r'currentVersion\s*=\s*"([^"]+)"', update_src)
+        disp_ver = re.search(r'displayVersion\s*=\s*"([^"]+)"', update_src)
+        cur_build = re.search(r"currentBuildNumber\s*=\s*(\d+)", update_src)
+        if not cur_ver or cur_ver.group(1) != android_version_name:
+            fail(f"AppUpdateService.currentVersion ({cur_ver.group(1) if cur_ver else None}) != Android ({android_version_name})")
+        if not disp_ver or disp_ver.group(1) != android_version_name:
+            fail(f"AppUpdateService.displayVersion ({disp_ver.group(1) if disp_ver else None}) != Android ({android_version_name})")
+        if not cur_build or int(cur_build.group(1)) != android_version_code:
+            fail(f"AppUpdateService.currentBuildNumber ({cur_build.group(1) if cur_build else None}) != Android ({android_version_code})")
+
+    pwa_pkg_file = REPO_ROOT / "chromeos-pwa" / "package.json"
+    pwa_types_file = REPO_ROOT / "chromeos-pwa" / "src" / "domain" / "types.ts"
+    if pwa_pkg_file.is_file():
+        pwa_pkg = json.loads(pwa_pkg_file.read_text(encoding="utf-8"))
+        if pwa_pkg.get("version") != android_version_name:
+            fail(f"chromeos-pwa/package.json version ({pwa_pkg.get('version')}) != Android ({android_version_name})")
+    if pwa_types_file.is_file():
+        pwa_types_src = pwa_types_file.read_text(encoding="utf-8")
+        pwa_ver = re.search(r"APP_VERSION\s*=\s*'([^']+)'", pwa_types_src)
+        pwa_build = re.search(r"APP_BUILD_CODE\s*=\s*(\d+)", pwa_types_src)
+        if not pwa_ver or pwa_ver.group(1) != android_version_name:
+            fail(f"chromeos-pwa types.ts APP_VERSION ({pwa_ver.group(1) if pwa_ver else None}) != Android ({android_version_name})")
+        if not pwa_build or int(pwa_build.group(1)) != android_version_code:
+            fail(f"chromeos-pwa types.ts APP_BUILD_CODE ({pwa_build.group(1) if pwa_build else None}) != Android ({android_version_code})")
 
     if not STRINGS_JSON.is_file() or not CORE_STRINGS_JSON.is_file():
         fail("Missing strings.json — run python3 macos/scripts/sync-strings-from-android.py")

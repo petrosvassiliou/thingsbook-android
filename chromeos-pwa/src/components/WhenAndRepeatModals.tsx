@@ -39,6 +39,7 @@ const REMINDER_PRESETS = ['08:00', '09:00', '12:00', '15:00', '18:00', '20:00'];
 interface InteractiveMonthCalendarProps {
   selectedEpoch: number | null;
   lang: SupportedLang;
+  t: TranslationStrings;
   accent?: 'blue' | 'deadline';
   onSelectDay: (epochMidnight: number) => void;
 }
@@ -46,6 +47,7 @@ interface InteractiveMonthCalendarProps {
 const InteractiveMonthCalendar: React.FC<InteractiveMonthCalendarProps> = ({
   selectedEpoch,
   lang,
+  t,
   accent = 'blue',
   onSelectDay
 }) => {
@@ -93,7 +95,8 @@ const InteractiveMonthCalendar: React.FC<InteractiveMonthCalendarProps> = ({
           className="icon-btn"
           style={{ height: 28, minWidth: 28, padding: 0 }}
           onClick={() => shiftMonth(-1)}
-          aria-label="Previous month"
+          title={t.calendarPrevMonth}
+          aria-label={t.calendarPrevMonth}
         >
           <ChevronLeft size={16} />
         </button>
@@ -103,7 +106,8 @@ const InteractiveMonthCalendar: React.FC<InteractiveMonthCalendarProps> = ({
           className="icon-btn"
           style={{ height: 28, minWidth: 28, padding: 0 }}
           onClick={() => shiftMonth(1)}
-          aria-label="Next month"
+          title={t.calendarNextMonth}
+          aria-label={t.calendarNextMonth}
         >
           <ChevronRight size={16} />
         </button>
@@ -335,6 +339,7 @@ export const WhenModal: React.FC<WhenModalProps> = ({
         <InteractiveMonthCalendar
           selectedEpoch={task.whenDate}
           lang={lang}
+          t={t}
           onSelectDay={(epoch) => applyEpochDate(epoch)}
         />
 
@@ -540,6 +545,7 @@ export const DeadlineModal: React.FC<DeadlineModalProps> = ({
         <InteractiveMonthCalendar
           selectedEpoch={currentDeadline}
           lang={lang}
+          t={t}
           accent="deadline"
           onSelectDay={(epoch) => pick(epoch)}
         />

@@ -84,7 +84,7 @@ object AppUpdateParser {
     const val RELEASES_PAGE_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
     const val BETA_RELEASES_PAGE_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases"
     const val RAW_GRADLE_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/app/build.gradle.kts"
-    const val RAW_BETA_GRADLE_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/beta-2.0/app/build.gradle.kts"
+    const val RAW_BETA_GRADLE_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/beta-3.0/app/build.gradle.kts"
     const val RAW_README_URL = "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/README.md"
 
     private val json = Json {

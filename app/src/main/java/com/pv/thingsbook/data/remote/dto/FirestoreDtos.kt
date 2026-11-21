@@ -9,6 +9,7 @@ import com.pv.thingsbook.data.local.entity.ProjectTemplateEntity
 import com.pv.thingsbook.data.local.entity.TagEntity
 import com.pv.thingsbook.data.local.entity.TaskEntity
 import com.pv.thingsbook.domain.model.EffortLevel
+import com.pv.thingsbook.domain.model.MAX_TASK_DURATION_MINUTES
 import com.pv.thingsbook.domain.model.ProjectStatus
 import com.pv.thingsbook.domain.model.RecurrenceRule
 import com.pv.thingsbook.domain.model.ScheduleState
@@ -507,7 +508,7 @@ data class TaskFirestoreDto(
             deadline = deadline,
             reminderTime = if (isPurgedTombstone) null else reminderTime,
             scheduledStartMinutes = if (isPurgedTombstone) null else scheduledStartMinutes?.takeIf { it in 0..1439 },
-            durationMinutes = if (isPurgedTombstone) null else durationMinutes?.takeIf { it in 1..1440 },
+            durationMinutes = if (isPurgedTombstone) null else durationMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
             completedAt = completedAt,
             projectId = if (isPurgedTombstone) null else projectId?.takeIf { it.isNotBlank() },
             headingId = if (isPurgedTombstone) null else headingId?.takeIf { it.isNotBlank() },

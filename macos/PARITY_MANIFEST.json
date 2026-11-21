@@ -1,7 +1,7 @@
 {
   "platform": "macOS",
   "minimumMacOSVersion": "14.0",
-  "bundleIdentifier": "com.pv.thingsbook.mac",
+  "bundleIdentifier": "com.thingsbook.macos",
   "macosVersion": "3.0.0-beta.13",
   "macosMarketingVersion": "3.0.0-beta.13",
   "macosBuildNumber": "104",

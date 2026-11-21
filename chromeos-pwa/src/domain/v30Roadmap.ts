@@ -7,6 +7,7 @@ import {
   type ProjectRecord,
   type ProjectViewMode,
   type ScheduleState,
+  type SupportedLang,
   type TaskRecord
 } from './types.ts';
 
@@ -80,10 +81,13 @@ export interface ProjectRoadmapLayout {
 }
 
 export interface RoadmapExportLabels {
+  lang?: SupportedLang;
   ungroupedTitle?: string;
   todayLabel?: string;
   unscheduledLabel?: string;
   subtitle?: string;
+  phaseTodoHeader?: string;
+  pageLabel?: string;
 }
 
 export type RoadmapPdfOrientation = 'landscape' | 'portrait';
@@ -761,20 +765,29 @@ function fmtNum(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
 }
 
-const MONTH_SHORT_EN = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec'
-];
+const MONTH_SHORT_BY_LANG: Record<SupportedLang, readonly string[]> = {
+  en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+  de: ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'],
+  fr: ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'],
+  it: ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'],
+  es: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+};
+
+const PHASE_TODO_HEADER_BY_LANG: Record<SupportedLang, string> = {
+  en: 'Phase / To-Do',
+  de: 'Phase / Aufgabe',
+  fr: 'Phase / Tâche',
+  it: 'Fase / Attività',
+  es: 'Fase / Tarea'
+};
+
+const PAGE_LABEL_BY_LANG: Record<SupportedLang, string> = {
+  en: 'Page',
+  de: 'Seite',
+  fr: 'Page',
+  it: 'Pagina',
+  es: 'Página'
+};
 
 export function wrapTextLines(raw: string, maxCharsPerLine: number): string[] {
   const clean = (raw || '').replace(/[\r\n\t]+/g, ' ').trim();
@@ -1039,13 +1052,19 @@ export function generateRoadmapPdfBytes(
 
   const pdfY = (topY: number): number => pageH - topY;
 
+  const resolvedLang: SupportedLang = labels.lang ?? 'en';
+  const monthNames = MONTH_SHORT_BY_LANG[resolvedLang] ?? MONTH_SHORT_BY_LANG.en;
+  const phaseTodoHeader =
+    labels.phaseTodoHeader || PHASE_TODO_HEADER_BY_LANG[resolvedLang] || 'Phase / To-Do';
+  const pageWord = labels.pageLabel || PAGE_LABEL_BY_LANG[resolvedLang] || 'Page';
+
   const rangeStart = exportDays[0];
   const rangeEnd = exportDays[exportDays.length - 1];
   const hasCustomRange =
     exportOptions.startEpoch != null || exportOptions.endEpoch != null;
   const computedRangeStr =
     rangeStart && rangeEnd
-      ? `${MONTH_SHORT_EN[rangeStart.monthIndex]} ${rangeStart.dayOfMonth}, ${rangeStart.year} - ${MONTH_SHORT_EN[rangeEnd.monthIndex]} ${rangeEnd.dayOfMonth}, ${rangeEnd.year}`
+      ? `${monthNames[rangeStart.monthIndex]} ${rangeStart.dayOfMonth}, ${rangeStart.year} - ${monthNames[rangeEnd.monthIndex]} ${rangeEnd.dayOfMonth}, ${rangeEnd.year}`
       : '';
   const rangeStr =
     !hasCustomRange && labels.subtitle ? labels.subtitle : labels.subtitle && hasCustomRange ? labels.subtitle : computedRangeStr;
@@ -1106,7 +1125,7 @@ export function generateRoadmapPdfBytes(
     );
 
     fillRgb(91, 98, 110);
-    const pageSuffix = totalPages > 1 ? `  |  Page ${pageIdx + 1} / ${totalPages}` : '';
+    const pageSuffix = totalPages > 1 ? `  |  ${pageWord} ${pageIdx + 1} / ${totalPages}` : '';
     drawText(
       `Thingsbook Roadmap  |  ${rangeStr}${pageSuffix}`,
       marginX,
@@ -1131,7 +1150,7 @@ export function generateRoadmapPdfBytes(
     rectFill(marginX, tableTop, tableW, dayHeaderH);
 
     fillRgb(91, 98, 110);
-    drawText('Phase / To-Do', marginX + 10, tableTop + 19, 'F2', 8.5, 32);
+    drawText(phaseTodoHeader, marginX + 10, tableTop + 19, 'F2', 8.5, 32);
 
     // 4. Weekend columns, adaptive vertical day grid lines & non-colliding day/month headers
     ops.push('0.55 w');
@@ -1154,7 +1173,7 @@ export function generateRoadmapPdfBytes(
 
       if ((i === 0 || cell.dayOfMonth === 1) && colX - lastMonthLabelX >= 24) {
         fillRgb(56, 152, 236);
-        drawText(MONTH_SHORT_EN[cell.monthIndex], colX + 2, tableTop + 10, 'F2', 7, 8);
+        drawText(monthNames[cell.monthIndex], colX + 2, tableTop + 10, 'F2', 7, 8);
         lastMonthLabelX = colX;
       }
 
@@ -1513,12 +1532,17 @@ export function renderRoadmapToPngDataUrl(
   ctx.font = '700 17px Inter, system-ui, -apple-system, sans-serif';
   ctx.fillText(projectTitle.trim() || 'Project Roadmap', marginX, marginY + 20);
 
+  const resolvedLang: SupportedLang = labels.lang ?? 'en';
+  const monthNames = MONTH_SHORT_BY_LANG[resolvedLang] ?? MONTH_SHORT_BY_LANG.en;
+  const phaseTodoHeader =
+    labels.phaseTodoHeader || PHASE_TODO_HEADER_BY_LANG[resolvedLang] || 'Phase / To-Do';
+
   const firstDay = layout.days[0];
   const lastDay = layout.days[layout.days.length - 1];
   const subtitle =
     labels.subtitle ||
     (firstDay && lastDay
-      ? `${MONTH_SHORT_EN[firstDay.monthIndex]} ${firstDay.dayOfMonth}, ${firstDay.year} – ${MONTH_SHORT_EN[lastDay.monthIndex]} ${lastDay.dayOfMonth}, ${lastDay.year}`
+      ? `${monthNames[firstDay.monthIndex]} ${firstDay.dayOfMonth}, ${firstDay.year} – ${monthNames[lastDay.monthIndex]} ${lastDay.dayOfMonth}, ${lastDay.year}`
       : '');
   ctx.fillStyle = textSecondary;
   ctx.font = '500 11.5px Inter, system-ui, -apple-system, sans-serif';
@@ -1534,7 +1558,7 @@ export function renderRoadmapToPngDataUrl(
 
   ctx.fillStyle = textSecondary;
   ctx.font = '600 11px Inter, system-ui, -apple-system, sans-serif';
-  ctx.fillText('Phase / To-Do', marginX + 12, tableTop + 21);
+  ctx.fillText(phaseTodoHeader, marginX + 12, tableTop + 21);
 
   for (let i = 0; i < layout.days.length; i++) {
     const cell = layout.days[i];
@@ -1555,7 +1579,7 @@ export function renderRoadmapToPngDataUrl(
     if (i === 0 || cell.dayOfMonth === 1) {
       ctx.fillStyle = '#3898EC';
       ctx.font = '700 9.5px Inter, system-ui, sans-serif';
-      ctx.fillText(MONTH_SHORT_EN[cell.monthIndex], colX + 4, tableTop + 12);
+      ctx.fillText(monthNames[cell.monthIndex], colX + 4, tableTop + 12);
     }
 
     if (cell.isToday) {

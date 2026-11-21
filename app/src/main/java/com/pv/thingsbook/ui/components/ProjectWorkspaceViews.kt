@@ -2,6 +2,7 @@ package com.pv.thingsbook.ui.components
 
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.DashPathEffect
 import android.graphics.LinearGradient
@@ -526,6 +527,7 @@ fun ProjectBoardWorkspace(
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
     onToggleTaskPin: (taskId: String) -> Unit,
     onOpenTaskEditor: (taskId: String) -> Unit,
+    onSelectSingleTask: ((taskId: String) -> Unit)? = null,
     onToggleTaskSelection: (taskId: String) -> Unit,
     onRangeSelectTask: (taskId: String) -> Unit,
     modifier: Modifier = Modifier
@@ -625,6 +627,7 @@ fun ProjectBoardWorkspace(
                     onUpdateTaskStatus = onUpdateTaskStatus,
                     onToggleTaskPin = onToggleTaskPin,
                     onOpenTaskEditor = onOpenTaskEditor,
+                    onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
                     onRangeSelectTask = onRangeSelectTask
                 )
@@ -656,6 +659,7 @@ fun ProjectBoardWorkspace(
                     onUpdateTaskStatus = onUpdateTaskStatus,
                     onToggleTaskPin = onToggleTaskPin,
                     onOpenTaskEditor = onOpenTaskEditor,
+                    onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
                     onRangeSelectTask = onRangeSelectTask
                 )
@@ -806,6 +810,7 @@ private fun ProjectBoardPhaseColumn(
     onUpdateTaskStatus: (String, TaskStatus) -> Unit,
     onToggleTaskPin: (String) -> Unit,
     onOpenTaskEditor: (String) -> Unit,
+    onSelectSingleTask: ((String) -> Unit)? = null,
     onToggleTaskSelection: (String) -> Unit,
     onRangeSelectTask: (String) -> Unit
 ) {
@@ -1162,6 +1167,7 @@ private fun ProjectBoardPhaseColumn(
                             onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
                             onTogglePin = { onToggleTaskPin(task.id) },
                             onOpenEditor = { onOpenTaskEditor(task.id) },
+                            onSelectSingle = onSelectSingleTask?.let { fn -> { fn(task.id) } },
                             onToggleSelection = { onToggleTaskSelection(task.id) },
                             onRangeSelect = { onRangeSelectTask(task.id) }
                         )
@@ -1264,6 +1270,7 @@ private fun KanbanTaskCard(
     onStatusChange: (TaskStatus) -> Unit,
     onTogglePin: () -> Unit,
     onOpenEditor: () -> Unit,
+    onSelectSingle: (() -> Unit)? = null,
     onToggleSelection: () -> Unit,
     onRangeSelect: () -> Unit
 ) {
@@ -1284,6 +1291,7 @@ private fun KanbanTaskCard(
 
     var modifierHeldShift by remember { mutableStateOf(false) }
     var modifierHeldCtrlOrMeta by remember { mutableStateOf(false) }
+    var lastPlainTapUptimeMs by remember(task.id) { mutableLongStateOf(0L) }
 
     Surface(
         modifier = Modifier
@@ -1317,14 +1325,33 @@ private fun KanbanTaskCard(
                 onClick = {
                     when {
                         modifierHeldShift -> {
+                            lastPlainTapUptimeMs = 0L
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onRangeSelect()
                         }
-                        modifierHeldCtrlOrMeta || isSelectionModeActive -> {
+                        modifierHeldCtrlOrMeta -> {
+                            lastPlainTapUptimeMs = 0L
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onToggleSelection()
                         }
-                        else -> onOpenEditor()
+                        else -> {
+                            val now = SystemClock.uptimeMillis()
+                            if (lastPlainTapUptimeMs > 0L && (now - lastPlainTapUptimeMs) <= 380L) {
+                                lastPlainTapUptimeMs = 0L
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onOpenEditor()
+                            } else {
+                                lastPlainTapUptimeMs = now
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                if (isSelectionModeActive) {
+                                    onToggleSelection()
+                                } else if (onSelectSingle != null) {
+                                    onSelectSingle()
+                                } else {
+                                    onToggleSelection()
+                                }
+                            }
+                        }
                     }
                 },
                 onLongClick = {
@@ -1386,6 +1413,26 @@ private fun KanbanTaskCard(
                             .clip(RoundedCornerShape(4.dp))
                             .clickable(onClick = onTogglePin)
                     )
+                }
+                val openDetailsLabel = stringResource(R.string.v30_open_details_action)
+                ThingsHoverTooltip(
+                    text = openDetailsLabel,
+                    enableTouchLongPress = false
+                ) {
+                    IconButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onOpenEditor()
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.OpenInFull,
+                            contentDescription = openDetailsLabel,
+                            tint = colors.secondaryText.copy(alpha = 0.72f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
                 if (task.status == TaskStatus.OPEN) {
                     ProjectTaskDragHandle(
@@ -3074,10 +3121,11 @@ private fun RoadmapDraggableTaskBar(
             .padding(horizontal = 8.dp),
         contentAlignment = Alignment.CenterStart
     ) {
+        val defaultTodoLabel = stringResource(R.string.entity_todo)
         Text(
             text = buildString {
                 if (taskBar.isActivelyBlocked) append("⏳ ")
-                append(taskBar.title.ifBlank { "To-Do" })
+                append(taskBar.title.ifBlank { defaultTodoLabel })
                 if (previewDelta != 0L) {
                     append(if (previewDelta > 0) " (+${previewDelta}d)" else " (${previewDelta}d)")
                 }
@@ -3688,6 +3736,7 @@ object RoadmapExporter {
         exportChooserTitle: String = context.getString(R.string.v30_roadmap_export)
     ): File {
         val generalLabel = context.getString(R.string.v30_board_ungrouped_column)
+        val todoFallbackLabel = context.getString(R.string.entity_todo)
         val filteredLayout = ProjectRoadmapEngine.filterLayoutForExport(
             layout = layout.copy(project = project),
             config = config
@@ -3726,7 +3775,7 @@ object RoadmapExporter {
                     is RoadmapDisplayRow.TaskRow -> {
                         MeasuredExportRow(
                             row = r,
-                            wrappedLines = listOf(r.taskBar.title.ifBlank { "To-Do" }),
+                            wrappedLines = listOf(r.taskBar.title.ifBlank { todoFallbackLabel }),
                             subtext = null,
                             heightPt = 28f
                         )
@@ -3763,7 +3812,8 @@ object RoadmapExporter {
                         pageHeight = pageHeight.toFloat(),
                         labelColW = labelColW,
                         locale = locale,
-                        isDark = isDark
+                        isDark = isDark,
+                        todoFallbackLabel = todoFallbackLabel
                     )
                     pdfDoc.finishPage(page)
                 } else {
@@ -3780,7 +3830,8 @@ object RoadmapExporter {
                             pageHeight = pageHeight.toFloat(),
                             labelColW = labelColW,
                             locale = locale,
-                            isDark = isDark
+                            isDark = isDark,
+                            todoFallbackLabel = todoFallbackLabel
                         )
                         pdfDoc.finishPage(page)
                     }
@@ -3865,6 +3916,7 @@ object RoadmapExporter {
         }
 
         val generalLabel = context.getString(R.string.v30_board_ungrouped_column)
+        val todoFallbackLabel = context.getString(R.string.entity_todo)
         val outFile = withContext(Dispatchers.IO) {
             val rows = buildExportRows(layout, headingCounts, generalLabel)
             val measureBoldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -3908,7 +3960,8 @@ object RoadmapExporter {
                     totalWidth = totalWidth.toFloat(),
                     totalHeight = totalHeight.toFloat(),
                     locale = locale,
-                    isDark = isDark
+                    isDark = isDark,
+                    todoFallbackLabel = todoFallbackLabel
                 )
                 FileOutputStream(targetFile).use { out ->
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
@@ -3978,6 +4031,23 @@ object RoadmapExporter {
         return rows
     }
 
+    private fun defaultUngroupedLabelForLocale(locale: Locale): String =
+        when (locale.language.lowercase(Locale.ROOT)) {
+            "de" -> "Allgemein"
+            "fr" -> "Général"
+            "it" -> "Generale"
+            else -> "General"
+        }
+
+    private fun defaultTodoLabelForLocale(locale: Locale): String =
+        when (locale.language.lowercase(Locale.ROOT)) {
+            "de" -> "Aufgabe"
+            "fr" -> "Tâche"
+            "it" -> "Attività"
+            "es" -> "Tarea"
+            else -> "To-Do"
+        }
+
     private fun drawA4PdfPage(
         canvas: android.graphics.Canvas,
         layout: ProjectRoadmapLayout,
@@ -3988,7 +4058,8 @@ object RoadmapExporter {
         pageHeight: Float,
         labelColW: Float,
         locale: Locale,
-        isDark: Boolean
+        isDark: Boolean,
+        todoFallbackLabel: String = defaultTodoLabelForLocale(locale)
     ) {
         val bgArgb = if (isDark) 0xFF121417.toInt() else 0xFFFFFFFF.toInt()
         val cardArgb = if (isDark) 0xFF1B1F25.toInt() else 0xFFF9FAFC.toInt()
@@ -4223,7 +4294,7 @@ object RoadmapExporter {
                     val tb = r.taskBar
                     taskGeometry[tb.taskId] = Triple(curY, rowH, tb)
                     canvas.drawText(
-                        ellipsizeText("• ${tb.title.ifBlank { "To-Do" }}", taskLabelPaint, labelColW - 22f),
+                        ellipsizeText("• ${tb.title.ifBlank { todoFallbackLabel }}", taskLabelPaint, labelColW - 22f),
                         tableLeft + 12f,
                         curY + rowH * 0.5f + 3.5f,
                         taskLabelPaint
@@ -4253,7 +4324,7 @@ object RoadmapExporter {
                         }
                         if (barRect.width() >= 22f) {
                             canvas.drawText(
-                                ellipsizeText(tb.title.ifBlank { "To-Do" }, taskBarTextPaint, barRect.width() - 8f),
+                                ellipsizeText(tb.title.ifBlank { todoFallbackLabel }, taskBarTextPaint, barRect.width() - 8f),
                                 barRect.left + 4f,
                                 barRect.centerY() + 3f,
                                 taskBarTextPaint
@@ -4332,9 +4403,11 @@ object RoadmapExporter {
         layout: ProjectRoadmapLayout,
         headingCounts: Map<String, Pair<Int, Int>> = emptyMap(),
         locale: Locale = Locale.getDefault(),
-        isDark: Boolean = false
+        isDark: Boolean = false,
+        generalLabel: String = defaultUngroupedLabelForLocale(locale),
+        todoFallbackLabel: String = defaultTodoLabelForLocale(locale)
     ) {
-        val rows = buildExportRows(layout, headingCounts, "General")
+        val rows = buildExportRows(layout, headingCounts, generalLabel)
         val measureBoldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 12.5f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -4350,7 +4423,7 @@ object RoadmapExporter {
         }.toFloat().coerceAtLeast(72f)
         val totalWidth = EXPORT_PADDING * 2f + EXPORT_LABEL_W + layout.totalDays * EXPORT_DAY_W
         val totalHeight = EXPORT_PADDING * 2f + EXPORT_HEADER_H + EXPORT_DAY_HEADER_H + rowsHeight
-        drawRoadmapToAndroidCanvas(canvas, layout, rows, totalWidth, totalHeight, locale, isDark)
+        drawRoadmapToAndroidCanvas(canvas, layout, rows, totalWidth, totalHeight, locale, isDark, todoFallbackLabel)
     }
 
     private fun drawRoadmapToAndroidCanvas(
@@ -4360,7 +4433,8 @@ object RoadmapExporter {
         totalWidth: Float,
         totalHeight: Float,
         locale: Locale,
-        isDark: Boolean
+        isDark: Boolean,
+        todoFallbackLabel: String = defaultTodoLabelForLocale(locale)
     ) {
         val bgArgb = if (isDark) 0xFF121417.toInt() else 0xFFFFFFFF.toInt()
         val cardArgb = if (isDark) 0xFF1B1F25.toInt() else 0xFFF9FAFC.toInt()
@@ -4540,7 +4614,7 @@ object RoadmapExporter {
                     val tb = row.taskBar
                     taskGeometry[tb.taskId] = Triple(curY, EXPORT_TASK_H, tb)
                     canvas.drawText(
-                        ellipsizeText("• ${tb.title.ifBlank { "To-Do" }}", rowRegularPaint, EXPORT_LABEL_W - 28f),
+                        ellipsizeText("• ${tb.title.ifBlank { todoFallbackLabel }}", rowRegularPaint, EXPORT_LABEL_W - 28f),
                         tableLeft + 16f,
                         curY + 21f,
                         rowRegularPaint
@@ -4566,7 +4640,7 @@ object RoadmapExporter {
                             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                         }
                         canvas.drawText(
-                            ellipsizeText(tb.title.ifBlank { "To-Do" }, taskBarTextPaint, (barRect.width() - 12f).coerceAtLeast(0f)),
+                            ellipsizeText(tb.title.ifBlank { todoFallbackLabel }, taskBarTextPaint, (barRect.width() - 12f).coerceAtLeast(0f)),
                             barRect.left + 6f,
                             barRect.centerY() + 3.8f,
                             taskBarTextPaint

@@ -113,7 +113,8 @@ export async function checkForSwAndReleaseUpdates(
   try {
     const rawUrls = effectiveIncludeBeta
       ? [
-          'https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-2.0/macos/PARITY_MANIFEST.json',
+          'https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-3.0/macos/PARITY_MANIFEST.json',
+          'https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/alpha-3.0/macos/PARITY_MANIFEST.json',
           'https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/PARITY_MANIFEST.json'
         ]
       : [

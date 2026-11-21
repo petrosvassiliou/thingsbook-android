@@ -40,6 +40,7 @@ import com.pv.thingsbook.domain.model.CalendarEventItem
 import com.pv.thingsbook.domain.model.DeviceCalendarInfo
 import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
+import com.pv.thingsbook.domain.model.MAX_TASK_DURATION_MINUTES
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
 import com.pv.thingsbook.domain.model.ProjectStatus
@@ -710,7 +711,7 @@ class ThingsbookViewModel @Inject constructor(
             title = cleanTitle,
             categoryIds = perspective.categoryIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
             effortLevel = EffortLevel.normalize(perspective.effortLevel),
-            maxDurationMinutes = perspective.maxDurationMinutes?.coerceIn(5, 1440),
+            maxDurationMinutes = perspective.maxDurationMinutes?.coerceIn(5, MAX_TASK_DURATION_MINUTES),
             dueWindow = perspective.dueWindow.trim().uppercase(Locale.ROOT).ifEmpty { "ANY" },
             areaId = perspective.areaId?.trim()?.takeIf { it.isNotEmpty() },
             sortOrder = nextSortOrder
@@ -772,11 +773,19 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun toggleTaskExpansion(taskId: String?) {
-        _expandedTaskId.value = if (_expandedTaskId.value == taskId) null else taskId
+        val next = if (_expandedTaskId.value == taskId) null else taskId?.takeIf { it.isNotBlank() }
+        if (next != null) {
+            _selectedTaskIds.value = emptySet()
+        }
+        _expandedTaskId.value = next
     }
 
     fun expandTask(taskId: String?) {
-        _expandedTaskId.value = taskId?.takeIf { it.isNotBlank() }
+        val resolved = taskId?.takeIf { it.isNotBlank() }
+        if (resolved != null) {
+            _selectedTaskIds.value = emptySet()
+        }
+        _expandedTaskId.value = resolved
     }
 
     fun collapseExpandedTask() {
@@ -2969,6 +2978,12 @@ class ThingsbookViewModel @Inject constructor(
 
     private var lastSelectedAnchorTaskId: String? = null
 
+    fun selectSingleTask(taskId: String) {
+        _expandedTaskId.value = null
+        _selectedTaskIds.value = setOf(taskId)
+        lastSelectedAnchorTaskId = taskId
+    }
+
     fun toggleTaskSelection(taskId: String) {
         val current = _selectedTaskIds.value
         if (taskId in current) {
@@ -3025,50 +3040,51 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun batchScheduleSelectedTasks(
-        allTasksInView: List<TaskItem>,
+        allTasksInView: List<TaskItem> = emptyList(),
         newState: ScheduleState,
         newWhenDate: Long?
     ) {
-        val ids = _selectedTaskIds.value
+        val ids = _selectedTaskIds.value.toList()
         if (ids.isEmpty()) return
-        val targets = allTasksInView.filter { it.id in ids }
         safeVmScope.launch {
-            targets.forEach { task ->
-                repository.createOrUpdateTask(
-                    id = task.id,
-                    title = task.title,
-                    notes = task.notes,
-                    status = task.status,
-                    scheduleState = newState,
-                    whenDate = newWhenDate,
-                    deadline = task.deadline,
-                    reminderTime = task.reminderTime,
-                    projectId = task.projectId,
-                    headingId = task.headingId,
-                    areaId = task.areaId,
-                    recurrenceRule = task.recurrenceRule,
-                    sortOrder = task.sortOrder,
-                    tagIds = task.tags.map { it.id }
-                )
+            ids.forEach { id ->
+                repository.updateTaskSchedule(id, newState, newWhenDate)
             }
             _selectedTaskIds.value = emptySet()
         }
     }
 
     fun batchMoveSelectedTasks(
-        allTasksInView: List<TaskItem>,
+        allTasksInView: List<TaskItem> = emptyList(),
         projectId: String?,
         headingId: String?,
         areaId: String?
     ) {
-        val ids = _selectedTaskIds.value
+        val ids = _selectedTaskIds.value.toList()
         if (ids.isEmpty()) return
-        val targets = allTasksInView.filter { it.id in ids }
         safeVmScope.launch {
-            targets.forEach { task ->
-                repository.moveTaskToContainer(task.id, projectId, headingId, areaId)
+            ids.forEach { id ->
+                repository.moveTaskToContainer(id, projectId, headingId, areaId)
             }
             _selectedTaskIds.value = emptySet()
+        }
+    }
+
+    fun toggleTagOnTaskIds(tagId: String, targetIds: Collection<String>) {
+        val cleanTagId = tagId.trim()
+        val ids = targetIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (cleanTagId.isEmpty() || ids.isEmpty()) return
+        safeVmScope.launch {
+            val entities = ids.mapNotNull { repository.getTaskEntityById(it) }.filter { !it.isDeleted }
+            if (entities.isEmpty()) return@launch
+            val allAlreadyHaveTag = entities.all { entity ->
+                entity.tagIdsJson.contains("\"$cleanTagId\"")
+            }
+            if (allAlreadyHaveTag) {
+                repository.batchUpdateTasksTags(ids, emptySet(), setOf(cleanTagId))
+            } else {
+                repository.batchUpdateTasksTags(ids, setOf(cleanTagId), emptySet())
+            }
         }
     }
 

@@ -166,7 +166,7 @@ elif [ "$INCLUDE_BETA" = "1" ]; then
   RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: Thingsbook-Installer" "$RELEASES_API" 2>/dev/null || true)"
   DMG_URL="$(resolve_dmg_url "$RELEASES_JSON" "1")"
   if [ -z "$DMG_URL" ]; then
-    RAW_MANIFEST="$(curl -fsSL "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-2.0/macos/PARITY_MANIFEST.json" 2>/dev/null || true)"
+    RAW_MANIFEST="$(curl -fsSL "https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/beta-3.0/macos/PARITY_MANIFEST.json" 2>/dev/null || true)"
     FALLBACK_VER="$(printf '%s' "$RAW_MANIFEST" | sed -n 's/.*"macosVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
     if [ -n "$FALLBACK_VER" ]; then
       DMG_URL="https://github.com/petrosvassiliou/thingsbook-android/releases/download/v${FALLBACK_VER#v}/Thingsbook-macOS-Universal.dmg"

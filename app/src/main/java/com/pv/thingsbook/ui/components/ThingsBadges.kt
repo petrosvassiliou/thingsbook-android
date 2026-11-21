@@ -104,6 +104,7 @@ fun ThisEveningHeaderBadge(
 fun ThingsTagPill(
     title: String,
     modifier: Modifier = Modifier,
+    tooltipText: String? = null,
     onClick: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
@@ -113,7 +114,7 @@ fun ThingsTagPill(
     val shape = RoundedCornerShape(50)
 
     ThingsHoverTooltip(
-        text = "${stringResource(R.string.action_tags)}: $title",
+        text = tooltipText ?: title,
         modifier = modifier
     ) {
         Box(

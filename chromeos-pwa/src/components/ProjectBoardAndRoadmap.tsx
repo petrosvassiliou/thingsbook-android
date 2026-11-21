@@ -1062,13 +1062,22 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                   className="context-menu-item"
                   onClick={() => {
                     const tk = cardCtxMenu.task;
+                    const focusMins =
+                      tk.durationMinutes != null && tk.durationMinutes > 0
+                        ? Math.min(720, tk.durationMinutes)
+                        : 25;
                     setCardCtxMenu(null);
-                    onStartFocusTimer(tk.id, tk.title, tk.durationMinutes ?? 25);
+                    onStartFocusTimer(tk.id, tk.title, focusMins);
                   }}
                 >
                   <Timer size={14} style={{ color: 'var(--things-blue)' }} />
                   <span>
-                    {t.actionFocusTimerMinutes(cardCtxMenu.task.durationMinutes ?? 25)}
+                    {t.actionFocusTimerMinutes(
+                      cardCtxMenu.task.durationMinutes != null &&
+                        cardCtxMenu.task.durationMinutes > 0
+                        ? Math.min(720, cardCtxMenu.task.durationMinutes)
+                        : 25
+                    )}
                   </span>
                 </button>
               )}
@@ -1545,6 +1554,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       layout,
       project.title,
       {
+        lang,
         ungroupedTitle: t.projectUngroupedColumn,
         todayLabel: t.viewToday,
         unscheduledLabel: t.roadmapUnscheduledSection,
@@ -1573,6 +1583,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       layout,
       project.title,
       {
+        lang,
         ungroupedTitle: t.projectUngroupedColumn,
         todayLabel: t.viewToday,
         unscheduledLabel: t.roadmapUnscheduledSection,
@@ -2644,6 +2655,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       <button
                         type="button"
                         className="things-checkbox"
+                        aria-label={t.actionComplete}
+                        title={t.actionComplete}
                         onClick={() =>
                           void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })
                         }

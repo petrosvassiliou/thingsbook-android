@@ -41,6 +41,7 @@ public struct TaskBentoModalView: View {
     @State private var didCommitAndDismiss = false
     @State private var measuredBodyHeight: CGFloat = 0
     @State private var draftSaveTask: Task<Void, Never>?
+    @State private var modalFlushToken = UUID()
 
     @FocusState private var isTitleFocused: Bool
     @FocusState private var isNotesFocused: Bool
@@ -75,12 +76,9 @@ public struct TaskBentoModalView: View {
     }
 
     private var modalBodyContent: some View {
-        HStack(alignment: .top, spacing: 14) {
+        AlignedBentoTwoColumnLayout(spacing: 14, rightWidth: 274) {
             leftPrimaryContentColumn
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-
             rightPropertiesColumn
-                .frame(width: 274, alignment: .topLeading)
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
@@ -151,12 +149,17 @@ public struct TaskBentoModalView: View {
             didCommitAndDismiss = false
             syncDrafts()
             applyInitialFocusRules()
+            registerDraftFlushHook()
         }
         .onDisappear {
             draftSaveTask?.cancel()
             voiceController.stopRecording()
             if !didCommitAndDismiss {
                 commitDraftEditsIfNeeded(commitPendingChecklist: true)
+            }
+            if store.flushOpenTaskModalToken == modalFlushToken {
+                store.flushOpenTaskModalDrafts = nil
+                store.flushOpenTaskModalToken = nil
             }
         }
         .onChange(of: task.id) { _, _ in
@@ -165,6 +168,7 @@ public struct TaskBentoModalView: View {
             didCommitAndDismiss = false
             syncDrafts()
             applyInitialFocusRules()
+            registerDraftFlushHook()
         }
         .onChange(of: draftTitle) { _, _ in
             scheduleDraftAutoSave()
@@ -189,11 +193,13 @@ public struct TaskBentoModalView: View {
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                    store.toggleTaskCompletion(current)
+                    let fresh = latestTask
+                    store.toggleTaskCompletion(fresh)
                 },
                 onCancelTask: {
                     commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                    store.cancelTask(current)
+                    let fresh = latestTask
+                    store.cancelTask(fresh)
                 }
             )
 
@@ -213,7 +219,8 @@ public struct TaskBentoModalView: View {
             // Pin Button
             Button {
                 commitDraftEditsIfNeeded()
-                store.setTasksPinned([current.id], isPinned: !current.isPinned)
+                let fresh = latestTask
+                store.setTasksPinned([fresh.id], isPinned: !fresh.isPinned)
             } label: {
                 Image(systemName: current.isPinned ? "pin.fill" : "pin")
                     .font(.system(size: 13, weight: .semibold))
@@ -310,7 +317,10 @@ public struct TaskBentoModalView: View {
     // MARK: - Zone B1: Left Primary Content Column (~430 pt)
 
     private var leftPrimaryContentColumn: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        FlexGrowBentoColumnLayout(
+            spacing: 11,
+            growIndices: [voiceController.isRecording ? 1 : 0]
+        ) {
             if voiceController.isRecording {
                 HStack(spacing: 7) {
                     Circle()
@@ -324,8 +334,12 @@ public struct TaskBentoModalView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
                         .fill(ThingsMacPalette.deadlineCrimson.opacity(0.09))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .strokeBorder(ThingsMacPalette.deadlineCrimson.opacity(0.22), lineWidth: 0.85)
+                        )
                 )
             }
 
@@ -377,14 +391,15 @@ public struct TaskBentoModalView: View {
                     if hasNotes {
                         Text(MarkdownNotesParser.renderAttributed(draftNotes))
                             .font(.system(size: 13.5))
-                            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text(store.tr("placeholder_notes"))
                             .font(.system(size: 13.5))
                             .foregroundStyle(.tertiary)
-                            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .frame(maxWidth: .infinity, minHeight: 58, maxHeight: .infinity, alignment: .topLeading)
                 .padding(10)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -416,8 +431,15 @@ public struct TaskBentoModalView: View {
                         .scrollContentBackground(.hidden)
                         .focused($isNotesFocused)
                         .padding(6)
-                        .frame(height: notesEditorHeight)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: notesEditorHeight,
+                    idealHeight: notesEditorHeight,
+                    maxHeight: .infinity,
+                    alignment: .topLeading
+                )
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(ThingsMacPalette.cardSurface)
@@ -462,6 +484,7 @@ public struct TaskBentoModalView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(12)
         .background(softBentoTileBackground())
     }
@@ -666,7 +689,10 @@ public struct TaskBentoModalView: View {
     // MARK: - Zone B2: Right Properties Column (3 Balanced Soft Bento Cards, ~274 pt)
 
     private var rightPropertiesColumn: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        FlexGrowBentoColumnLayout(
+            spacing: 11,
+            growIndices: [0, 1, 2]
+        ) {
             scheduleBentoCard
             focusAndDependenciesBentoCard
             organizationBentoCard
@@ -760,7 +786,13 @@ public struct TaskBentoModalView: View {
                         copy.title = draftTitle
                         copy.notes = draftNotes
                         copy.scheduledStartMinutes = startMins
-                        copy.durationMinutes = durMins
+                        if startMins == nil {
+                            if let durMins {
+                                copy.durationMinutes = durMins
+                            }
+                        } else {
+                            copy.durationMinutes = durMins
+                        }
                         store.updateTask(copy)
                     }
                 }
@@ -809,8 +841,8 @@ public struct TaskBentoModalView: View {
                 }
             }
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(12)
         .background(softBentoTileBackground())
     }
 
@@ -916,8 +948,8 @@ public struct TaskBentoModalView: View {
                 }
             }
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(12)
         .background(softBentoTileBackground())
     }
 
@@ -1040,8 +1072,8 @@ public struct TaskBentoModalView: View {
                 }
             }
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(12)
         .background(softBentoTileBackground())
     }
 
@@ -1084,11 +1116,21 @@ public struct TaskBentoModalView: View {
                     helpText: store.tr("action_duplicate_todo")
                 ) {
                     commitDraftEditsIfNeeded(commitPendingChecklist: true)
-                    if let copy = try? store.database.duplicateTask(current.id, copySuffix: store.tr("v25_copy_suffix")) {
+                    let fresh = latestTask
+                    if let copy = try? store.database.duplicateTask(fresh.id, copySuffix: store.tr("v25_copy_suffix")) {
                         store.selectedTaskIds = [copy.id]
                         store.lastSelectedTaskId = copy.id
                         store.expandedTaskId = copy.id
                     }
+                }
+
+                ThingsUtilityIconButton(
+                    systemImage: "doc.on.doc",
+                    tint: .secondary,
+                    helpText: store.tr("action_copy_todo")
+                ) {
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    store.copyTaskToPasteboard(latestTask)
                 }
 
                 Button(role: .destructive) {
@@ -1207,6 +1249,14 @@ public struct TaskBentoModalView: View {
     }
 
     // MARK: - State, Persistence & Actions
+
+    private func registerDraftFlushHook() {
+        store.flushOpenTaskModalToken = modalFlushToken
+        store.flushOpenTaskModalDrafts = {
+            draftSaveTask?.cancel()
+            commitDraftEditsIfNeeded(commitPendingChecklist: true)
+        }
+    }
 
     private func syncDrafts() {
         let current = latestTask
@@ -1490,6 +1540,124 @@ private struct ModalBodyHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private struct AlignedBentoTwoColumnLayout: Layout {
+    var spacing: CGFloat = 14
+    var rightWidth: CGFloat = 274
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard subviews.count >= 2 else {
+            let fallbackW = proposal.width ?? rightWidth
+            let fallbackH = subviews.first?.sizeThatFits(ProposedViewSize(width: fallbackW, height: nil)).height ?? 0
+            return CGSize(width: fallbackW, height: fallbackH)
+        }
+        let totalW: CGFloat = {
+            if let pw = proposal.width, pw.isFinite, pw > 0 {
+                return pw
+            }
+            return 688
+        }()
+        let leftW = max(120, totalW - rightWidth - spacing)
+        let leftNatH = subviews[0].sizeThatFits(ProposedViewSize(width: leftW, height: nil)).height
+        let rightNatH = subviews[1].sizeThatFits(ProposedViewSize(width: rightWidth, height: nil)).height
+        return CGSize(width: totalW, height: max(leftNatH, rightNatH))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard !subviews.isEmpty else { return }
+        if subviews.count == 1 {
+            subviews[0].place(
+                at: CGPoint(x: bounds.minX, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+            )
+            return
+        }
+        let totalW = bounds.width > 0 ? bounds.width : 688
+        let leftW = max(120, totalW - rightWidth - spacing)
+        let leftNatH = subviews[0].sizeThatFits(ProposedViewSize(width: leftW, height: nil)).height
+        let rightNatH = subviews[1].sizeThatFits(ProposedViewSize(width: rightWidth, height: nil)).height
+        let targetH = max(leftNatH, rightNatH)
+
+        subviews[0].place(
+            at: CGPoint(x: bounds.minX, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: leftW, height: targetH)
+        )
+        subviews[1].place(
+            at: CGPoint(x: bounds.minX + leftW + spacing, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: rightWidth, height: targetH)
+        )
+    }
+}
+
+private struct FlexGrowBentoColumnLayout: Layout {
+    var spacing: CGFloat = 11
+    var growIndices: Set<Int>
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let w: CGFloat = {
+            if let pw = proposal.width, pw.isFinite, pw > 0 {
+                return pw
+            }
+            return subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 274
+        }()
+        let minHeights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: w, height: nil)).height }
+        let naturalTotal = minHeights.reduce(0, +) + spacing * CGFloat(max(0, subviews.count - 1))
+        if let proposedH = proposal.height, proposedH.isFinite {
+            return CGSize(width: w, height: max(naturalTotal, proposedH))
+        }
+        return CGSize(width: w, height: naturalTotal)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard !subviews.isEmpty else { return }
+        let w = bounds.width > 0 ? bounds.width : (proposal.width ?? 274)
+        let minHeights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: w, height: nil)).height }
+        let naturalTotal = minHeights.reduce(0, +) + spacing * CGFloat(max(0, subviews.count - 1))
+
+        let activeGrow = growIndices.filter { $0 >= 0 && $0 < subviews.count }
+        let targetH: CGFloat = {
+            if let proposedH = proposal.height, proposedH.isFinite {
+                return max(naturalTotal, proposedH)
+            }
+            return max(naturalTotal, bounds.height)
+        }()
+        let surplus = max(0, targetH - naturalTotal)
+        let share: CGFloat = activeGrow.isEmpty ? 0 : (surplus / CGFloat(activeGrow.count))
+
+        var y = bounds.minY
+        for idx in subviews.indices {
+            let childH = minHeights[idx] + (activeGrow.contains(idx) ? share : 0)
+            subviews[idx].place(
+                at: CGPoint(x: bounds.minX, y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: w, height: childH)
+            )
+            y += childH + spacing
+        }
     }
 }
 

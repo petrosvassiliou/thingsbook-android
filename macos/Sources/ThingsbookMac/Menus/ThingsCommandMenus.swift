@@ -212,12 +212,7 @@ public struct ThingsCommandMenus: Commands {
         CommandMenu(store.tr("macos_todo_menu")) {
             Button(store.tr("action_complete")) {
                 guard !isCommandBlocked else { return }
-                if store.selectedTaskIds.count > 1 {
-                    store.completeSelectedTasks()
-                } else if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
-                          let task = (store.allOpenTasks + store.logbookTasks).first(where: { $0.id == id }) {
-                    store.toggleTaskCompletion(task)
-                }
+                store.toggleSelectedTasksCompletion()
             }
             .keyboardShortcut("k", modifiers: [.command])
             .disabled(isCommandBlocked)
@@ -236,8 +231,20 @@ public struct ThingsCommandMenus: Commands {
             .keyboardShortcut("d", modifiers: [.command])
             .disabled(isCommandBlocked)
 
+            Button(store.tr("action_copy_todo")) {
+                guard !isShortcutBlocked() else { return }
+                if store.selectedTaskIds.count > 1 {
+                    store.copySelectedTasksToPasteboard()
+                } else if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
+                          let task = (store.allOpenTasks + store.logbookTasks).first(where: { $0.id == id }) {
+                    store.copyTaskToPasteboard(task)
+                }
+            }
+            .disabled(isCommandBlocked || (store.expandedTaskId == nil && store.selectedTaskIds.isEmpty))
+
             Button(store.tr("action_attach_file")) {
                 guard !isCommandBlocked else { return }
+                store.flushModalDraftsIfNeeded()
                 if let id = store.expandedTaskId ?? store.selectedTaskIds.first {
                     store.pickAndAttachFiles(taskId: id)
                 } else if case .project(let pid) = store.selectedDestination {
@@ -249,6 +256,7 @@ public struct ThingsCommandMenus: Commands {
 
             Button(store.tr("action_focus_timer")) {
                 guard !isCommandBlocked else { return }
+                store.flushModalDraftsIfNeeded()
                 if let id = store.expandedTaskId ?? store.selectedTaskIds.first,
                    let task = store.allOpenTasks.first(where: { $0.id == id }) {
                     store.startFocusTimer(for: task)
@@ -434,19 +442,8 @@ public struct ThingsCommandMenus: Commands {
     }
 
     private func scheduleSelected(_ preset: ScheduleState) {
-        let resolved = WhenScheduleResolver.resolvePresetSelection(
-            preset: preset,
-            reminderEnabled: false,
-            reminderHour: 9,
-            reminderMinute: 0
-        )
+        store.flushModalDraftsIfNeeded()
         let ids = !store.selectedTaskIds.isEmpty ? Array(store.selectedTaskIds) : (store.expandedTaskId.map { [$0] } ?? [])
-        for id in ids {
-            if var t = store.allOpenTasks.first(where: { $0.id == id }) {
-                t.scheduleState = resolved.scheduleState
-                t.whenDate = resolved.whenDateEpochMillis
-                store.updateTask(t)
-            }
-        }
+        store.scheduleTasks(ids, to: preset)
     }
 }

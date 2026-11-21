@@ -108,6 +108,7 @@ import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.TodayTimelineEntry
+import com.pv.thingsbook.domain.model.formatDurationCompact
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import java.time.Instant
 import java.time.LocalDate
@@ -498,7 +499,7 @@ fun ThingsWeeklyReviewModal(
                             if (inboxTasks.isEmpty()) {
                                 ReviewEmptyStepPlaceholder(
                                     emoji = "✨",
-                                    title = "Inbox Zero!",
+                                    title = stringResource(R.string.v2_review_inbox_zero),
                                     subtitle = stringResource(R.string.v2_review_step_inbox)
                                 )
                             } else {
@@ -2546,7 +2547,7 @@ fun ThingsTodayTimelineSection(
                                             onShiftTimeblock(task.id, 15)
                                         }
                                         QuickReviewChip(
-                                            label = "⏱ ${entry.durationMinutes}m",
+                                            label = "⏱ ${formatDurationCompact(entry.durationMinutes)}",
                                             bg = colors.thingsBlueSoft,
                                             fg = colors.thingsBlue
                                         ) {
@@ -2635,7 +2636,7 @@ fun ThingsTodayTimelineSection(
                         ) {
                             val suggestedLabel = TimeblockScheduleUtils.formatMinutesAsHm(suggestedNextSlot)
                             QuickReviewChip(
-                                label = "⚡ $suggestedLabel (${defaultDur}m)",
+                                label = "⚡ $suggestedLabel (${formatDurationCompact(defaultDur)})",
                                 bg = colors.thingsBlueSoft,
                                 fg = colors.thingsBlue
                             ) {

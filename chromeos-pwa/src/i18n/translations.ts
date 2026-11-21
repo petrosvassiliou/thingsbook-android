@@ -1,5 +1,23 @@
 import type { SupportedLang } from '../domain/types';
 
+function formatFocusMinutesCompact(mins: number): string {
+  const safe = Math.max(1, Math.min(720, Math.trunc(Number.isFinite(mins) ? mins : 25)));
+  if (safe < 60) return `${safe}m`;
+  if (safe >= 480) {
+    const d = Math.floor(safe / 480);
+    const rem = safe % 480;
+    const h = Math.floor(rem / 60);
+    const m = rem % 60;
+    const parts = [`${d}d`];
+    if (h > 0) parts.push(`${h}h`);
+    if (m > 0) parts.push(`${m}m`);
+    return parts.join(' ');
+  }
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 export interface TranslationStrings {
   appName: string;
   viewInbox: string;
@@ -465,6 +483,33 @@ export interface TranslationStrings {
   timelineExitFullscreen: string;
   quickEditAction: string;
   openDetailsAction: string;
+  actionClose: string;
+  actionRefresh: string;
+  calendarPrevMonth: string;
+  calendarNextMonth: string;
+  attachmentsZoomIn: string;
+  attachmentsZoomOut: string;
+  mdHeadingTooltip: string;
+  mdBoldTooltip: string;
+  mdItalicTooltip: string;
+  mdCodeTooltip: string;
+  mdListTooltip: string;
+  mdListBtn: string;
+  mdCheckboxTooltip: string;
+  mdPreviewTooltip: string;
+  notificationsTestSentToast: string;
+  notificationsBlockedToast: string;
+  backupFailedToast: string;
+  backupRestoredToast: (count: number) => string;
+  backupInvalidFileOrPassword: string;
+  calendarInvalidIcsError: string;
+  csvExportFailedToast: string;
+  csvImportedToast: (count: number) => string;
+  csvImportFailedToast: string;
+  sampleTasksRemovedToast: string;
+  authResetEmailSentToast: string;
+  geminiErrorFallback: string;
+  geminiAreaOptionalLabel: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -824,7 +869,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Assign a time slot to place tasks onto your daily timeline.',
     timelineEmptyScheduled:
       'No calendar events or timeblocked tasks yet — pick a slot below to build your day.',
-    actionFocusTimerMinutes: (mins) => `Start Focus Timer (${mins}m)`,
+    actionFocusTimerMinutes: (mins) => `Start Focus Timer (${formatFocusMinutesCompact(mins)})`,
     topbarTooltipHideSidebar: 'Hide Sidebar',
     topbarTooltipShowSidebar: 'Show Sidebar',
     topbarTooltipQuickFind: 'Quick Find',
@@ -953,7 +998,34 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineFullscreen: 'Full Screen',
     timelineExitFullscreen: 'Exit Full Screen',
     quickEditAction: 'Quick Edit',
-    openDetailsAction: 'Open Details'
+    openDetailsAction: 'Open Details',
+    actionClose: 'Close',
+    actionRefresh: 'Refresh',
+    calendarPrevMonth: 'Previous month',
+    calendarNextMonth: 'Next month',
+    attachmentsZoomIn: 'Zoom In',
+    attachmentsZoomOut: 'Zoom Out',
+    mdHeadingTooltip: 'Heading (#)',
+    mdBoldTooltip: 'Bold (**text**)',
+    mdItalicTooltip: 'Italic (*text*)',
+    mdCodeTooltip: 'Inline Code (`code`)',
+    mdListTooltip: 'Bullet List (- )',
+    mdListBtn: 'List',
+    mdCheckboxTooltip: 'Markdown Checkbox (- [ ] )',
+    mdPreviewTooltip: 'Preview Notes',
+    notificationsTestSentToast: '✓ Notification sent',
+    notificationsBlockedToast: 'Browser notifications blocked',
+    backupFailedToast: 'Backup failed',
+    backupRestoredToast: (count) => `✓ Restored ${count} to-dos`,
+    backupInvalidFileOrPassword: 'Invalid password or backup file',
+    calendarInvalidIcsError: 'Invalid .ics calendar file',
+    csvExportFailedToast: 'CSV export failed',
+    csvImportedToast: (count) => `✓ Imported ${count} to-dos`,
+    csvImportFailedToast: 'Invalid CSV file',
+    sampleTasksRemovedToast: '✓ Sample tasks removed',
+    authResetEmailSentToast: '✓ Password reset email sent',
+    geminiErrorFallback: 'Gemini error',
+    geminiAreaOptionalLabel: 'Area (optional)'
   },
   de: {
     appName: 'Thingsbook',
@@ -1314,7 +1386,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Weise ein Zeitfenster zu, um Aufgaben auf der Tages-Zeitachse einzuplanen.',
     timelineEmptyScheduled:
       'Noch keine Termine oder Zeitblöcke — wähle unten ein Zeitfenster für deinen Tag.',
-    actionFocusTimerMinutes: (mins) => `Fokus-Timer starten (${mins}m)`,
+    actionFocusTimerMinutes: (mins) => `Fokus-Timer starten (${formatFocusMinutesCompact(mins)})`,
     topbarTooltipHideSidebar: 'Seitenleiste ausblenden',
     topbarTooltipShowSidebar: 'Seitenleiste einblenden',
     topbarTooltipQuickFind: 'Schnellsuche',
@@ -1443,7 +1515,34 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineFullscreen: 'Vollbild',
     timelineExitFullscreen: 'Vollbild beenden',
     quickEditAction: 'Schnellbearbeitung',
-    openDetailsAction: 'Details öffnen'
+    openDetailsAction: 'Details öffnen',
+    actionClose: 'Schließen',
+    actionRefresh: 'Aktualisieren',
+    calendarPrevMonth: 'Vorheriger Monat',
+    calendarNextMonth: 'Nächster Monat',
+    attachmentsZoomIn: 'Vergrößern',
+    attachmentsZoomOut: 'Verkleinern',
+    mdHeadingTooltip: 'Überschrift (#)',
+    mdBoldTooltip: 'Fett (**Text**)',
+    mdItalicTooltip: 'Kursiv (*Text*)',
+    mdCodeTooltip: 'Inline-Code (`Code`)',
+    mdListTooltip: 'Aufzählung (- )',
+    mdListBtn: 'Liste',
+    mdCheckboxTooltip: 'Markdown-Checkbox (- [ ] )',
+    mdPreviewTooltip: 'Notizvorschau',
+    notificationsTestSentToast: '✓ Benachrichtigung gesendet',
+    notificationsBlockedToast: 'Browser-Benachrichtigungen blockiert',
+    backupFailedToast: 'Sicherung fehlgeschlagen',
+    backupRestoredToast: (count) => `✓ ${count} Aufgaben wiederhergestellt`,
+    backupInvalidFileOrPassword: 'Ungültiges Passwort oder ungültige Sicherungsdatei',
+    calendarInvalidIcsError: 'Ungültige .ics-Kalenderdatei',
+    csvExportFailedToast: 'CSV-Export fehlgeschlagen',
+    csvImportedToast: (count) => `✓ ${count} Aufgaben importiert`,
+    csvImportFailedToast: 'Ungültige CSV-Datei',
+    sampleTasksRemovedToast: '✓ Beispielaufgaben entfernt',
+    authResetEmailSentToast: '✓ E-Mail zum Zurücksetzen gesendet',
+    geminiErrorFallback: 'Gemini-Fehler',
+    geminiAreaOptionalLabel: 'Bereich (optional)'
   },
   fr: {
     appName: 'Thingsbook',
@@ -1629,7 +1728,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     areaSuggestions: ['Travail', 'Maison', 'Finances', 'Santé', 'Famille', 'Études', 'Sport', 'Loisirs'],
     repeatFixedSchedule: 'Régulièrement',
     repeatAfterCompletion: 'Après achèvement',
-    repeatClearBtn: 'Off',
+    repeatClearBtn: 'Désactivé',
     repeatEndsNever: 'Jamais',
     repeatEndsOn: 'Choisir une date…',
     repeatLastDay: 'Dernier jour',
@@ -1802,7 +1901,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Attribuez un créneau pour placer vos tâches sur la chronologie du jour.',
     timelineEmptyScheduled:
       'Aucun événement ni créneau planifié — choisissez un horaire ci-dessous.',
-    actionFocusTimerMinutes: (mins) => `Démarrer le minuteur Focus (${mins}m)`,
+    actionFocusTimerMinutes: (mins) =>
+      `Démarrer le minuteur Focus (${formatFocusMinutesCompact(mins)})`,
     topbarTooltipHideSidebar: 'Masquer la barre latérale',
     topbarTooltipShowSidebar: 'Afficher la barre latérale',
     topbarTooltipQuickFind: 'Recherche rapide',
@@ -1931,7 +2031,34 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineFullscreen: 'Plein écran',
     timelineExitFullscreen: 'Quitter le plein écran',
     quickEditAction: 'Modification rapide',
-    openDetailsAction: 'Ouvrir les détails'
+    openDetailsAction: 'Ouvrir les détails',
+    actionClose: 'Fermer',
+    actionRefresh: 'Actualiser',
+    calendarPrevMonth: 'Mois précédent',
+    calendarNextMonth: 'Mois suivant',
+    attachmentsZoomIn: 'Zoom avant',
+    attachmentsZoomOut: 'Zoom arrière',
+    mdHeadingTooltip: 'Titre (#)',
+    mdBoldTooltip: 'Gras (**texte**)',
+    mdItalicTooltip: 'Italique (*texte*)',
+    mdCodeTooltip: 'Code en ligne (`code`)',
+    mdListTooltip: 'Liste à puces (- )',
+    mdListBtn: 'Liste',
+    mdCheckboxTooltip: 'Case Markdown (- [ ] )',
+    mdPreviewTooltip: 'Aperçu des notes',
+    notificationsTestSentToast: '✓ Notification envoyée',
+    notificationsBlockedToast: 'Notifications du navigateur bloquées',
+    backupFailedToast: 'Échec de la sauvegarde',
+    backupRestoredToast: (count) => `✓ ${count} tâches restaurées`,
+    backupInvalidFileOrPassword: 'Mot de passe ou fichier de sauvegarde invalide',
+    calendarInvalidIcsError: 'Fichier calendrier .ics invalide',
+    csvExportFailedToast: 'Échec de l’exportation CSV',
+    csvImportedToast: (count) => `✓ ${count} tâches importées`,
+    csvImportFailedToast: 'Fichier CSV invalide',
+    sampleTasksRemovedToast: '✓ Tâches d’exemple supprimées',
+    authResetEmailSentToast: '✓ E-mail de réinitialisation envoyé',
+    geminiErrorFallback: 'Erreur Gemini',
+    geminiAreaOptionalLabel: 'Domaine (facultatif)'
   },
   it: {
     appName: 'Thingsbook',
@@ -2117,7 +2244,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     areaSuggestions: ['Lavoro', 'Casa', 'Finanze', 'Salute', 'Famiglia', 'Studio', 'Sport', 'Hobby'],
     repeatFixedSchedule: 'Regolarmente',
     repeatAfterCompletion: 'Dopo il completamento',
-    repeatClearBtn: 'Off',
+    repeatClearBtn: 'Disattivo',
     repeatEndsNever: 'Mai',
     repeatEndsOn: 'Scegli data…',
     repeatLastDay: 'Ultimo giorno',
@@ -2290,7 +2417,7 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Assegna una fascia oraria per inserire le attività nella timeline.',
     timelineEmptyScheduled:
       'Nessun evento o blocco orario pianificato — scegli uno slot qui sotto.',
-    actionFocusTimerMinutes: (mins) => `Avvia timer Focus (${mins}m)`,
+    actionFocusTimerMinutes: (mins) => `Avvia timer Focus (${formatFocusMinutesCompact(mins)})`,
     topbarTooltipHideSidebar: 'Nascondi barra laterale',
     topbarTooltipShowSidebar: 'Mostra barra laterale',
     topbarTooltipQuickFind: 'Ricerca rapida',
@@ -2419,7 +2546,34 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineFullscreen: 'Schermo intero',
     timelineExitFullscreen: 'Esci da schermo intero',
     quickEditAction: 'Modifica rapida',
-    openDetailsAction: 'Apri dettagli'
+    openDetailsAction: 'Apri dettagli',
+    actionClose: 'Chiudi',
+    actionRefresh: 'Aggiorna',
+    calendarPrevMonth: 'Mese precedente',
+    calendarNextMonth: 'Mese successivo',
+    attachmentsZoomIn: 'Ingrandisci',
+    attachmentsZoomOut: 'Riduci',
+    mdHeadingTooltip: 'Intestazione (#)',
+    mdBoldTooltip: 'Grassetto (**testo**)',
+    mdItalicTooltip: 'Corsivo (*testo*)',
+    mdCodeTooltip: 'Codice in linea (`codice`)',
+    mdListTooltip: 'Elenco puntato (- )',
+    mdListBtn: 'Elenco',
+    mdCheckboxTooltip: 'Casella Markdown (- [ ] )',
+    mdPreviewTooltip: 'Anteprima note',
+    notificationsTestSentToast: '✓ Notifica inviata',
+    notificationsBlockedToast: 'Notifiche del browser bloccate',
+    backupFailedToast: 'Creazione backup non riuscita',
+    backupRestoredToast: (count) => `✓ ${count} attività ripristinate`,
+    backupInvalidFileOrPassword: 'Password o file di backup non valido',
+    calendarInvalidIcsError: 'File calendario .ics non valido',
+    csvExportFailedToast: 'Esportazione CSV non riuscita',
+    csvImportedToast: (count) => `✓ ${count} attività importate`,
+    csvImportFailedToast: 'File CSV non valido',
+    sampleTasksRemovedToast: '✓ Attività di esempio rimosse',
+    authResetEmailSentToast: '✓ Email di reimpostazione inviata',
+    geminiErrorFallback: 'Errore Gemini',
+    geminiAreaOptionalLabel: 'Area (opzionale)'
   },
   es: {
     appName: 'Thingsbook',
@@ -2778,7 +2932,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineUnscheduledDesc: 'Asigna una franja horaria para ubicar tareas en tu cronología diaria.',
     timelineEmptyScheduled:
       'Aún no hay eventos ni bloques horarios — elige una hora abajo para organizar tu día.',
-    actionFocusTimerMinutes: (mins) => `Iniciar temporizador Focus (${mins}m)`,
+    actionFocusTimerMinutes: (mins) =>
+      `Iniciar temporizador Focus (${formatFocusMinutesCompact(mins)})`,
     topbarTooltipHideSidebar: 'Ocultar barra lateral',
     topbarTooltipShowSidebar: 'Mostrar barra lateral',
     topbarTooltipQuickFind: 'Búsqueda rápida',
@@ -2907,7 +3062,34 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     timelineFullscreen: 'Pantalla completa',
     timelineExitFullscreen: 'Salir de pantalla completa',
     quickEditAction: 'Edición rápida',
-    openDetailsAction: 'Abrir detalles'
+    openDetailsAction: 'Abrir detalles',
+    actionClose: 'Cerrar',
+    actionRefresh: 'Actualizar',
+    calendarPrevMonth: 'Mes anterior',
+    calendarNextMonth: 'Mes siguiente',
+    attachmentsZoomIn: 'Acercar',
+    attachmentsZoomOut: 'Alejar',
+    mdHeadingTooltip: 'Encabezado (#)',
+    mdBoldTooltip: 'Negrita (**texto**)',
+    mdItalicTooltip: 'Cursiva (*texto*)',
+    mdCodeTooltip: 'Código en línea (`código`)',
+    mdListTooltip: 'Lista con viñetas (- )',
+    mdListBtn: 'Lista',
+    mdCheckboxTooltip: 'Casilla Markdown (- [ ] )',
+    mdPreviewTooltip: 'Vista previa de notas',
+    notificationsTestSentToast: '✓ Notificación enviada',
+    notificationsBlockedToast: 'Notificaciones del navegador bloqueadas',
+    backupFailedToast: 'Error al crear la copia de seguridad',
+    backupRestoredToast: (count) => `✓ ${count} tareas restauradas`,
+    backupInvalidFileOrPassword: 'Contraseña o archivo de copia no válido',
+    calendarInvalidIcsError: 'Archivo de calendario .ics no válido',
+    csvExportFailedToast: 'Error al exportar CSV',
+    csvImportedToast: (count) => `✓ ${count} tareas importadas`,
+    csvImportFailedToast: 'Archivo CSV no válido',
+    sampleTasksRemovedToast: '✓ Tareas de ejemplo eliminadas',
+    authResetEmailSentToast: '✓ Correo de restablecimiento enviado',
+    geminiErrorFallback: 'Error de Gemini',
+    geminiAreaOptionalLabel: 'Área (opcional)'
   }
 };
 

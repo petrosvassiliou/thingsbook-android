@@ -840,7 +840,7 @@ export class ThingsLocalDb {
         : (existing?.durationMinutes ?? null);
     const durationMinutes =
       rawDuration != null && Number.isFinite(rawDuration) && rawDuration > 0
-        ? Math.max(5, Math.min(720, Math.trunc(rawDuration)))
+        ? Math.max(1, Math.min(48_000, Math.trunc(rawDuration)))
         : null;
 
     let resolvedTagIds = Array.from(

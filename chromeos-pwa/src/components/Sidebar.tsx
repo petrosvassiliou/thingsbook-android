@@ -599,10 +599,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             type="button"
             className="sidebar-install-card"
             onClick={onTriggerInstallPwa}
-            title={t.installChromeOsHint}
+            title={canInstallPwa ? t.installChromeOsBtn : t.installChromeOsHint}
           >
             <Download size={15} style={{ flexShrink: 0 }} />
-            <span>{canInstallPwa ? t.installChromeOsBtn : t.installChromeOsBtn}</span>
+            <span>{t.installChromeOsBtn}</span>
           </button>
         )}
 

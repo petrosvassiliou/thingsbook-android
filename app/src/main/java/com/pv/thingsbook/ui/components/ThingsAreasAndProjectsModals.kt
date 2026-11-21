@@ -448,8 +448,16 @@ fun ThingsAreaManagerModal(
 
                     // Quick 1-tap Area suggestions if not yet present (up to 8 Areas)
                     val existingNamesLower = areas.map { it.title.lowercase(Locale.ROOT) }.toSet()
-                    val suggestions = listOf("Work", "Home", "Finance", "Health", "Family", "Study", "Sport", "Hobby")
-                        .filter { it.lowercase(Locale.ROOT) !in existingNamesLower }
+                    val suggestions = listOf(
+                        stringResource(R.string.area_suggestion_work),
+                        stringResource(R.string.area_suggestion_home),
+                        stringResource(R.string.area_suggestion_finance),
+                        stringResource(R.string.area_suggestion_health),
+                        stringResource(R.string.area_suggestion_family),
+                        stringResource(R.string.area_suggestion_study),
+                        stringResource(R.string.area_suggestion_sport),
+                        stringResource(R.string.area_suggestion_hobby)
+                    ).filter { it.lowercase(Locale.ROOT) !in existingNamesLower }
                     if (suggestions.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         FlowRow(
@@ -900,7 +908,8 @@ fun CreateOrEditProjectDialog(
             currentDeadline = deadlineEpochMillis,
             locale = locale,
             onApplyDeadline = { chosen -> deadlineEpochMillis = chosen },
-            onDismiss = { showDeadlineCalendar = false }
+            onDismiss = { showDeadlineCalendar = false },
+            titleText = stringResource(R.string.project_target_date_label)
         )
     }
 }
@@ -1083,8 +1092,11 @@ fun MoveTaskToProjectOrAreaDialog(
                         }
                     }
 
-                    // Projects without an Area
-                    val unassignedProjects = projects.filter { it.areaId == null }
+                    // Projects without an Area (including orphaned areaId)
+                    val validAreaIds = areas.mapTo(HashSet()) { it.id }
+                    val unassignedProjects = projects.filter { proj ->
+                        proj.areaId == null || proj.areaId !in validAreaIds
+                    }
                     if (unassignedProjects.isNotEmpty()) {
                         items(unassignedProjects, key = { "move_proj_unassigned_${it.id}" }) { proj ->
                             ProjectMoveRowItem(

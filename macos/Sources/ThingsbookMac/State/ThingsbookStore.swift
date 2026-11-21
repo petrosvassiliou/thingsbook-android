@@ -109,6 +109,16 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var magicPlusActiveDrop: MacMagicPlusResolvedDrop? = nil
     @Published public var newlyCreatedHeadingId: String? = nil
     public var registeredMagicPlusSlots: [MacMagicPlusSlotGeometry] = []
+    public var flushOpenTaskModalDrafts: (() -> Void)? = nil
+    public var flushOpenTaskModalToken: UUID? = nil
+    private var isFlushingModalDrafts = false
+
+    public func flushModalDraftsIfNeeded() {
+        guard !isFlushingModalDrafts else { return }
+        isFlushingModalDrafts = true
+        defer { isFlushingModalDrafts = false }
+        flushOpenTaskModalDrafts?()
+    }
 
     // MARK: - Overlays, Sheets & Modals
     @Published public var isQuickFindPresented = false
@@ -860,6 +870,7 @@ public final class ThingsbookStore: ObservableObject {
         startMinutes: Int?,
         durationMinutes: Int?
     ) {
+        flushModalDraftsIfNeeded()
         try? database.setTaskTimeblock(
             taskId: taskId,
             scheduledStartMinutes: startMinutes,
@@ -868,10 +879,12 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func shiftTaskTimeblock(_ task: TaskItem, deltaMinutes: Int) {
-        let currentStart = task.scheduledStartMinutes ?? (9 * 60)
+        flushModalDraftsIfNeeded()
+        let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        let currentStart = fresh.scheduledStartMinutes ?? (9 * 60)
         let nextStart = min(23 * 60 + 45, max(0, currentStart + deltaMinutes))
-        let duration = task.durationMinutes ?? 30
-        setTaskTimeblock(task.id, startMinutes: nextStart, durationMinutes: duration)
+        let duration = fresh.durationMinutes ?? 30
+        setTaskTimeblock(fresh.id, startMinutes: nextStart, durationMinutes: duration)
     }
 
     public func todayTimelineCalendarEvents() -> [CalendarEventItem] {
@@ -1290,6 +1303,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func setTaskStandaloneDuration(_ taskId: String, durationMinutes: Int?) {
+        flushModalDraftsIfNeeded()
         let existingEffort = (allOpenTasks + logbookTasks).first(where: { $0.id == taskId })?.effortLevel
         try? database.setTaskEffortAndDuration(
             taskId: taskId,
@@ -1299,6 +1313,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func setTaskEffort(_ taskId: String, effortLevel: String?) {
+        flushModalDraftsIfNeeded()
         let existingDuration = (allOpenTasks + logbookTasks).first(where: { $0.id == taskId })?.durationMinutes
         try? database.setTaskEffortAndDuration(
             taskId: taskId,
@@ -1308,6 +1323,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func setTaskEffortAndDuration(_ taskId: String, effortLevel: String?, durationMinutes: Int?) {
+        flushModalDraftsIfNeeded()
         try? database.setTaskEffortAndDuration(
             taskId: taskId,
             effortLevel: effortLevel,
@@ -1317,6 +1333,7 @@ public final class ThingsbookStore: ObservableObject {
 
     @discardableResult
     public func setTaskBlockedBy(_ taskId: String, blockedByTaskIds: [String]) -> Bool {
+        flushModalDraftsIfNeeded()
         let ok = (try? database.setTaskBlockedBy(taskId: taskId, blockedByTaskIds: blockedByTaskIds)) ?? false
         if !ok {
             showToast(tr("v30_blocked_by_cycle_warning"))
@@ -1447,43 +1464,71 @@ public final class ThingsbookStore: ObservableObject {
     // MARK: - Task, Checklist, Project & Area Reordering / Actions
 
     public func toggleTaskCompletion(_ task: TaskItem) {
-        let nextStatus: TaskStatus = (task.status == .completed) ? .open : .completed
-        let spawnedId = (try? database.setTaskStatus(taskId: task.id, status: nextStatus)) ?? nil
+        flushModalDraftsIfNeeded()
+        let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        let nextStatus: TaskStatus = (fresh.status == .completed) ? .open : .completed
+        let spawnedId = (try? database.setTaskStatus(taskId: fresh.id, status: nextStatus)) ?? nil
         reloadSnapshot()
         if nextStatus == .completed {
-            if focusTimer?.taskId == task.id {
+            if focusTimer?.taskId == fresh.id {
                 stopFocusTimer()
             }
-            NotificationReminderService.shared.cancelTaskReminder(taskId: task.id)
+            NotificationReminderService.shared.cancelTaskReminder(taskId: fresh.id)
             if let spawnedId, let spawnedTask = allOpenTasks.first(where: { $0.id == spawnedId }) {
                 NotificationReminderService.shared.syncTaskReminder(spawnedTask, lang: preferences.language)
             }
-            let displayTitle = task.title.isEmpty ? tr("macos_untitled_todo") : task.title
+            let displayTitle = fresh.title.isEmpty ? tr("macos_untitled_todo") : fresh.title
             presentUndo(
                 message: trf("undo_task_completed", displayTitle),
                 action: .taskCompleted(
-                    taskId: task.id,
+                    taskId: fresh.id,
                     title: displayTitle,
                     spawnedRecurringTaskId: spawnedId
                 )
             )
-        } else if let reopened = allOpenTasks.first(where: { $0.id == task.id }) {
+        } else if let reopened = allOpenTasks.first(where: { $0.id == fresh.id }) {
             NotificationReminderService.shared.syncTaskReminder(reopened, lang: preferences.language)
         }
     }
 
     public func cancelTask(_ task: TaskItem) {
-        let nextStatus: TaskStatus = (task.status == .canceled) ? .open : .canceled
-        _ = try? database.setTaskStatus(taskId: task.id, status: nextStatus)
+        flushModalDraftsIfNeeded()
+        let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        let nextStatus: TaskStatus = (fresh.status == .canceled) ? .open : .canceled
+        _ = try? database.setTaskStatus(taskId: fresh.id, status: nextStatus)
         reloadSnapshot()
         if nextStatus == .canceled {
-            if focusTimer?.taskId == task.id {
+            if focusTimer?.taskId == fresh.id {
                 stopFocusTimer()
             }
-            NotificationReminderService.shared.cancelTaskReminder(taskId: task.id)
-        } else if let reopened = allOpenTasks.first(where: { $0.id == task.id }) {
+            NotificationReminderService.shared.cancelTaskReminder(taskId: fresh.id)
+        } else if let reopened = allOpenTasks.first(where: { $0.id == fresh.id }) {
             NotificationReminderService.shared.syncTaskReminder(reopened, lang: preferences.language)
         }
+    }
+
+    public func copyTaskToPasteboard(_ task: TaskItem) {
+        flushModalDraftsIfNeeded()
+        let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        let markdown = TaskItem.formatMarkdown(fresh, untitledFallback: tr("macos_untitled_todo"))
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+        showToast(tr("action_copy_todo"))
+    }
+
+    public func copySelectedTasksToPasteboard() {
+        flushModalDraftsIfNeeded()
+        let orderedIds = orderedTaskIds(matching: selectedTaskIds)
+        let pool = allOpenTasks + logbookTasks
+        let byId = Dictionary(uniqueKeysWithValues: pool.map { ($0.id, $0) })
+        let items = orderedIds.compactMap { byId[$0] }
+        guard !items.isEmpty else { return }
+        let markdown = items
+            .map { TaskItem.formatMarkdown($0, untitledFallback: tr("macos_untitled_todo")) }
+            .joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+        showToast(tr("action_copy_todo"))
     }
 
     public func updateTask(_ task: TaskItem, tagIds: [String]? = nil) {
@@ -1536,21 +1581,24 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func deleteTask(_ task: TaskItem) {
-        if focusTimer?.taskId == task.id {
+        flushModalDraftsIfNeeded()
+        let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        if focusTimer?.taskId == fresh.id {
             stopFocusTimer()
         }
-        NotificationReminderService.shared.cancelTaskReminder(taskId: task.id)
-        try? database.softDeleteTask(task.id)
-        if expandedTaskId == task.id { expandedTaskId = nil }
-        selectedTaskIds.remove(task.id)
-        let displayTitle = task.title.isEmpty ? tr("macos_untitled_todo") : task.title
+        NotificationReminderService.shared.cancelTaskReminder(taskId: fresh.id)
+        try? database.softDeleteTask(fresh.id)
+        if expandedTaskId == fresh.id { expandedTaskId = nil }
+        selectedTaskIds.remove(fresh.id)
+        let displayTitle = fresh.title.isEmpty ? tr("macos_untitled_todo") : fresh.title
         presentUndo(
             message: trf("undo_task_deleted", displayTitle),
-            action: .taskDeleted(taskId: task.id, title: displayTitle)
+            action: .taskDeleted(taskId: fresh.id, title: displayTitle)
         )
     }
 
     public func deleteSelectedTasks() {
+        flushModalDraftsIfNeeded()
         let ids = selectedTaskIds
         guard !ids.isEmpty else {
             if let exp = expandedTaskId, let t = (allOpenTasks + logbookTasks).first(where: { $0.id == exp }) {
@@ -1589,11 +1637,13 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func setTasksPinned(_ taskIds: [String], isPinned: Bool) {
+        flushModalDraftsIfNeeded()
         guard !taskIds.isEmpty else { return }
         try? database.setTasksPinned(taskIds, isPinned: isPinned)
     }
 
     public func togglePinForSelectedTasks() {
+        flushModalDraftsIfNeeded()
         let ids = Array(selectedTaskIds)
         guard !ids.isEmpty else { return }
         let candidates = (allOpenTasks + logbookTasks).filter { selectedTaskIds.contains($0.id) }
@@ -1602,6 +1652,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func togglePinForSelectedOrExpandedTasks() {
+        flushModalDraftsIfNeeded()
         let ids: [String]
         if !selectedTaskIds.isEmpty {
             ids = Array(selectedTaskIds)
@@ -1616,6 +1667,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func completeSelectedTasks() {
+        flushModalDraftsIfNeeded()
         let ids = orderedTaskIds(matching: selectedTaskIds)
         guard !ids.isEmpty else { return }
         for id in ids {
@@ -1639,22 +1691,51 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
-    public func scheduleSelectedTasks(_ preset: ScheduleState) {
-        let resolved = WhenScheduleResolver.resolvePresetSelection(
-            preset: preset,
-            reminderEnabled: false,
-            reminderHour: 9,
-            reminderMinute: 0
-        )
-        let ids = Array(selectedTaskIds)
+    public func toggleSelectedTasksCompletion() {
+        flushModalDraftsIfNeeded()
+        if selectedTaskIds.count > 1 {
+            completeSelectedTasks()
+        } else if let id = expandedTaskId ?? selectedTaskIds.first,
+                  let task = (allOpenTasks + logbookTasks).first(where: { $0.id == id }) {
+            toggleTaskCompletion(task)
+        }
+    }
+
+    public func scheduleTasks(_ ids: [String], to preset: ScheduleState) {
+        flushModalDraftsIfNeeded()
         guard !ids.isEmpty else { return }
+        let cal = Calendar.current
+        let now = Date()
         for id in ids {
-            if var t = allOpenTasks.first(where: { $0.id == id }) {
+            if var t = (allOpenTasks + logbookTasks).first(where: { $0.id == id }) {
+                let hasExistingReminder = t.reminderTime != nil
+                let remComps: DateComponents? = t.reminderTime.map {
+                    cal.dateComponents([.hour, .minute], from: DateEpochConverter.date(fromMillis: $0))
+                }
+                let resolved = WhenScheduleResolver.resolvePresetSelection(
+                    preset: preset,
+                    todayDate: now,
+                    calendar: cal,
+                    reminderEnabled: hasExistingReminder,
+                    reminderHour: remComps?.hour ?? 9,
+                    reminderMinute: remComps?.minute ?? 0
+                )
                 t.scheduleState = resolved.scheduleState
                 t.whenDate = resolved.whenDateEpochMillis
+                switch preset {
+                case .someday, .anytime, .inbox:
+                    t.reminderTime = nil
+                case .today, .thisEvening, .upcoming:
+                    t.reminderTime = resolved.reminderEpochMillis
+                }
                 updateTask(t)
             }
         }
+    }
+
+    public func scheduleSelectedTasks(_ preset: ScheduleState) {
+        flushModalDraftsIfNeeded()
+        scheduleTasks(Array(selectedTaskIds), to: preset)
     }
 
     public func batchTagSelectionState() -> (allSelected: Set<String>, partialSelected: Set<String>) {
@@ -1679,6 +1760,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func batchToggleTagOnSelectedTasks(_ tagId: String) {
+        flushModalDraftsIfNeeded()
         let ids = Array(selectedTaskIds)
         guard !ids.isEmpty else { return }
         let state = batchTagSelectionState()
@@ -1690,6 +1772,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func duplicateSelectedTasks() {
+        flushModalDraftsIfNeeded()
         let orderedIds = orderedTaskIds(matching: selectedTaskIds)
         guard !orderedIds.isEmpty else { return }
         let copySuffix = tr("v25_copy_suffix")
@@ -1705,6 +1788,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func duplicateSelectedOrExpandedTask() {
+        flushModalDraftsIfNeeded()
         let copySuffix = tr("v25_copy_suffix")
         if let expId = expandedTaskId {
             if let copy = try? database.duplicateTask(expId, copySuffix: copySuffix) {
@@ -1753,6 +1837,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func applyTagShortcut(_ char: String) {
+        flushModalDraftsIfNeeded()
         let lower = char.lowercased()
         guard let matchedTag = tags.first(where: { $0.shortcut?.lowercased() == lower }) else { return }
         if selectedTaskIds.count > 1 {
@@ -1916,11 +2001,14 @@ public final class ThingsbookStore: ObservableObject {
     // MARK: - 25m Focus Pomodoro Timer
 
     public func startFocusTimer(for task: TaskItem) {
+        flushModalDraftsIfNeeded()
         focusTimerCancellable?.invalidate()
-        let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("macos_untitled_todo") : task.title
-        let durationSeconds = max(1, task.durationMinutes ?? 25) * 60
+        let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        let title = fresh.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("macos_untitled_todo") : fresh.title
+        let sessionMinutes = min(max(1, fresh.durationMinutes ?? 25), 120)
+        let durationSeconds = sessionMinutes * 60
         focusTimer = FocusTimerState(
-            taskId: task.id,
+            taskId: fresh.id,
             taskTitle: title,
             remainingSeconds: durationSeconds,
             totalSeconds: durationSeconds

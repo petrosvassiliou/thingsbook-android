@@ -3839,6 +3839,8 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           className="icon-btn"
+                          title={t.actionMove}
+                          aria-label={t.actionMove}
                           disabled={areaIdx <= 0}
                           onClick={() => localDb.moveAreaOrder(area.id, 'up')}
                         >
@@ -3847,6 +3849,8 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           className="icon-btn"
+                          title={t.actionMove}
+                          aria-label={t.actionMove}
                           disabled={areaIdx < 0 || areaIdx >= activeAreas.length - 1}
                           onClick={() => localDb.moveAreaOrder(area.id, 'down')}
                         >
@@ -3855,6 +3859,8 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           className="icon-btn"
+                          title={t.actionRename}
+                          aria-label={t.actionRename}
                           onClick={() => {
                             setEditingAreaTitle(area.title);
                             setEditingAreaHeader(true);
@@ -3865,6 +3871,8 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           className="icon-btn"
+                          title={t.actionDelete}
+                          aria-label={t.actionDelete}
                           style={{ color: 'var(--deadline-red)' }}
                           onClick={async () => {
                             await localDb.deleteArea(area.id);

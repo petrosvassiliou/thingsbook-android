@@ -1960,8 +1960,10 @@ public struct TimeblockPopoverView: View {
     }
 
     private var formattedRangePreview: String {
-        let endMins = (selectedStartMinutes + selectedDurationMinutes) % 1440
-        return "\(TaskItem.formatMinutesOfDay(selectedStartMinutes))–\(TaskItem.formatMinutesOfDay(endMins)) · \(selectedDurationMinutes)m"
+        TaskItem.formatTimeblockRange(
+            startMinutes: selectedStartMinutes,
+            durationMinutes: selectedDurationMinutes
+        )
     }
 
     public var body: some View {
@@ -1973,9 +1975,9 @@ public struct TimeblockPopoverView: View {
 
                 Spacer()
 
-                if currentStartMinutes != nil || currentDurationMinutes != nil {
+                if currentStartMinutes != nil {
                     Button(store.tr("v2_timeblock_clear")) {
-                        onApply(nil, nil)
+                        onApply(nil, currentDurationMinutes)
                         dismiss()
                     }
                     .font(.system(size: 11.5))
@@ -2032,7 +2034,7 @@ public struct TimeblockPopoverView: View {
                     Button {
                         selectedDurationMinutes = dur
                     } label: {
-                        Text("\(dur)m")
+                        Text(TaskItem.formatCompactDuration(dur))
                             .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium, design: .rounded))
                             .foregroundStyle(isSelected ? Color.white : Color.primary)
                             .frame(maxWidth: .infinity)

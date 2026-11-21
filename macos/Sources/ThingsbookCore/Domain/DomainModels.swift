@@ -472,17 +472,53 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         return Self.formatCompactDuration(dur)
     }
 
+    public static let MINUTES_PER_WORKDAY: Int = 480
+
+    public static func formatTimeblockRange(startMinutes: Int, durationMinutes: Int) -> String {
+        let clampedStart = ((startMinutes % 1440) + 1440) % 1440
+        let dur = durationMinutes > 0 ? durationMinutes : 30
+        let compactDur = formatCompactDuration(dur)
+        if dur >= MINUTES_PER_WORKDAY {
+            return "\(formatMinutesOfDay(clampedStart)) · \(compactDur)"
+        }
+        let totalEnd = clampedStart + dur
+        let end = totalEnd % 1440
+        let dayOverflow = totalEnd / 1440
+        let overflowSuffix = dayOverflow > 0 ? " +\(dayOverflow)d" : ""
+        return "\(formatMinutesOfDay(clampedStart))–\(formatMinutesOfDay(end))\(overflowSuffix) · \(compactDur)"
+    }
+
     public var formattedTimeblockPill: String? {
         if let start = scheduledStartMinutes {
-            let clampedStart = ((start % 1440) + 1440) % 1440
-            let dur = effectiveDurationMinutes
-            let end = (clampedStart + dur) % 1440
-            return "\(Self.formatMinutesOfDay(clampedStart))–\(Self.formatMinutesOfDay(end)) · \(dur)m"
+            return Self.formatTimeblockRange(startMinutes: start, durationMinutes: effectiveDurationMinutes)
         }
         if let dur = durationMinutes, dur > 0 {
             return Self.formatCompactDuration(dur)
         }
         return nil
+    }
+
+    public static func formatMarkdown(_ task: TaskItem, untitledFallback: String = "Untitled To-Do") -> String {
+        let cleanTitle = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = cleanTitle.isEmpty ? untitledFallback : cleanTitle
+        let rootBox = task.status == .completed ? "[x]" : "[ ]"
+        var lines: [String] = ["- \(rootBox) \(resolvedTitle)"]
+
+        let cleanNotes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanNotes.isEmpty {
+            for noteLine in cleanNotes.components(separatedBy: .newlines) {
+                lines.append("  \(noteLine)")
+            }
+        }
+
+        for item in task.checklistItems {
+            let itemTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !itemTitle.isEmpty else { continue }
+            let box = item.isCompleted ? "[x]" : "[ ]"
+            lines.append("  - \(box) \(itemTitle)")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     public static let standaloneDurationPresets: [Int] = [5, 15, 30, 60, 120, 240, 480]
@@ -492,9 +528,9 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         if clamped < 60 {
             return "\(clamped)m"
         }
-        if clamped >= 480 {
-            let d = clamped / 480
-            let rem = clamped % 480
+        if clamped >= MINUTES_PER_WORKDAY {
+            let d = clamped / MINUTES_PER_WORKDAY
+            let rem = clamped % MINUTES_PER_WORKDAY
             let h = rem / 60
             let m = rem % 60
             var parts: [String] = ["\(d)d"]
@@ -2003,8 +2039,15 @@ public struct FocusTimerState: Equatable, Sendable {
     }
 
     public var formattedCountdown: String {
-        let mins = max(0, remainingSeconds) / 60
-        let secs = max(0, remainingSeconds) % 60
+        let clamped = max(0, remainingSeconds)
+        if clamped >= 3600 {
+            let hours = clamped / 3600
+            let mins = (clamped % 3600) / 60
+            let secs = clamped % 60
+            return String(format: "%02d:%02d:%02d", hours, mins, secs)
+        }
+        let mins = clamped / 60
+        let secs = clamped % 60
         return String(format: "%02d:%02d", mins, secs)
     }
 

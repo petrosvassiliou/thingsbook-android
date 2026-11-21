@@ -183,4 +183,127 @@ class V3Beta7LayoutPolishTest {
         assertTrue(pwaFaviconSvg.contains("""width="504" height="504""""))
         assertTrue(androidFgXml.contains("""android:scaleX="1.18""""))
     }
+
+    @Test
+    fun `v3_0_0_qa_alignment_multiday_topbar_and_click_parity verifies 0px Bento frame alignment, multi_day durations, full_width TopBar, and instant task selection`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+
+        // 1. Soft Bento 2-column gray-frame 0px top & bottom alignment math
+        val spacing = 12
+        // Case A: Left shorter than Right -> Notes (left[0]) grows so bottom edges sit 100% flush (0px delta)
+        val (leftA, rightA) = com.pv.thingsbook.ui.components.computeBentoAlignedColumnCardHeights(
+            leftNaturalHeights = listOf(72, 110, 44),
+            rightNaturalHeights = listOf(120, 108, 98),
+            verticalSpacingPx = spacing
+        )
+        val leftTotalA = leftA.sum() + spacing * (leftA.size - 1)
+        val rightTotalA = rightA.sum() + spacing * (rightA.size - 1)
+        org.junit.Assert.assertEquals(rightTotalA, leftTotalA)
+        org.junit.Assert.assertEquals(listOf(172, 110, 44), leftA)
+        org.junit.Assert.assertEquals(listOf(120, 108, 98), rightA)
+
+        // Case B: Left taller than Right with non-divisible remainder -> 3 right property cards share surplus to the exact pixel
+        val (leftB, rightB) = com.pv.thingsbook.ui.components.computeBentoAlignedColumnCardHeights(
+            leftNaturalHeights = listOf(240, 180, 95),
+            rightNaturalHeights = listOf(112, 104, 96),
+            verticalSpacingPx = spacing
+        )
+        val leftTotalB = leftB.sum() + spacing * (leftB.size - 1)
+        val rightTotalB = rightB.sum() + spacing * (rightB.size - 1)
+        org.junit.Assert.assertEquals(leftTotalB, rightTotalB)
+        org.junit.Assert.assertEquals(listOf(180, 172, 163), rightB)
+
+        // Case C: Already equal -> zero adjustments
+        val (leftC, rightC) = com.pv.thingsbook.ui.components.computeBentoAlignedColumnCardHeights(
+            leftNaturalHeights = listOf(100, 100, 100),
+            rightNaturalHeights = listOf(100, 100, 100),
+            verticalSpacingPx = spacing
+        )
+        org.junit.Assert.assertEquals(listOf(100, 100, 100), leftC)
+        org.junit.Assert.assertEquals(listOf(100, 100, 100), rightC)
+
+        // 2. Multi-day duration (MAX_TASK_DURATION_MINUTES = 48_000), Timeblock formatting, Outline @duration parser, and AppUpdateParser
+        org.junit.Assert.assertEquals(48_000, com.pv.thingsbook.domain.model.MAX_TASK_DURATION_MINUTES)
+        val fiveDayEntity = com.pv.thingsbook.data.remote.dto.TaskFirestoreDto(
+            id = "task-5d",
+            title = "5-Day Sprint",
+            durationMinutes = 2400
+        ).toEntity()
+        org.junit.Assert.assertEquals(2400, fiveDayEntity.durationMinutes)
+        org.junit.Assert.assertEquals(
+            "09:00–09:45 (45m)",
+            com.pv.thingsbook.domain.model.TimeblockScheduleUtils.formatTimeblockRange(9 * 60, 45)
+        )
+        org.junit.Assert.assertEquals(
+            "09:00 (1d)",
+            com.pv.thingsbook.domain.model.TimeblockScheduleUtils.formatTimeblockRange(9 * 60, 480)
+        )
+        org.junit.Assert.assertEquals(
+            "09:00 (2d)",
+            com.pv.thingsbook.domain.model.TimeblockScheduleUtils.formatTimeblockRange(9 * 60, 960)
+        )
+        val parsedOutline = com.pv.thingsbook.domain.model.ProjectOutlineImporter.parseOutline(
+            """
+            # Platform Release
+            - Ship API @45m
+            - Full architecture review @1d
+            - Multi-day migration (2.5d)
+            """.trimIndent()
+        )
+        org.junit.Assert.assertEquals(3, parsedOutline.unheadedTasks.size)
+        org.junit.Assert.assertEquals("Ship API", parsedOutline.unheadedTasks[0].title)
+        org.junit.Assert.assertEquals(45, parsedOutline.unheadedTasks[0].durationMinutes)
+        org.junit.Assert.assertEquals("Full architecture review", parsedOutline.unheadedTasks[1].title)
+        org.junit.Assert.assertEquals(480, parsedOutline.unheadedTasks[1].durationMinutes)
+        org.junit.Assert.assertEquals("Multi-day migration", parsedOutline.unheadedTasks[2].title)
+        org.junit.Assert.assertEquals(1200, parsedOutline.unheadedTasks[2].durationMinutes)
+
+        assertTrue(com.pv.thingsbook.data.update.AppUpdateParser.isNewerVersion("3.0.0-beta.13", "3.0.0"))
+        val updateManagerKt = File(appSrcMain, "java/com/pv/thingsbook/data/update/AppUpdateManager.kt").readText()
+        assertTrue(updateManagerKt.contains("beta-3.0/app/build.gradle.kts"))
+
+        // 3. Non-destructive timeblock clear preserves standalone duration
+        val repoKt = File(appSrcMain, "java/com/pv/thingsbook/data/repository/ThingsRepository.kt").readText()
+        val timeblockChunk = repoKt
+            .substringAfter("suspend fun updateTaskTimeblock(")
+            .substringBefore("suspend fun ")
+        assertTrue(timeblockChunk.contains("cleanStart == null && durationMinutes == null -> existing.durationMinutes"))
+
+        // 4. Full-width TopThingsbookBar (not trapped inside 1040.dp widthIn) so top-right icons sit at true window right edge
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        val workspaceBoxChunk = smartViewKt
+            .substringAfter("contentAlignment = Alignment.TopStart\n            ) {")
+            .substringBefore("ThingsMainTaskLazyList(")
+        val topBarCallIdx = workspaceBoxChunk.indexOf("TopThingsbookBar(")
+        val widthIn1040Idx = workspaceBoxChunk.indexOf("isWideScreen -> 1040.dp")
+        assertTrue("TopThingsbookBar must render in outer full-width Column", topBarCallIdx > 0)
+        assertTrue("TopThingsbookBar must appear BEFORE the 1040.dp bounded content Column", widthIn1040Idx > topBarCallIdx)
+        val quickFindHeaderChunk = smartViewKt
+            .substringAfter("private fun ThingsTopHeaderAndQuickFindSection(")
+            .substringBefore("private fun ThingsTaskRowItem(")
+        assertFalse("ThingsTopHeaderAndQuickFindSection must not duplicate TopThingsbookBar inside 1040.dp Column", quickFindHeaderChunk.contains("TopThingsbookBar("))
+
+        // 5. Cross-platform task click parity: 0ms single-click selects, <=380ms double-click or Open Details button opens modal
+        val viewModelKt = File(appSrcMain, "java/com/pv/thingsbook/ui/viewmodel/ThingsbookViewModel.kt").readText()
+        assertTrue(viewModelKt.contains("fun selectSingleTask(taskId: String)"))
+        assertTrue(viewModelKt.contains("fun clearTaskSelection()"))
+        assertTrue(smartViewKt.contains("else if (selectedTaskIds.isNotEmpty()) {\n                            viewModel.clearTaskSelection()"))
+        assertTrue(smartViewKt.contains("onSelectSingle = { viewModel.selectSingleTask(task.id) }"))
+        assertTrue(smartViewKt.contains("onSelectSingleTask = {\n                    taskId -> viewModel.selectSingleTask(taskId)") ||
+            smartViewKt.contains("onSelectSingleTask = { taskId ->\n                    viewModel.selectSingleTask(taskId)"))
+
+        val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
+        assertTrue(cardKt.contains("BentoAlignedTwoColumnRow("))
+        assertTrue(cardKt.contains("var lastPlainTapUptimeMs by remember(task.id) { mutableLongStateOf(0L) }"))
+        assertTrue(cardKt.contains("(now - lastPlainTapUptimeMs) <= 380L"))
+        assertTrue(cardKt.contains("Icons.Outlined.OpenInFull"))
+        assertFalse("combinedClickable must never pass onDoubleClick (which adds 300ms single-tap latency)", cardKt.contains("onDoubleClick ="))
+
+        val boardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ProjectWorkspaceViews.kt").readText()
+        val kanbanCardChunk = boardKt.substringAfter("private fun KanbanTaskCard(")
+        assertTrue(kanbanCardChunk.contains("var lastPlainTapUptimeMs by remember(task.id) { mutableLongStateOf(0L) }"))
+        assertTrue(kanbanCardChunk.contains("(now - lastPlainTapUptimeMs) <= 380L"))
+        assertTrue(kanbanCardChunk.contains("Icons.Outlined.OpenInFull"))
+        assertFalse("KanbanTaskCard combinedClickable must never pass onDoubleClick", kanbanCardChunk.contains("onDoubleClick ="))
+    }
 }

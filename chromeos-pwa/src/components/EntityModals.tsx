@@ -146,6 +146,8 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
                   <button
                     type="button"
                     className="icon-btn active"
+                    title={t.actionSave}
+                    aria-label={t.actionSave}
                     onClick={async () => {
                       if (editingText.trim()) {
                         await localDb.upsertArea({ id: area.id, title: editingText.trim() });
@@ -160,6 +162,8 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
                     <button
                       type="button"
                       className="icon-btn"
+                      title={t.actionMove}
+                      aria-label={t.actionMove}
                       disabled={idx === 0}
                       onClick={() => localDb.moveAreaOrder(area.id, 'up')}
                     >
@@ -168,6 +172,8 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
                     <button
                       type="button"
                       className="icon-btn"
+                      title={t.actionMove}
+                      aria-label={t.actionMove}
                       disabled={idx === activeAreas.length - 1}
                       onClick={() => localDb.moveAreaOrder(area.id, 'down')}
                     >
@@ -176,6 +182,8 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
                     <button
                       type="button"
                       className="icon-btn"
+                      title={t.actionRename}
+                      aria-label={t.actionRename}
                       onClick={() => {
                         setEditingId(area.id);
                         setEditingText(area.title);
@@ -186,6 +194,8 @@ export const AreaManagerModal: React.FC<AreaManagerModalProps> = ({
                     <button
                       type="button"
                       className="icon-btn"
+                      title={t.actionDelete}
+                      aria-label={t.actionDelete}
                       style={{ color: 'var(--deadline-red)' }}
                       onClick={() => localDb.deleteArea(area.id)}
                     >
@@ -765,7 +775,8 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                 className="icon-btn"
                 style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
                 onClick={() => setFilterQuery('')}
-                aria-label="Clear"
+                title={t.actionClear}
+                aria-label={t.actionClear}
               >
                 <X size={13} />
               </button>
@@ -879,7 +890,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                         maxLength={1}
                         value={editShortcut}
                         onChange={(e) => setEditShortcut(e.target.value.toUpperCase().slice(0, 1))}
-                        placeholder="Key"
+                        placeholder={t.tagsShortcutLabel}
                         onKeyDown={async (e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
@@ -1034,6 +1045,8 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                       type="button"
                       className="icon-btn"
                       style={{ width: 24, height: 24 }}
+                      title={t.actionCancel}
+                      aria-label={t.actionCancel}
                       onClick={() => {
                         setMergingId(null);
                         setMergeTargetId('');
@@ -1150,13 +1163,14 @@ export const TaskTagPickerModal: React.FC<TaskTagPickerModalProps> = ({
                 className="icon-btn"
                 style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
                 onClick={() => setSearchQuery('')}
-                aria-label="Clear"
+                title={t.actionClear}
+                aria-label={t.actionClear}
               >
                 <X size={14} />
               </button>
             )}
           </div>
-          <button type="submit" className="btn-primary" disabled={!cleanQuery}>
+          <button type="submit" className="btn-primary" title={t.tagsAddBtn} aria-label={t.tagsAddBtn} disabled={!cleanQuery}>
             <Plus size={15} />
           </button>
         </form>
@@ -1343,6 +1357,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
           <button
             type="button"
             className={`toggle-switch ${prefs.dailyDigestEnabled ? 'on' : ''}`}
+            aria-label={t.notificationsDailyTitle}
             onClick={toggleDigest}
             aria-pressed={prefs.dailyDigestEnabled}
           >
@@ -1385,7 +1400,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
             className="btn-secondary"
             onClick={async () => {
               const ok = await sendTestChromeOsNotification(t.appName, prefs.language);
-              onToast(ok ? '✓ Notification sent' : 'Browser notifications blocked');
+              onToast(ok ? t.notificationsTestSentToast : t.notificationsBlockedToast);
             }}
           >
             <Bell size={14} />
@@ -1526,7 +1541,8 @@ export const TaskDependencyModal: React.FC<TaskDependencyModalProps> = ({
               className="icon-btn"
               style={{ position: 'absolute', right: 4, width: 24, height: 24 }}
               onClick={() => setSearchQuery('')}
-              aria-label="Clear"
+              title={t.actionClear}
+              aria-label={t.actionClear}
             >
               <X size={14} />
             </button>
@@ -1912,6 +1928,7 @@ export const PerspectiveModal: React.FC<PerspectiveModalProps> = ({
             <button
               type="button"
               className={`toggle-switch ${actionableOnly ? 'on' : ''}`}
+              aria-label={t.perspectiveActionableOnlyLabel}
               aria-pressed={actionableOnly}
               onClick={() => setActionableOnly((v) => !v)}
             >

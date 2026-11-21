@@ -1231,11 +1231,16 @@ public struct CustomDurationPopoverView: View {
         self.onApply = onApply
     }
 
+    private var hasInvalidShorthand: Bool {
+        !shorthandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && TaskItem.parseCustomDurationMinutes(shorthandText) == nil
+    }
+
     private var computedTotalMinutes: Int {
         if let parsed = TaskItem.parseCustomDurationMinutes(shorthandText) {
             return parsed
         }
-        return max(0, days * 480 + hours * 60 + minutes)
+        return min(48_000, max(0, days * 480 + hours * 60 + minutes))
     }
 
     public var body: some View {
@@ -1244,7 +1249,7 @@ public struct CustomDurationPopoverView: View {
                 Label(store.tr("v30_duration_custom_title"), systemImage: "timer")
                     .font(.system(size: 13, weight: .bold))
                 Spacer()
-                if computedTotalMinutes > 0 {
+                if !hasInvalidShorthand && computedTotalMinutes > 0 {
                     Text(TaskItem.formatCompactDuration(computedTotalMinutes))
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(ThingsMacPalette.anytimeTeal)
@@ -1285,7 +1290,7 @@ public struct CustomDurationPopoverView: View {
             }
 
             HStack(spacing: 8) {
-                stepperUnitBox(label: store.tr("v30_duration_days_short"), value: $days, step: 1, range: 0...60)
+                stepperUnitBox(label: store.tr("v30_duration_days_short"), value: $days, step: 1, range: 0...100)
                 stepperUnitBox(label: store.tr("v30_duration_hours_short"), value: $hours, step: 1, range: 0...23)
                 stepperUnitBox(label: store.tr("v30_duration_minutes_short"), value: $minutes, step: 5, range: 0...55)
             }
@@ -1293,8 +1298,16 @@ public struct CustomDurationPopoverView: View {
             TextField(store.tr("v30_duration_custom_placeholder"), text: $shorthandText)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(
+                            hasInvalidShorthand ? ThingsMacPalette.deadlineCrimson : Color.clear,
+                            lineWidth: 1.2
+                        )
+                        .allowsHitTesting(false)
+                )
                 .onSubmit {
-                    if computedTotalMinutes > 0 {
+                    if !hasInvalidShorthand && computedTotalMinutes > 0 {
                         onApply(computedTotalMinutes)
                         dismiss()
                     }
@@ -1310,13 +1323,13 @@ public struct CustomDurationPopoverView: View {
                 }
                 Spacer()
                 Button(store.tr("action_done")) {
-                    guard computedTotalMinutes > 0 else { return }
+                    guard !hasInvalidShorthand, computedTotalMinutes > 0 else { return }
                     onApply(computedTotalMinutes)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(computedTotalMinutes <= 0)
+                .disabled(hasInvalidShorthand || computedTotalMinutes <= 0)
             }
         }
         .padding(14)

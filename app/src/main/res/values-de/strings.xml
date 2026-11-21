@@ -568,7 +568,7 @@
     <string name="v30_export_planner_xlsx">Projekt als Planner (.xlsx) exportieren</string>
     <string name="v30_export_planner_csv">Projekt als Planner-CSV exportieren</string>
     <string name="v30_external_import_success">Projekt „%1$s“ importiert (%2$d Aufgaben)</string>
-    <string name="v30_external_import_section">Projektdatei importieren (100 % offline)</string>
+    <string name="v30_external_import_section" formatted="false">Projektdatei importieren (100 % offline)</string>
     <string name="v30_external_import_desc">Ordnet Abschnitte &amp; Buckets Phasen zu, Unteraufgaben &amp; Checklistenpunkte Checklisten, Start-/Fälligkeitsdaten Start/Deadline sowie Tags/Bezeichnungen Kategorien.</string>
     <string name="v30_external_export_section">Bestehendes Projekt exportieren</string>
     <string name="v30_external_select_project">Zu exportierendes Projekt</string>
@@ -584,4 +584,15 @@
     <string name="v30_duration_days_short">Tage</string>
     <string name="v30_duration_hours_short">Std.</string>
     <string name="v30_duration_minutes_short">Min.</string>
+    <string name="action_copy_todo">Aufgabe kopieren</string>
+    <string name="repeat_ends_until_date">Enddatum der Wiederholung</string>
+    <string name="v2_review_inbox_zero">Eingang leer!</string>
+    <string name="area_suggestion_work">Arbeit</string>
+    <string name="area_suggestion_home">Zuhause</string>
+    <string name="area_suggestion_finance">Finanzen</string>
+    <string name="area_suggestion_health">Gesundheit</string>
+    <string name="area_suggestion_family">Familie</string>
+    <string name="area_suggestion_study">Studium</string>
+    <string name="area_suggestion_sport">Sport</string>
+    <string name="area_suggestion_hobby">Hobby</string>
 </resources>

@@ -58,17 +58,21 @@ import {
   sortTasksForView
 } from '../domain/v2Utils';
 import {
+  ROADMAP_MOUSE_DRAG_ACTIVATE_PX,
+  ROADMAP_TOUCH_HOLD_SLOP_PX,
   attachMultiTaskDragPreview,
   downloadBlob,
   extractDraggedTaskIds,
   generateRoadmapPdfBytes,
   hasDraggedTaskMime,
+  isRoadmapPointerActivelyPressed,
   localDaysBetween,
   orderTaskIdsByVisualOrder,
   renderRoadmapToPngDataUrl,
   resolveRoadmapHoldDurationMs,
   shiftPhaseDatesByDays,
   shiftTaskDatesByDays,
+  shouldActivateMouseRoadmapDrag,
   shouldCancelUnarmedRoadmapDrag,
   slugifyFilename,
   wrapTextLines,
@@ -1235,6 +1239,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     useState<RoadmapPdfOrientation>('landscape');
 
   const [barDrag, setBarDrag] = useState<BarDragState | null>(null);
+  const barDragRef = useRef<BarDragState | null>(null);
+  const barDragTargetRef = useRef<HTMLElement | null>(null);
   const [dragOverLaneId, setDragOverLaneId] = useState<string | null>(null);
   const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
   const [editingPhaseTitle, setEditingPhaseTitle] = useState('');
@@ -1243,7 +1249,32 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   const lastRoadmapPointerTypeRef = useRef<string>('mouse');
   const suppressNextBarClickRef = useRef<boolean>(false);
   const dayWidth = ZOOM_DAY_WIDTH_PX[zoom];
+  const dayWidthRef = useRef<number>(dayWidth);
+  dayWidthRef.current = dayWidth;
+  const layoutRef = useRef<ProjectRoadmapLayout>(layout);
+  layoutRef.current = layout;
   const timelineWidthPx = layout.totalDays * dayWidth;
+
+  const beginBarDrag = useCallback((target: HTMLElement, next: BarDragState) => {
+    barDragTargetRef.current = target;
+    barDragRef.current = next;
+    setBarDrag(next);
+  }, []);
+
+  const clearBarDragState = useCallback(() => {
+    const prev = barDragRef.current;
+    const target = barDragTargetRef.current;
+    if (prev && target) {
+      try {
+        target.releasePointerCapture?.(prev.pointerId);
+      } catch {
+        // ignore if pointer capture was not active
+      }
+    }
+    barDragRef.current = null;
+    barDragTargetRef.current = null;
+    setBarDrag(null);
+  }, []);
 
   const selectablePdfLanes = useMemo(() => {
     const hasHeadingLanes = layout.lanes.some((l) => l.heading != null);
@@ -1311,35 +1342,125 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     return layout.days.map((d) => fmt.format(new Date(d.epoch)));
   }, [layout.days, lang]);
 
-  // Pointer drag lifecycle for Phase bars & Task bars (requires explicit press-and-hold before dragging)
+  const activeDragSessionKey = barDrag
+    ? `${barDrag.kind}:${barDrag.id}:${barDrag.pointerId}`
+    : null;
+
+  // Pointer drag lifecycle for Phase bars & Task bars:
+  // - Pure hovering (buttons === 0) NEVER moves any task or phase bar.
+  // - Mouse: keeping the primary button pressed & dragging (>= 4px) or holding stationary arms and drags smoothly.
+  // - Touch / Pen: keeping a finger/stylus held stationary for 320ms arms drag (while quick swipes scroll normally).
   useEffect(() => {
     if (!barDrag || isFullScreen) return;
+    const initial = barDragRef.current ?? barDrag;
+    barDragRef.current = initial;
 
-    const holdTimer: number | null = !barDrag.armed
+    let holdTimer: number | null = !initial.armed
       ? window.setTimeout(() => {
-          setBarDrag((prev) =>
-            prev && !prev.armed ? { ...prev, armed: true } : prev
-          );
-        }, resolveRoadmapHoldDurationMs(barDrag.pointerType))
+          holdTimer = null;
+          const cur = barDragRef.current;
+          if (!cur || cur.armed) return;
+          try {
+            barDragTargetRef.current?.setPointerCapture?.(cur.pointerId);
+          } catch {
+            // ignore synthetic events without active pointer capture support
+          }
+          const armedNext: BarDragState = { ...cur, armed: true };
+          barDragRef.current = armedNext;
+          setBarDrag(armedNext);
+        }, resolveRoadmapHoldDurationMs(initial.pointerType))
       : null;
 
+    const clearHoldTimer = () => {
+      if (holdTimer !== null) {
+        window.clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    };
+
+    const abortDrag = () => {
+      clearHoldTimer();
+      clearBarDragState();
+    };
+
     const cancelIfUnarmed = () => {
-      if (!barDrag.armed) {
-        if (holdTimer !== null) window.clearTimeout(holdTimer);
-        setBarDrag(null);
+      const cur = barDragRef.current;
+      if (cur && !cur.armed) {
+        abortDrag();
+      }
+    };
+
+    const onTouchMove = (ev: TouchEvent) => {
+      const cur = barDragRef.current;
+      if (cur && cur.armed && ev.cancelable) {
+        ev.preventDefault();
+      }
+    };
+
+    const onContextMenu = (ev: MouseEvent) => {
+      const cur = barDragRef.current;
+      if (!cur) return;
+      if (cur.armed || cur.pointerType !== 'mouse') {
+        ev.preventDefault();
+      } else {
+        abortDrag();
       }
     };
 
     const onPointerMove = (ev: PointerEvent) => {
-      if (ev.pointerId !== barDrag.pointerId) return;
+      const cur = barDragRef.current;
+      if (!cur || ev.pointerId !== cur.pointerId) return;
 
-      if (!barDrag.armed) {
+      const effectivePointerType = ev.pointerType || cur.pointerType;
+      if (!isRoadmapPointerActivelyPressed(effectivePointerType, ev.buttons)) {
+        abortDrag();
+        return;
+      }
+
+      const dx = ev.clientX - cur.startClientX;
+
+      if (!cur.armed) {
+        if (effectivePointerType === 'mouse') {
+          if (
+            !shouldActivateMouseRoadmapDrag(
+              cur.startClientX,
+              cur.startClientY,
+              ev.clientX,
+              ev.clientY,
+              ev.buttons,
+              ROADMAP_MOUSE_DRAG_ACTIVATE_PX
+            )
+          ) {
+            return;
+          }
+          clearHoldTimer();
+          try {
+            barDragTargetRef.current?.setPointerCapture?.(cur.pointerId);
+          } catch {
+            // ignore synthetic pointer capture error
+          }
+          if (ev.cancelable) {
+            ev.preventDefault();
+          }
+          const delta = Math.round(dx / dayWidthRef.current);
+          const next: BarDragState = {
+            ...cur,
+            armed: true,
+            moved: true,
+            deltaDays: delta
+          };
+          barDragRef.current = next;
+          setBarDrag(next);
+          return;
+        }
+
         if (
           shouldCancelUnarmedRoadmapDrag(
-            barDrag.startClientX,
-            barDrag.startClientY,
+            cur.startClientX,
+            cur.startClientY,
             ev.clientX,
-            ev.clientY
+            ev.clientY,
+            ROADMAP_TOUCH_HOLD_SLOP_PX
           )
         ) {
           cancelIfUnarmed();
@@ -1350,31 +1471,37 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       if (ev.cancelable) {
         ev.preventDefault();
       }
-      const dx = ev.clientX - barDrag.startClientX;
-      const delta = Math.round(dx / dayWidth);
-      const moved = barDrag.moved || Math.abs(dx) >= 4;
-      setBarDrag((prev) =>
-        prev && prev.armed && (prev.deltaDays !== delta || prev.moved !== moved)
-          ? { ...prev, deltaDays: delta, moved }
-          : prev
-      );
+      const delta = Math.round(dx / dayWidthRef.current);
+      const moved = cur.moved || Math.abs(dx) >= ROADMAP_MOUSE_DRAG_ACTIVATE_PX;
+      if (cur.deltaDays !== delta || cur.moved !== moved) {
+        const next: BarDragState = { ...cur, deltaDays: delta, moved };
+        barDragRef.current = next;
+        setBarDrag(next);
+      }
     };
 
     const onPointerUp = (ev: PointerEvent) => {
-      if (ev.pointerId !== barDrag.pointerId) return;
-      if (holdTimer !== null) window.clearTimeout(holdTimer);
-      const finished = barDrag;
-      setBarDrag(null);
-      if (!finished || !finished.armed) return;
+      const finished = barDragRef.current;
+      if (!finished || ev.pointerId !== finished.pointerId) return;
+      clearHoldTimer();
+      clearBarDragState();
+      if (!finished.armed) return;
 
-      suppressNextBarClickRef.current = true;
-      window.setTimeout(() => {
-        suppressNextBarClickRef.current = false;
-      }, 80);
+      if (
+        finished.moved ||
+        finished.deltaDays !== 0 ||
+        finished.pointerType !== 'mouse'
+      ) {
+        suppressNextBarClickRef.current = true;
+        window.setTimeout(() => {
+          suppressNextBarClickRef.current = false;
+        }, 80);
+      }
 
       if (finished.deltaDays !== 0) {
+        const currentLayout = layoutRef.current;
         if (finished.kind === 'phase') {
-          const lane = layout.lanes.find((l) => l.heading?.id === finished.id);
+          const lane = currentLayout.lanes.find((l) => l.heading?.id === finished.id);
           if (lane && lane.heading) {
             const shifted = shiftPhaseDatesByDays(lane.heading, finished.deltaDays, {
               startEpoch: lane.startEpoch,
@@ -1387,12 +1514,14 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
             );
           }
         } else {
-          const plotted = layout.plottedTasks.find((p) => p.task.id === finished.id);
+          const plotted = currentLayout.plottedTasks.find(
+            (p) => p.task.id === finished.id
+          );
           if (plotted) {
             const shifted = shiftTaskDatesByDays(
               plotted.task,
               finished.deltaDays,
-              layout.todayEpoch
+              currentLayout.todayEpoch
             );
             void localDb.upsertTask({
               id: plotted.task.id,
@@ -1406,26 +1535,44 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     };
 
     const onPointerCancel = (ev: PointerEvent) => {
-      if (ev.pointerId !== barDrag.pointerId) return;
-      if (holdTimer !== null) window.clearTimeout(holdTimer);
-      setBarDrag(null);
+      const cur = barDragRef.current;
+      if (!cur || ev.pointerId !== cur.pointerId) return;
+      abortDrag();
+    };
+
+    const onWindowBlur = () => {
+      abortDrag();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        abortDrag();
+      }
     };
 
     const scrollEl = scrollRef.current;
     window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('contextmenu', onContextMenu, true);
+    window.addEventListener('blur', onWindowBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('scroll', cancelIfUnarmed, true);
     scrollEl?.addEventListener('scroll', cancelIfUnarmed, { passive: true });
     return () => {
-      if (holdTimer !== null) window.clearTimeout(holdTimer);
+      clearHoldTimer();
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('contextmenu', onContextMenu, true);
+      window.removeEventListener('blur', onWindowBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('scroll', cancelIfUnarmed, true);
       scrollEl?.removeEventListener('scroll', cancelIfUnarmed);
     };
-  }, [barDrag, isFullScreen, dayWidth, layout]);
+  }, [activeDragSessionKey, isFullScreen, clearBarDragState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stepPhaseByDays = (lane: ProjectRoadmapLayout['lanes'][number], delta: number) => {
     if (isFullScreen || !lane.heading) return;
@@ -1469,7 +1616,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
 
       for (const pt of lane.plottedTasks) {
         const offsetDays =
-          barDrag && barDrag.kind === 'task' && barDrag.id === pt.task.id
+          !isFullScreen &&
+          barDrag &&
+          barDrag.kind === 'task' &&
+          barDrag.id === pt.task.id &&
+          barDrag.armed
             ? barDrag.deltaDays
             : 0;
         const clampedS = Math.max(
@@ -2217,9 +2368,9 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             onPointerDown={(e) => {
                               if (isFullScreen) return;
                               if (e.pointerType === 'mouse' && e.button !== 0) return;
-                              if ((e.target as HTMLElement).closest('button')) return;
                               e.stopPropagation();
-                              setBarDrag({
+                              suppressNextBarClickRef.current = false;
+                              beginBarDrag(e.currentTarget, {
                                 kind: 'phase',
                                 id: hd.id,
                                 pointerId: e.pointerId,
@@ -2255,6 +2406,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                   aria-label={t.roadmapShiftEarlier}
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    if (suppressNextBarClickRef.current) {
+                                      suppressNextBarClickRef.current = false;
+                                      return;
+                                    }
                                     stepPhaseByDays(lane, -1);
                                   }}
                                 >
@@ -2267,6 +2422,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                   aria-label={t.roadmapShiftLater}
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    if (suppressNextBarClickRef.current) {
+                                      suppressNextBarClickRef.current = false;
+                                      return;
+                                    }
                                     stepPhaseByDays(lane, 1);
                                   }}
                                 >
@@ -2555,11 +2714,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             onPointerDown={(e) => {
                               if (isFullScreen) return;
                               if (e.pointerType === 'mouse' && e.button !== 0) return;
-                              if ((e.target as HTMLElement).closest('button')) return;
                               e.stopPropagation();
                               lastRoadmapPointerTypeRef.current = e.pointerType || 'mouse';
                               suppressNextBarClickRef.current = false;
-                              setBarDrag({
+                              beginBarDrag(e.currentTarget, {
                                 kind: 'task',
                                 id: tk.id,
                                 pointerId: e.pointerId,
@@ -2591,6 +2749,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             onDoubleClick={(e) => {
                               e.stopPropagation();
                               if (isFullScreen) return;
+                              clearBarDragState();
                               onOpenTaskEditor(tk.id);
                             }}
                           >
@@ -2621,6 +2780,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                       aria-label={t.roadmapShiftEarlier}
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        if (suppressNextBarClickRef.current) {
+                                          suppressNextBarClickRef.current = false;
+                                          return;
+                                        }
                                         stepTaskByDays(tk, -1);
                                       }}
                                       onDoubleClick={(e) => e.stopPropagation()}
@@ -2634,6 +2797,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                       aria-label={t.roadmapShiftLater}
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        if (suppressNextBarClickRef.current) {
+                                          suppressNextBarClickRef.current = false;
+                                          return;
+                                        }
                                         stepTaskByDays(tk, 1);
                                       }}
                                       onDoubleClick={(e) => e.stopPropagation()}

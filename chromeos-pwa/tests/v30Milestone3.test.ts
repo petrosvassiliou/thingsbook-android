@@ -11,17 +11,21 @@ import {
 import {
   DRAG_MIME_MULTI_TASKS,
   DRAG_MIME_SINGLE_TASK,
+  ROADMAP_MOUSE_DRAG_ACTIVATE_PX,
+  ROADMAP_MOUSE_HOLD_MS,
+  ROADMAP_TOUCH_HOLD_MS,
+  ROADMAP_TOUCH_HOLD_SLOP_PX,
   addOneMonthLocal,
   buildProjectRoadmapLayout,
   extractDraggedTaskIds,
   generateRoadmapPdfBytes,
+  isRoadmapPointerActivelyPressed,
   localDaysBetween,
   normalizeProjectViewMode,
-  ROADMAP_MOUSE_HOLD_MS,
-  ROADMAP_TOUCH_HOLD_MS,
   resolveRoadmapHoldDurationMs,
   shiftPhaseDatesByDays,
   shiftTaskDatesByDays,
+  shouldActivateMouseRoadmapDrag,
   shouldCancelUnarmedRoadmapDrag,
   wrapTextLines
 } from '../src/domain/v30Roadmap.ts';
@@ -877,4 +881,39 @@ test('v3.0.0-beta.3 Roadmap hold-to-drag guard requires stationary hold and canc
   assert.equal(shouldCancelUnarmedRoadmapDrag(100, 200, 100, 214), true);
   assert.equal(shouldCancelUnarmedRoadmapDrag(100, 200, 106, 206), true);
 });
+
+test('v3.0.0-beta.16 Roadmap timeline drag requires active mouse press or finger contact and ignores hover', () => {
+  // Pure mouse/pen/touch hover (buttons === 0) is NEVER treated as actively pressed
+  assert.equal(isRoadmapPointerActivelyPressed('mouse', 0), false);
+  assert.equal(isRoadmapPointerActivelyPressed('mouse', 2), false); // right button only
+  assert.equal(isRoadmapPointerActivelyPressed('pen', 0), false);
+  assert.equal(isRoadmapPointerActivelyPressed('touch', 0), false);
+
+  // Active primary mouse press or finger/stylus contact returns true
+  assert.equal(isRoadmapPointerActivelyPressed('mouse', 1), true);
+  assert.equal(isRoadmapPointerActivelyPressed('mouse', 3), true);
+  assert.equal(isRoadmapPointerActivelyPressed('pen', 1), true);
+  assert.equal(isRoadmapPointerActivelyPressed('touch', 1), true);
+
+  // Hovering mouse motion (buttons === 0) NEVER activates drag regardless of distance
+  assert.equal(shouldActivateMouseRoadmapDrag(100, 200, 180, 200, 0), false);
+  // Tiny click jitter (< 4px) while pressed does NOT prematurely activate drag
+  assert.equal(shouldActivateMouseRoadmapDrag(100, 200, 102, 201, 1), false);
+  // Pressing primary mouse button and dragging >= 4px activates smooth timeline drag immediately
+  assert.equal(
+    shouldActivateMouseRoadmapDrag(100, 200, 100 + ROADMAP_MOUSE_DRAG_ACTIVATE_PX, 200, 1),
+    true
+  );
+
+  // Touch hold jitter tolerance allows natural capacitive pad settle (<= 10px) while rejecting scroll swipes
+  assert.equal(
+    shouldCancelUnarmedRoadmapDrag(100, 200, 107, 205, ROADMAP_TOUCH_HOLD_SLOP_PX),
+    false
+  );
+  assert.equal(
+    shouldCancelUnarmedRoadmapDrag(100, 200, 122, 200, ROADMAP_TOUCH_HOLD_SLOP_PX),
+    true
+  );
+});
+
 

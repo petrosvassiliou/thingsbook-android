@@ -1021,13 +1021,161 @@ async function main() {
     );
     await auditVisibleButtonsAndHoverStability(cdp, 'Project Gantt Roadmap (Milestone Diamond)');
 
+    // Timeline Drag E2E Parity Check (Hover = no-op; Mouse press-and-drag = moves +2d; Touch hold-and-drag = moves -2d):
+    const dayW = await cdp.evalJs(`
+      return document.querySelector('.roadmap-day-cell')?.getBoundingClientRect()?.width || 40;
+    `);
+    const twoDaysPx = Math.round(2 * dayW);
+
+    const getBarMetrics = async (selector) => {
+      return await cdp.evalJs(`
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          leftStylePx: parseFloat(el.style.left || '0'),
+          rectLeft: r.left,
+          cx: Math.round(r.left + Math.min(24, r.width / 2)),
+          cy: Math.round(r.top + r.height / 2)
+        };
+      `);
+    };
+
+    const taskBarSel = `[data-testid="roadmap-task-bar-${seededIds.taskDeId}"]`;
+    const beforeTaskBar = await getBarMetrics(taskBarSel);
+    assert(beforeTaskBar, `Missing task bar ${taskBarSel} in Roadmap Timeline`);
+
+    // 1. Pure mouse hover (buttons: 0) across task bar MUST NOT move it
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: beforeTaskBar.cx,
+      y: beforeTaskBar.cy,
+      button: 'none',
+      buttons: 0
+    });
+    await sleep(60);
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: beforeTaskBar.cx + Math.round(3 * dayW),
+      y: beforeTaskBar.cy,
+      button: 'none',
+      buttons: 0
+    });
+    await sleep(80);
+    const afterHoverTaskBar = await getBarMetrics(taskBarSel);
+    assert(
+      Math.abs(afterHoverTaskBar.leftStylePx - beforeTaskBar.leftStylePx) < 0.5,
+      `Hovering over Timeline task bar moved it! before=${beforeTaskBar.leftStylePx}, afterHover=${afterHoverTaskBar.leftStylePx}`
+    );
+
+    // 2. Mouse press-and-drag (+2 * dayW = +2 days) MUST move bar while pressed and persist on release
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: beforeTaskBar.cx,
+      y: beforeTaskBar.cy,
+      button: 'none',
+      buttons: 0
+    });
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: beforeTaskBar.cx,
+      y: beforeTaskBar.cy,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1
+    });
+    await sleep(30); // Move immediately (< 260ms) like a normal mouse press-and-drag!
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: beforeTaskBar.cx + 16,
+      y: beforeTaskBar.cy,
+      button: 'left',
+      buttons: 1
+    });
+    await sleep(30);
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: beforeTaskBar.cx + twoDaysPx,
+      y: beforeTaskBar.cy,
+      button: 'left',
+      buttons: 1
+    });
+    await sleep(60);
+    const midMouseDragBar = await getBarMetrics(taskBarSel);
+    assert(
+      Math.abs(midMouseDragBar.leftStylePx - (beforeTaskBar.leftStylePx + twoDaysPx)) <= 1,
+      `Expected live mouse press-and-drag preview +${twoDaysPx}px (+2d), got before=${beforeTaskBar.leftStylePx}, mid=${midMouseDragBar.leftStylePx}`
+    );
+
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: beforeTaskBar.cx + twoDaysPx,
+      y: beforeTaskBar.cy,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1
+    });
+    await sleep(160);
+
+    // Post-release hover back (buttons: 0) MUST NOT pull the task bar back!
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: beforeTaskBar.cx - Math.round(dayW),
+      y: beforeTaskBar.cy,
+      button: 'none',
+      buttons: 0
+    });
+    await sleep(80);
+    const afterMouseReleaseBar = await getBarMetrics(taskBarSel);
+    assert(
+      Math.abs(afterMouseReleaseBar.leftStylePx - (beforeTaskBar.leftStylePx + twoDaysPx)) <= 1,
+      `Expected persisted +${twoDaysPx}px (+2d) position after mouse release + hover, got ${afterMouseReleaseBar.leftStylePx}`
+    );
+
+    // 3. Touch finger press-and-hold (360ms) + drag (-2 * dayW = -2 days) on Milestone diamond bar MUST move cleanly without scroll/pointercancel
+    const milestoneSel = '[data-milestone="true"]';
+    const beforeMilestoneBar = await getBarMetrics(milestoneSel);
+    assert(beforeMilestoneBar, 'Missing Milestone bar for touch hold-and-drag test');
+    const diamondTouchPos = await cdp.evalJs(`
+      const d = document.querySelector('[data-milestone="true"] .roadmap-milestone-diamond');
+      const r = d.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    `);
+
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: diamondTouchPos.x, y: diamondTouchPos.y, radiusX: 6, radiusY: 6, id: 1 }]
+    });
+    await sleep(360); // Hold stationary > 320ms to arm touch drag
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: diamondTouchPos.x - Math.round(dayW), y: diamondTouchPos.y, radiusX: 6, radiusY: 6, id: 1 }]
+    });
+    await sleep(40);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: diamondTouchPos.x - twoDaysPx, y: diamondTouchPos.y, radiusX: 6, radiusY: 6, id: 1 }]
+    });
+    await sleep(60);
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: []
+    });
+    await sleep(160);
+
+    const afterTouchMilestoneBar = await getBarMetrics(milestoneSel);
+    assert(
+      Math.abs(afterTouchMilestoneBar.leftStylePx - (beforeMilestoneBar.leftStylePx - twoDaysPx)) <= 1,
+      `Expected touch hold-and-drag on Milestone to shift -${twoDaysPx}px (-2d), got before=${beforeMilestoneBar.leftStylePx}, after=${afterTouchMilestoneBar.leftStylePx}`
+    );
+
     const milestoneRoadmapShotPath = path.join(ARTIFACT_DIR, 'smoke_milestone_roadmap.png');
     await cdp.saveScreenshot(milestoneRoadmapShotPath);
     console.log(`Captured Milestone Gantt Roadmap screenshot -> ${milestoneRoadmapShotPath}`);
 
-    cdp.assertZeroErrors('Milestone toggle + Selection Parity + Roadmap Diamond + Quick Find');
+    cdp.assertZeroErrors('Milestone toggle + Selection Parity + Roadmap Hover/Mouse/Touch Drag + Quick Find');
     console.log(
-      '[9/9] ALL E2E Headless Chromium UI Smoke Checks PASSED (0 console.error, 0 exceptions, <=1px Bento alignment, Milestone Roadmap & Selection Parity verified)!'
+      '[9/9] ALL E2E Headless Chromium UI Smoke Checks PASSED (0 console.error, 0 exceptions, <=1px Bento alignment, Timeline Mouse & Touch Drag + Hover Guard verified)!'
     );
   } finally {
     if (cdp) cdp.close();

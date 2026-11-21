@@ -1972,6 +1972,8 @@ export function downloadBlob(
 export const ROADMAP_MOUSE_HOLD_MS = 260;
 export const ROADMAP_TOUCH_HOLD_MS = 320;
 export const ROADMAP_HOLD_MOVE_SLOP_PX = 6;
+export const ROADMAP_MOUSE_DRAG_ACTIVATE_PX = 4;
+export const ROADMAP_TOUCH_HOLD_SLOP_PX = 10;
 
 export function resolveRoadmapHoldDurationMs(pointerType: string): number {
   return pointerType === 'mouse' ? ROADMAP_MOUSE_HOLD_MS : ROADMAP_TOUCH_HOLD_MS;
@@ -1986,4 +1988,38 @@ export function shouldCancelUnarmedRoadmapDrag(
 ): boolean {
   return Math.hypot(currentClientX - startClientX, currentClientY - startClientY) > slopPx;
 }
+
+/**
+ * Returns true strictly when the user is actively keeping the primary mouse button pressed
+ * or maintaining finger/stylus contact on the screen. Hovering (buttons === 0) ALWAYS returns false.
+ */
+export function isRoadmapPointerActivelyPressed(
+  pointerType: string,
+  buttons: number | undefined
+): boolean {
+  if (pointerType === 'mouse' || pointerType === 'pen') {
+    return typeof buttons === 'number' && (buttons & 1) === 1;
+  }
+  if (typeof buttons === 'number') {
+    return buttons !== 0;
+  }
+  return true;
+}
+
+/**
+ * Mouse press-and-drag activates as soon as the user moves >= 4px while keeping
+ * the primary mouse button pressed (buttons & 1 === 1), while pure hover or tiny click jitter does not.
+ */
+export function shouldActivateMouseRoadmapDrag(
+  startClientX: number,
+  startClientY: number,
+  currentClientX: number,
+  currentClientY: number,
+  buttons: number | undefined,
+  activatePx: number = ROADMAP_MOUSE_DRAG_ACTIVATE_PX
+): boolean {
+  if (!isRoadmapPointerActivelyPressed('mouse', buttons)) return false;
+  return Math.hypot(currentClientX - startClientX, currentClientY - startClientY) >= activatePx;
+}
+
 

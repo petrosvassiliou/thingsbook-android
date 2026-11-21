@@ -4965,11 +4965,15 @@ button.v2-stalled-pill:hover {
   align-items: center;
   gap: 2px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
-.roadmap-phase-bar:hover .roadmap-bar-step-controls {
-  opacity: 1;
+@media (hover: hover) {
+  .roadmap-phase-bar:hover:not(.armed):not(.dragging) .roadmap-bar-step-controls {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .roadmap-bar-step-btn {
@@ -6338,11 +6342,15 @@ button.v2-stalled-pill:hover {
   align-items: center;
   gap: 2px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
-.roadmap-task-bar.milestone:hover .roadmap-bar-step-controls {
-  opacity: 1;
+@media (hover: hover) {
+  .roadmap-task-bar.milestone:hover:not(.armed):not(.dragging) .roadmap-bar-step-controls {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .roadmap-task-bar.milestone .roadmap-bar-step-btn {

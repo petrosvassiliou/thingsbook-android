@@ -409,15 +409,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.15")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.15")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 106)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.16")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.16")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 107)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.15", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.15", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.15", current: "3.0.0-beta.14"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.15"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.15"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.16", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.16", current: "2.5.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.16", current: "3.0.0-beta.15"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.16"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.16"))
         XCTAssertTrue(TaskItem.standaloneDurationPresets.contains(480))
         XCTAssertEqual(TaskItem.formatCompactDuration(480), "1d")
         XCTAssertEqual(TaskItem.formatCompactDuration(720), "1d 4h")

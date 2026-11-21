@@ -94,4 +94,22 @@ class V3Beta7LayoutPolishTest {
         val macCanvasSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/SmartViewCanvas.swift").readText()
         assertTrue(macCanvasSwift.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
     }
+
+    @Test
+    fun `v3_0_0_beta_10 sidebar main Bento tiles, mini_cards, and navigation buttons provide subtle zero_shift hover highlights across macOS, ChromeOS PWA, and Android`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        val macSidebarSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/SidebarView.swift").readText()
+        assertTrue(macSidebarSwift.contains("@State private var hoveredSmartView: SmartView? = nil"))
+        assertTrue(macSidebarSwift.contains("@State private var isHoveringWeeklyReview = false"))
+        assertTrue(macSidebarSwift.contains("@State private var isHoveringNewProjectMenu = false"))
+
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        assertTrue(smartViewKt.contains("bentoHoverSource.collectIsHoveredAsState()"))
+
+        val chromeCss = File(repoRoot, "chromeos-pwa/src/index.css").readText()
+        val bentoHover = Regex("""\.bento-tile:hover\s*\{([^}]*)\}""").find(chromeCss)?.groupValues?.get(1).orEmpty()
+        assertTrue(bentoHover.contains("border-color: rgba(56, 152, 236, 0.36);"))
+    }
 }

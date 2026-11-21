@@ -105,3 +105,20 @@ test('v3.0.0-beta.9 Hovering over task rows never changes row or section frame d
   assert.ok(!taskRowHoverBlock.includes('margin'));
   assert.ok(!taskRowHoverBlock.includes('border'));
 });
+
+test('v3.0.0-beta.10 Sidebar main Bento tiles & mini-cards provide calm sky-blue hover highlight with zero size shift', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
+
+  const bentoHover = css.match(/\.bento-tile:hover\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(bentoHover.includes('background: var(--bg-card-hover);'));
+  assert.ok(bentoHover.includes('border-color: rgba(56, 152, 236, 0.36);'));
+  assert.ok(!bentoHover.includes('padding'));
+  assert.ok(!bentoHover.includes('border-width'));
+  assert.ok(!bentoHover.includes('transform'));
+
+  const miniHover = css.match(/\.bento-mini-card:hover\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(miniHover.includes('background: var(--bg-card-hover);'));
+  assert.ok(miniHover.includes('border-color: rgba(56, 152, 236, 0.36);'));
+  assert.ok(!miniHover.includes('padding'));
+  assert.ok(!miniHover.includes('border-width'));
+});

@@ -32,8 +32,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -7570,6 +7572,8 @@ private fun ThingsChromebookSidebar(
                         val selected = navTarget == ActiveNavigationTarget.SmartView(viewType)
                         val count = smartViewCounts[viewType] ?: 0
                         val viewLabel = stringResource(viewType.titleRes)
+                        val bentoHoverSource = remember(viewType) { MutableInteractionSource() }
+                        val isBentoHovered by bentoHoverSource.collectIsHoveredAsState()
                         ThingsHoverTooltip(
                             text = "$viewLabel (Ctrl+$shortcutNum)",
                             modifier = Modifier.weight(1f)
@@ -7591,15 +7595,24 @@ private fun ThingsChromebookSidebar(
                                         }
                                     )
                                     .clip(RoundedCornerShape(14.dp))
+                                    .hoverable(interactionSource = bentoHoverSource)
                                     .clickable {
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onSelectSmartView(viewType)
                                     },
                                 shape = RoundedCornerShape(14.dp),
-                                color = if (selected) colors.thingsBlueSoft else colors.cardSurface.copy(alpha = 0.86f),
+                                color = when {
+                                    selected -> colors.thingsBlueSoft
+                                    isBentoHovered -> colors.cardSurface
+                                    else -> colors.cardSurface.copy(alpha = 0.86f)
+                                },
                                 border = BorderStroke(
                                     width = if (selected) 1.2.dp else 0.75.dp,
-                                    color = if (selected) colors.thingsBlue.copy(alpha = 0.48f) else colors.hairlineDivider
+                                    color = when {
+                                        selected -> colors.thingsBlue.copy(alpha = if (isBentoHovered) 0.65f else 0.48f)
+                                        isBentoHovered -> colors.thingsBlue.copy(alpha = 0.36f)
+                                        else -> colors.hairlineDivider
+                                    }
                                 )
                             ) {
                                 Column(
@@ -7616,7 +7629,7 @@ private fun ThingsChromebookSidebar(
                                         SmartViewIcon(
                                             viewType = viewType,
                                             modifier = Modifier.size(19.dp),
-                                            isSelected = selected
+                                            isSelected = selected || isBentoHovered
                                         )
                                         Text(
                                             text = if (count > 0) count.toString() else "",
@@ -7653,6 +7666,8 @@ private fun ThingsChromebookSidebar(
             val somedaySelected = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY)
             val somedayCount = smartViewCounts[SmartViewType.SOMEDAY] ?: 0
             val somedayLabel = stringResource(SmartViewType.SOMEDAY.titleRes)
+            val somedayHoverSource = remember { MutableInteractionSource() }
+            val isSomedayHovered by somedayHoverSource.collectIsHoveredAsState()
             ThingsHoverTooltip(
                 text = "$somedayLabel (Ctrl+5)",
                 modifier = Modifier.weight(1f)
@@ -7674,15 +7689,24 @@ private fun ThingsChromebookSidebar(
                             }
                         )
                         .clip(RoundedCornerShape(12.dp))
+                        .hoverable(interactionSource = somedayHoverSource)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelectSmartView(SmartViewType.SOMEDAY)
                         },
                     shape = RoundedCornerShape(12.dp),
-                    color = if (somedaySelected) colors.thingsBlueSoft else colors.cardSurface.copy(alpha = 0.78f),
+                    color = when {
+                        somedaySelected -> colors.thingsBlueSoft
+                        isSomedayHovered -> colors.cardSurface
+                        else -> colors.cardSurface.copy(alpha = 0.78f)
+                    },
                     border = BorderStroke(
                         width = if (somedaySelected) 1.1.dp else 0.75.dp,
-                        color = if (somedaySelected) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider
+                        color = when {
+                            somedaySelected -> colors.thingsBlue.copy(alpha = if (isSomedayHovered) 0.62f else 0.45f)
+                            isSomedayHovered -> colors.thingsBlue.copy(alpha = 0.36f)
+                            else -> colors.hairlineDivider
+                        }
                     )
                 ) {
                     Column(
@@ -7699,7 +7723,7 @@ private fun ThingsChromebookSidebar(
                             SmartViewIcon(
                                 viewType = SmartViewType.SOMEDAY,
                                 modifier = Modifier.size(15.dp),
-                                isSelected = somedaySelected
+                                isSelected = somedaySelected || isSomedayHovered
                             )
                             Text(
                                 text = if (somedayCount > 0) somedayCount.toString() else "",
@@ -7724,6 +7748,8 @@ private fun ThingsChromebookSidebar(
 
             val reviewFullTitle = stringResource(R.string.v2_weekly_review_title)
             val reviewShortLabel = stringResource(R.string.sidebar_review_short)
+            val reviewHoverSource = remember { MutableInteractionSource() }
+            val isReviewHovered by reviewHoverSource.collectIsHoveredAsState()
             ThingsHoverTooltip(
                 text = "$reviewFullTitle (Ctrl+Shift+R)",
                 modifier = Modifier.weight(1f)
@@ -7732,15 +7758,16 @@ private fun ThingsChromebookSidebar(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
+                        .hoverable(interactionSource = reviewHoverSource)
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onOpenWeeklyReview()
                         },
                     shape = RoundedCornerShape(12.dp),
-                    color = colors.cardSurface.copy(alpha = 0.78f),
+                    color = if (isReviewHovered) colors.cardSurface else colors.cardSurface.copy(alpha = 0.78f),
                     border = BorderStroke(
                         width = 0.75.dp,
-                        color = colors.hairlineDivider
+                        color = if (isReviewHovered) colors.thingsBlue.copy(alpha = 0.36f) else colors.hairlineDivider
                     )
                 ) {
                     Column(
@@ -8291,16 +8318,22 @@ private fun ThingsChromebookSidebar(
                 .padding(top = 6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            val newProjectBtnHoverSource = remember { MutableInteractionSource() }
+            val isNewProjectBtnHovered by newProjectBtnHoverSource.collectIsHoveredAsState()
             Box(modifier = Modifier.fillMaxWidth()) {
                 ThingsHoverTooltip(text = "${stringResource(R.string.entity_new_project)} (Ctrl+Shift+N)") {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
+                            .hoverable(interactionSource = newProjectBtnHoverSource)
                             .clickable { showNewProjectFooterMenu = true },
                         shape = RoundedCornerShape(10.dp),
-                        color = colors.thingsBlueSoft.copy(alpha = 0.78f),
-                        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.26f))
+                        color = colors.thingsBlueSoft.copy(alpha = if (isNewProjectBtnHovered) 0.98f else 0.78f),
+                        border = BorderStroke(
+                            0.75.dp,
+                            colors.thingsBlue.copy(alpha = if (isNewProjectBtnHovered) 0.48f else 0.26f)
+                        )
                     ) {
                         Row(
                             modifier = Modifier

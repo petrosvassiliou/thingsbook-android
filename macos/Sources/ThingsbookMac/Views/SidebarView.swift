@@ -4,6 +4,13 @@ import ThingsbookCore
 public struct SidebarView: View {
     @ObservedObject var store: ThingsbookStore
     @State private var collapsedAreaIds: Set<String> = []
+    @State private var hoveredSmartView: SmartView? = nil
+    @State private var isHoveringWeeklyReview = false
+    @State private var isHoveringNewProjectMenu = false
+    @State private var hoveredPerspectiveId: String? = nil
+    @State private var hoveredAreaId: String? = nil
+    @State private var hoveredProjectId: String? = nil
+    @State private var hoveredFooterUtility: String? = nil
 
     public init(store: ThingsbookStore) {
         self.store = store
@@ -214,10 +221,13 @@ public struct SidebarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(ThingsMacPalette.accentBlue.opacity(0.11))
+                            .fill(ThingsMacPalette.accentBlue.opacity(isHoveringNewProjectMenu ? 0.18 : 0.11))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 0.8)
+                                    .strokeBorder(
+                                        ThingsMacPalette.accentBlue.opacity(isHoveringNewProjectMenu ? 0.42 : 0.24),
+                                        lineWidth: 0.8
+                                    )
                             )
                     )
                     .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -225,6 +235,11 @@ public struct SidebarView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringNewProjectMenu = hovering
+                    }
+                }
                 .thingsTooltip(store.tr("entity_new_project"))
 
                 HStack(spacing: 6) {
@@ -236,6 +251,7 @@ public struct SidebarView: View {
 
                     Spacer(minLength: 4)
 
+                    let isAreasHovered = hoveredFooterUtility == "areas"
                     Button {
                         store.isAreaManagerPresented = true
                     } label: {
@@ -245,33 +261,52 @@ public struct SidebarView: View {
                             Text("\(store.areas.count)/\(ThingsSQLiteDatabase.maxAreas)")
                                 .font(.system(size: 11, weight: .medium, design: .rounded))
                         }
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isAreasHovered ? .primary : .secondary)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 4)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.primary.opacity(0.045))
+                                .fill(Color.primary.opacity(isAreasHovered ? 0.085 : 0.045))
                         )
                     }
                     .buttonStyle(.plain)
+                    .onHover { hovering in
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            hoveredFooterUtility = hovering ? "areas" : (hoveredFooterUtility == "areas" ? nil : hoveredFooterUtility)
+                        }
+                    }
                     .thingsTooltip(store.trf("areas_active_count", store.areas.count, ThingsSQLiteDatabase.maxAreas))
 
                     Spacer(minLength: 4)
 
+                    let isTagsHovered = hoveredFooterUtility == "tags"
                     Button {
                         store.isTagManagerPresented = true
                     } label: {
                         Image(systemName: "square.grid.2x2")
                             .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(store.isTagManagerPresented ? ThingsMacPalette.accentBlue : .secondary)
+                            .foregroundStyle(
+                                store.isTagManagerPresented
+                                    ? ThingsMacPalette.accentBlue
+                                    : (isTagsHovered ? .primary : .secondary)
+                            )
                             .frame(width: 24, height: 24)
                             .background(
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(store.isTagManagerPresented ? ThingsMacPalette.accentBlue.opacity(0.16) : Color.clear)
+                                    .fill(
+                                        store.isTagManagerPresented
+                                            ? ThingsMacPalette.accentBlue.opacity(isTagsHovered ? 0.22 : 0.16)
+                                            : (isTagsHovered ? Color.primary.opacity(0.075) : Color.clear)
+                                    )
                             )
                             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .onHover { hovering in
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            hoveredFooterUtility = hovering ? "tags" : (hoveredFooterUtility == "tags" ? nil : hoveredFooterUtility)
+                        }
+                    }
                     .thingsTooltip(store.tr("tags_manage_title"))
                 }
                 .padding(.horizontal, 2)
@@ -314,6 +349,7 @@ public struct SidebarView: View {
     private func bentoTile(_ view: SmartView, count: Int) -> some View {
         let dest = NavigationDestination.smartView(view)
         let selected = store.selectedDestination == dest
+        let hovered = hoveredSmartView == view
         return Button {
             store.selectedDestination = dest
         } label: {
@@ -321,7 +357,7 @@ public struct SidebarView: View {
                 HStack(alignment: .center) {
                     Image(systemName: view.sfSymbol)
                         .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
+                        .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected || hovered))
 
                     Spacer(minLength: 4)
 
@@ -343,19 +379,36 @@ public struct SidebarView: View {
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.76))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(
+                            selected
+                                ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.21 : 0.16)
+                                : ThingsMacPalette.cardSurface.opacity(hovered ? 0.96 : 0.76)
+                        )
+                    if !selected && hovered {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.055))
+                    }
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .strokeBorder(
-                        selected ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.075),
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.58 : 0.42)
+                            : (hovered ? ThingsMacPalette.accentBlue.opacity(0.34) : Color.primary.opacity(0.075)),
                         lineWidth: selected ? 1.1 : 0.75
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredSmartView = hovering ? view : (hoveredSmartView == view ? nil : hoveredSmartView)
+            }
+        }
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
         .thingsDropTarget(cornerRadius: 13) { payloads in
             store.dropTasks(payloads, onto: dest)
@@ -365,6 +418,7 @@ public struct SidebarView: View {
     private func slimMiniCard(_ view: SmartView, count: Int) -> some View {
         let dest = NavigationDestination.smartView(view)
         let selected = store.selectedDestination == dest
+        let hovered = hoveredSmartView == view
         return Button {
             store.selectedDestination = dest
         } label: {
@@ -372,7 +426,7 @@ public struct SidebarView: View {
                 HStack(alignment: .center) {
                     Image(systemName: view.sfSymbol)
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected))
+                        .foregroundStyle(ThingsMacPalette.color(for: view, isSelected: selected || hovered))
 
                     Spacer(minLength: 4)
 
@@ -385,7 +439,7 @@ public struct SidebarView: View {
 
                 Text(store.tr(view.titleKey))
                     .font(.system(size: 12, weight: selected ? .bold : .semibold))
-                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary.opacity(0.9))
+                    .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .primary.opacity(hovered ? 1.0 : 0.9))
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
                     .fixedSize(horizontal: false, vertical: true)
@@ -394,19 +448,36 @@ public struct SidebarView: View {
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.68))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            selected
+                                ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.21 : 0.16)
+                                : ThingsMacPalette.cardSurface.opacity(hovered ? 0.95 : 0.68)
+                        )
+                    if !selected && hovered {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.055))
+                    }
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
-                        selected ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.07),
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.58 : 0.42)
+                            : (hovered ? ThingsMacPalette.accentBlue.opacity(0.34) : Color.primary.opacity(0.07)),
                         lineWidth: selected ? 1.05 : 0.75
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredSmartView = hovering ? view : (hoveredSmartView == view ? nil : hoveredSmartView)
+            }
+        }
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
         .thingsDropTarget(cornerRadius: 12) { payloads in
             store.dropTasks(payloads, onto: dest)
@@ -416,6 +487,7 @@ public struct SidebarView: View {
     private var weeklyReviewMiniCard: some View {
         let stalledCount = store.stalledProjects.count
         let active = store.isWeeklyReviewPresented
+        let hovered = isHoveringWeeklyReview
         return Button {
             store.isWeeklyReviewPresented = true
         } label: {
@@ -423,7 +495,11 @@ public struct SidebarView: View {
                 HStack(alignment: .center) {
                     Image(systemName: "checklist.checked")
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(active ? ThingsMacPalette.accentBlue : ThingsMacPalette.accentBlue.opacity(0.85))
+                        .foregroundStyle(
+                            active || hovered
+                                ? ThingsMacPalette.accentBlue
+                                : ThingsMacPalette.accentBlue.opacity(0.85)
+                        )
 
                     Spacer(minLength: 4)
 
@@ -436,7 +512,7 @@ public struct SidebarView: View {
 
                 Text(store.tr("sidebar_review_short"))
                     .font(.system(size: 12, weight: active ? .bold : .semibold))
-                    .foregroundStyle(active ? ThingsMacPalette.accentBlue : .primary.opacity(0.9))
+                    .foregroundStyle(active ? ThingsMacPalette.accentBlue : .primary.opacity(hovered ? 1.0 : 0.9))
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
                     .fixedSize(horizontal: false, vertical: true)
@@ -445,39 +521,66 @@ public struct SidebarView: View {
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(active ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.68))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            active
+                                ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.21 : 0.16)
+                                : ThingsMacPalette.cardSurface.opacity(hovered ? 0.95 : 0.68)
+                        )
+                    if !active && hovered {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.055))
+                    }
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
-                        active ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.07),
+                        active
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.58 : 0.42)
+                            : (hovered ? ThingsMacPalette.accentBlue.opacity(0.34) : Color.primary.opacity(0.07)),
                         lineWidth: active ? 1.05 : 0.75
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHoveringWeeklyReview = hovering
+            }
+        }
         .thingsTooltip(store.tr("v2_weekly_review_title") + " (⇧⌘R)")
     }
 
     private func footerSmartIconButton(_ view: SmartView) -> some View {
         let dest = NavigationDestination.smartView(view)
         let selected = store.selectedDestination == dest
+        let hovered = hoveredSmartView == view
         return Button {
             store.selectedDestination = dest
         } label: {
             Image(systemName: view.sfSymbol)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(selected ? ThingsMacPalette.accentBlue : .secondary)
+                .foregroundStyle(selected ? ThingsMacPalette.accentBlue : (hovered ? .primary : .secondary))
                 .frame(width: 25, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.16) : Color.clear)
+                        .fill(
+                            selected
+                                ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.22 : 0.16)
+                                : (hovered ? Color.primary.opacity(0.075) : Color.clear)
+                        )
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredSmartView = hovering ? view : (hoveredSmartView == view ? nil : hoveredSmartView)
+            }
+        }
         .thingsTooltip("\(store.tr(view.titleKey)) (\(smartViewShortcut(for: view)))")
         .thingsDropTarget(cornerRadius: 6) { payloads in
             store.dropTasks(payloads, onto: dest)
@@ -487,6 +590,7 @@ public struct SidebarView: View {
     private func areaSection(_ area: Area) -> some View {
         let dest = NavigationDestination.area(area.id)
         let selected = store.selectedDestination == dest
+        let hovered = hoveredAreaId == area.id
         let nestedProjects = store.projectsForArea(area.id)
         let isCollapsed = collapsedAreaIds.contains(area.id)
 
@@ -546,12 +650,26 @@ public struct SidebarView: View {
             .padding(.vertical, 5.5)
             .background(
                 Capsule(style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
+                    .fill(
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.20 : 0.15)
+                            : (hovered ? Color.primary.opacity(0.055) : Color.clear)
+                    )
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
+                    .strokeBorder(
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.38 : 0.28)
+                            : (hovered ? Color.primary.opacity(0.085) : Color.clear),
+                        lineWidth: 0.8
+                    )
             )
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    hoveredAreaId = hovering ? area.id : (hoveredAreaId == area.id ? nil : hoveredAreaId)
+                }
+            }
             .thingsDropTarget(isCapsule: true) { payloads in
                 store.dropTasks(payloads, onto: dest)
             }
@@ -585,6 +703,7 @@ public struct SidebarView: View {
     private func projectRow(_ proj: Project, indented: Bool = false) -> some View {
         let dest = NavigationDestination.project(proj.id)
         let selected = store.selectedDestination == dest
+        let hovered = hoveredProjectId == proj.id
         let stalledInfo = store.projectStalledInfo(proj)
         let statusHelpText: String? = {
             if stalledInfo.hasNoNextAction {
@@ -635,15 +754,29 @@ public struct SidebarView: View {
             .padding(.vertical, 5.5)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
+                    .fill(
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.20 : 0.15)
+                            : (hovered ? Color.primary.opacity(0.055) : Color.clear)
+                    )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
+                    .strokeBorder(
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.38 : 0.28)
+                            : (hovered ? Color.primary.opacity(0.085) : Color.clear),
+                        lineWidth: 0.8
+                    )
             )
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredProjectId = hovering ? proj.id : (hoveredProjectId == proj.id ? nil : hoveredProjectId)
+            }
+        }
         .thingsTooltip(statusHelpText.map { "\(proj.title) — \($0)" } ?? proj.title)
         .thingsDropTarget(cornerRadius: 10) { payloads in
             store.dropTasks(payloads, onto: dest)
@@ -796,6 +929,7 @@ public struct SidebarView: View {
     private func perspectiveRow(_ perspective: SavedPerspective) -> some View {
         let dest = NavigationDestination.perspective(perspective.id)
         let selected = store.selectedDestination == dest
+        let hovered = hoveredPerspectiveId == perspective.id
         let count = store.tasksForPerspective(perspective).count
 
         return Button {
@@ -824,15 +958,29 @@ public struct SidebarView: View {
             .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
-                    .fill(selected ? ThingsMacPalette.accentBlue.opacity(0.15) : Color.clear)
+                    .fill(
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.20 : 0.15)
+                            : (hovered ? Color.primary.opacity(0.055) : Color.clear)
+                    )
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(selected ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.clear, lineWidth: 0.8)
+                    .strokeBorder(
+                        selected
+                            ? ThingsMacPalette.accentBlue.opacity(hovered ? 0.38 : 0.28)
+                            : (hovered ? Color.primary.opacity(0.085) : Color.clear),
+                        lineWidth: 0.8
+                    )
             )
             .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredPerspectiveId = hovering ? perspective.id : (hoveredPerspectiveId == perspective.id ? nil : hoveredPerspectiveId)
+            }
+        }
         .thingsTooltip(perspective.title)
         .contextMenu {
             Button(store.tr("v30_perspective_edit")) {

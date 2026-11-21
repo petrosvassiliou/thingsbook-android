@@ -246,18 +246,25 @@ button {
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   text-align: left;
-  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.12s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
 }
 
 .bento-tile:hover {
-  background: var(--bg-sidebar-hover);
-  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  border-color: rgba(56, 152, 236, 0.36);
+  box-shadow: 0 2px 8px rgba(56, 152, 236, 0.08);
 }
 
 .bento-tile.active {
   background: var(--things-blue-soft);
   border-color: rgba(56, 152, 236, 0.42);
   color: var(--active-pill-text);
+}
+
+.bento-tile.active:hover {
+  background: var(--things-blue-soft);
+  border-color: rgba(56, 152, 236, 0.62);
+  box-shadow: 0 2px 8px rgba(56, 152, 236, 0.12);
 }
 
 .bento-tile.drag-over {
@@ -319,12 +326,13 @@ button {
   font-weight: 590;
   text-align: left;
   min-width: 0;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, color 0.14s ease;
 }
 
 .bento-mini-card:hover {
-  background: var(--bg-sidebar-hover);
-  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  border-color: rgba(56, 152, 236, 0.36);
+  box-shadow: 0 2px 8px rgba(56, 152, 236, 0.08);
 }
 
 .bento-mini-card.active {
@@ -332,6 +340,12 @@ button {
   border-color: rgba(56, 152, 236, 0.42);
   color: var(--active-pill-text);
   font-weight: 660;
+}
+
+.bento-mini-card.active:hover {
+  background: var(--things-blue-soft);
+  border-color: rgba(56, 152, 236, 0.62);
+  box-shadow: 0 2px 8px rgba(56, 152, 236, 0.12);
 }
 
 .bento-mini-card.drag-over {

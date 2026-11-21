@@ -578,4 +578,10 @@
     <string name="v30_timeline_exit_fullscreen">Vollbild beenden</string>
     <string name="v30_quick_edit_action">Schnellbearbeitung</string>
     <string name="v30_open_details_action">Details öffnen</string>
+    <string name="v30_duration_custom">Benutzerdefiniert…</string>
+    <string name="v30_duration_custom_title">Benutzerdefinierte Dauer</string>
+    <string name="v30_duration_custom_placeholder">z. B. 45m, 1,5h, 2d</string>
+    <string name="v30_duration_days_short">Tage</string>
+    <string name="v30_duration_hours_short">Std.</string>
+    <string name="v30_duration_minutes_short">Min.</string>
 </resources>

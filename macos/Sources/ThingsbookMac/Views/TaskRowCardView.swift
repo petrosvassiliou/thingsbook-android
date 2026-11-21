@@ -12,6 +12,7 @@ public struct TaskRowCardView: View {
     @State private var isCollapsedDeadlinePopoverOpen = false
     @State private var isCollapsedRepeatPopoverOpen = false
     @State private var isCollapsedReminderPopoverOpen = false
+    @State private var isCollapsedCustomDurationPopoverOpen = false
     @State private var isInlineQuickEditing = false
     @State private var inlineDraftTitle = ""
     @FocusState private var isInlineTitleFocused: Bool
@@ -26,7 +27,7 @@ public struct TaskRowCardView: View {
     }
 
     private var latestTask: TaskItem {
-        (store.allOpenTasks + store.logbookTasks + store.trashedTasks).first(where: { $0.id == task.id }) ?? task
+        store.taskIncludingTrash(byId: task.id) ?? task
     }
 
     public init(store: ThingsbookStore, task: TaskItem, showContextSubtitle: Bool = true) {
@@ -277,6 +278,14 @@ public struct TaskRowCardView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .thingsTooltip("\(store.tr("v30_duration_label")): \(durPill)")
+                    .popover(isPresented: $isCollapsedCustomDurationPopoverOpen) {
+                        CustomDurationPopoverView(
+                            store: store,
+                            currentDurationMinutes: latestTask.durationMinutes
+                        ) { customMins in
+                            store.setTaskStandaloneDuration(latestTask.id, durationMinutes: customMins)
+                        }
+                    }
                 }
 
                 if let rem = task.reminderTime {
@@ -437,16 +446,15 @@ public struct TaskRowCardView: View {
                 isHoveringOpenIcon = false
             }
         }
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
-                guard !isInlineQuickEditing else { return }
+        .thingsInstantTaskTap(
+            isEnabled: !isInlineQuickEditing,
+            onSingleClick: { modifiers in
+                store.handleRowClick(taskId: task.id, modifiers: modifiers)
+            },
+            onDoubleClick: {
                 store.openTaskModal(task.id)
             }
         )
-        .onTapGesture {
-            guard !isInlineQuickEditing else { return }
-            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-        }
     }
 
     private func rowHoverActionButton(
@@ -640,8 +648,7 @@ public struct TaskRowCardView: View {
 
     @ViewBuilder
     private func durationMenuItems(for targetTask: TaskItem) -> some View {
-        let presets = [5, 15, 30, 60, 120, 240]
-        ForEach(presets, id: \.self) { mins in
+        ForEach(TaskItem.standaloneDurationPresets, id: \.self) { mins in
             let isCurrent = targetTask.durationMinutes == mins
             Button {
                 store.setTaskStandaloneDuration(targetTask.id, durationMinutes: mins)
@@ -653,8 +660,15 @@ public struct TaskRowCardView: View {
                 }
             }
         }
+        Divider()
+        Button(store.tr("v30_duration_custom")) {
+            if targetTask.durationMinutes != nil {
+                isCollapsedCustomDurationPopoverOpen = true
+            } else {
+                store.openTaskModal(targetTask.id)
+            }
+        }
         if (targetTask.durationMinutes ?? 0) > 0 {
-            Divider()
             Button(store.tr("v30_duration_clear"), role: .destructive) {
                 store.setTaskStandaloneDuration(targetTask.id, durationMinutes: nil)
             }

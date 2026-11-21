@@ -40,12 +40,13 @@ cp "${MACOS_DIR}/Resources/Assets/AppIcon-1024.png" "${APP_BUNDLE}/Contents/Reso
 cp "${MACOS_DIR}/Resources/Assets/MenuBarIconTemplate.png" "${APP_BUNDLE}/Contents/Resources/MenuBarIconTemplate.png"
 cp "${MACOS_DIR}/Resources/Assets/MenuBarIconTemplate@2x.png" "${APP_BUNDLE}/Contents/Resources/MenuBarIconTemplate@2x.png"
 
-# Compile Apple HIG Glacier v3 AppIconGlacierV3.icns (cache-busting IconServices key) via macOS iconutil
+# Compile Apple HIG Glacier v4 AppIconGlacierV4.icns (cache-busting IconServices key) via macOS iconutil
 if command -v iconutil >/dev/null 2>&1 && [ -d "${MACOS_DIR}/Resources/Assets/AppIcon.iconset" ]; then
-    iconutil -c icns "${MACOS_DIR}/Resources/Assets/AppIcon.iconset" -o "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV3.icns"
-    cp "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV3.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
-    if [ ! -s "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV3.icns" ]; then
-        echo "❌ Error: Failed to compile non-empty AppIconGlacierV3.icns" >&2
+    iconutil -c icns "${MACOS_DIR}/Resources/Assets/AppIcon.iconset" -o "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV4.icns"
+    cp "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV4.icns" "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV3.icns"
+    cp "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV4.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
+    if [ ! -s "${APP_BUNDLE}/Contents/Resources/AppIconGlacierV4.icns" ]; then
+        echo "❌ Error: Failed to compile non-empty AppIconGlacierV4.icns" >&2
         exit 1
     fi
 fi

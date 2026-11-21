@@ -95,6 +95,10 @@ public enum ThingsResourceLoader {
            let img = NSImage(contentsOf: pngURL) {
             return img
         }
+        if let icnsV4URL = url(forResource: "AppIconGlacierV4", withExtension: "icns"),
+           let img = NSImage(contentsOf: icnsV4URL) {
+            return img
+        }
         if let icnsURL = url(forResource: "AppIconGlacierV3", withExtension: "icns"),
            let img = NSImage(contentsOf: icnsURL) {
             return img

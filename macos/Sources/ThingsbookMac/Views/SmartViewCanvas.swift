@@ -2330,14 +2330,14 @@ private struct TodayDailyTimelineView: View {
             card
         } else {
             card
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded {
+                .thingsInstantTaskTap(
+                    onSingleClick: { modifiers in
+                        store.handleRowClick(taskId: task.id, modifiers: modifiers)
+                    },
+                    onDoubleClick: {
                         store.openTaskModal(task.id)
                     }
                 )
-                .onTapGesture {
-                    store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-                }
                 .contextMenu {
                     Button {
                         store.openTaskModal(task.id)
@@ -2566,14 +2566,14 @@ private struct TodayDailyTimelineView: View {
         .padding(.vertical, 9)
         .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
+        .thingsInstantTaskTap(
+            onSingleClick: { modifiers in
+                store.handleRowClick(taskId: task.id, modifiers: modifiers)
+            },
+            onDoubleClick: {
                 store.openTaskModal(task.id)
             }
         )
-        .onTapGesture {
-            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-        }
         .contextMenu {
             Button {
                 store.openTaskModal(task.id)

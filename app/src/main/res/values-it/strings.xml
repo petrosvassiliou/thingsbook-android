@@ -578,4 +578,10 @@
     <string name="v30_timeline_exit_fullscreen">Esci da schermo intero</string>
     <string name="v30_quick_edit_action">Modifica rapida</string>
     <string name="v30_open_details_action">Apri dettagli</string>
+    <string name="v30_duration_custom">Personalizzata…</string>
+    <string name="v30_duration_custom_title">Durata personalizzata</string>
+    <string name="v30_duration_custom_placeholder">es. 45m, 1,5h, 2g</string>
+    <string name="v30_duration_days_short">Giorni</string>
+    <string name="v30_duration_hours_short">Ore</string>
+    <string name="v30_duration_minutes_short">Min</string>
 </resources>

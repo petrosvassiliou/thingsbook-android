@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  STANDALONE_DURATION_PRESETS,
+  formatStandaloneDuration,
+  parseCustomDurationMinutes
+} from '../src/domain/v2Utils.ts';
 
 const SRC_DIR = path.resolve(import.meta.dirname, '../src');
 
@@ -158,4 +163,69 @@ test('v3.0.0-beta.12 Task Modal eliminates vertical centering white gap between 
 
   const modalBodyCss = css.match(/\.task-bento-modal-body\s*\{([^}]*)\}/)?.[1] ?? '';
   assert.ok(modalBodyCss.includes('padding: 12px 18px 14px;'));
+});
+
+test('v3.0.0-beta.13 subtle pill hover, 1-day & custom durations, 0ms macOS task click selection, and full-presence app icons', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
+  const taskItemSrc = fs.readFileSync(path.join(SRC_DIR, 'components/TaskItem.tsx'), 'utf8');
+  const repoRoot = path.resolve(SRC_DIR, '../..');
+
+  // 1. Subtle zero-shift hover on Task Modal property pills
+  const pillHoverCss =
+    css.match(
+      /\.task-bento-prop-pills\s+\.chip-btn:hover:not\(\.active\):not\(\.urgent\):not\(\.evening-quick\)\s*\{([^}]*)\}/
+    )?.[1] ?? '';
+  assert.ok(pillHoverCss.includes('border-color: rgba(56, 152, 236, 0.38);'));
+  assert.ok(!pillHoverCss.includes('padding'));
+
+  // 2. 1-day (480m) preset + multi-day formatting + custom duration parser & input
+  assert.ok(STANDALONE_DURATION_PRESETS.includes(480));
+  assert.equal(formatStandaloneDuration(480), '1d');
+  assert.equal(formatStandaloneDuration(720), '1d 4h');
+  assert.equal(formatStandaloneDuration(960), '2d');
+  assert.equal(parseCustomDurationMinutes('1d'), 480);
+  assert.equal(parseCustomDurationMinutes('2,5d'), 1200);
+  assert.equal(parseCustomDurationMinutes('1d 4h'), 720);
+  assert.equal(parseCustomDurationMinutes('3t'), 1440);
+  assert.equal(parseCustomDurationMinutes('2j'), 960);
+  assert.equal(parseCustomDurationMinutes('1g'), 480);
+  assert.equal(parseCustomDurationMinutes('1:30'), 90);
+  assert.equal(parseCustomDurationMinutes('45'), 45);
+  assert.equal(parseCustomDurationMinutes('invalid'), null);
+  assert.ok(taskItemSrc.includes('data-testid="task-custom-duration-input"'));
+
+  // 3. macOS 0ms instant task selection (zero TapGesture(count: 2) disambiguation delay)
+  const macRowSwift = fs.readFileSync(
+    path.join(repoRoot, 'macos/Sources/ThingsbookMac/Views/TaskRowCardView.swift'),
+    'utf8'
+  );
+  const macBoardSwift = fs.readFileSync(
+    path.join(repoRoot, 'macos/Sources/ThingsbookMac/Views/ProjectBoardAndRoadmapView.swift'),
+    'utf8'
+  );
+  const macCanvasSwift = fs.readFileSync(
+    path.join(repoRoot, 'macos/Sources/ThingsbookMac/Views/SmartViewCanvas.swift'),
+    'utf8'
+  );
+  assert.ok(macRowSwift.includes('.thingsInstantTaskTap('));
+  assert.ok(!macRowSwift.includes('TapGesture(count: 2)'));
+  assert.ok(!macBoardSwift.includes('TapGesture(count: 2)'));
+  assert.ok(!macCanvasSwift.includes('TapGesture(count: 2)'));
+
+  // 4. Full-presence app icon geometry across macOS (864x864), ChromeOS PWA (504x504), and Android (scaleX 1.18)
+  const macIconSvg = fs.readFileSync(
+    path.join(repoRoot, 'macos/Resources/Assets/AppIcon.svg'),
+    'utf8'
+  );
+  const pwaFaviconSvg = fs.readFileSync(
+    path.join(repoRoot, 'chromeos-pwa/public/favicon.svg'),
+    'utf8'
+  );
+  const androidFgXml = fs.readFileSync(
+    path.join(repoRoot, 'app/src/main/res/drawable/ic_launcher_foreground.xml'),
+    'utf8'
+  );
+  assert.ok(macIconSvg.includes('width="864" height="864"'));
+  assert.ok(pwaFaviconSvg.includes('width="504" height="504"'));
+  assert.ok(androidFgXml.includes('android:scaleX="1.18"'));
 });

@@ -1,7 +1,11 @@
 package com.pv.thingsbook.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -22,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,14 +107,25 @@ fun ThingsTagPill(
     onClick: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
+    val hoverSource = remember { MutableInteractionSource() }
+    val isHovered by hoverSource.collectIsHoveredAsState()
+    val interactiveHover = isHovered && onClick != null
+    val shape = RoundedCornerShape(50)
+
     ThingsHoverTooltip(
         text = "${stringResource(R.string.action_tags)}: $title",
         modifier = modifier
     ) {
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(colors.tagPillBg)
+                .clip(shape)
+                .background(if (interactiveHover) colors.thingsBlueSoft else colors.tagPillBg)
+                .border(
+                    width = 0.75.dp,
+                    color = if (interactiveHover) colors.thingsBlue.copy(alpha = 0.42f) else Color.Transparent,
+                    shape = shape
+                )
+                .hoverable(interactionSource = hoverSource, enabled = onClick != null)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                 .padding(horizontal = 8.dp, vertical = 2.5.dp),
             contentAlignment = Alignment.Center
@@ -117,7 +133,7 @@ fun ThingsTagPill(
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelSmall,
-                color = colors.tagPillText
+                color = if (interactiveHover) colors.thingsBlue else colors.tagPillText
             )
         }
     }

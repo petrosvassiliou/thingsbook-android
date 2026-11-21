@@ -73,6 +73,7 @@ import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -80,8 +81,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -146,6 +149,7 @@ import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.RecurrenceRule
+import com.pv.thingsbook.domain.model.STANDALONE_DURATION_PRESETS
 import com.pv.thingsbook.domain.model.ScheduleState
 import com.pv.thingsbook.domain.model.Tag
 import com.pv.thingsbook.domain.model.TaskCardInteractionRules
@@ -154,6 +158,7 @@ import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.formatDurationCompact
 import com.pv.thingsbook.domain.model.isTaskActivelyBlocked
+import com.pv.thingsbook.domain.model.parseCustomDurationMinutes
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1470,20 +1475,15 @@ private fun CollapsedTaskInlineBadges(
                         }
                     )
                 }
+                var showInlineCustomDurationDialog by remember(task.id) { mutableStateOf(false) }
                 if (onUpdateStandaloneDuration != null) {
                     DropdownMenu(
                         expanded = showInlineDurationMenu,
                         onDismissRequest = { showInlineDurationMenu = false },
                         modifier = Modifier.background(colors.cardElevatedSurface)
                     ) {
-                        listOf(
-                            5 to "5m",
-                            15 to "15m",
-                            30 to "30m",
-                            60 to "1h",
-                            120 to "2h",
-                            240 to "4h"
-                        ).forEach { (mins, label) ->
+                        STANDALONE_DURATION_PRESETS.forEach { mins ->
+                            val label = formatDurationCompact(mins)
                             val selected = task.durationMinutes == mins
                             DropdownMenuItem(
                                 text = {
@@ -1506,6 +1506,20 @@ private fun CollapsedTaskInlineBadges(
                         DropdownMenuItem(
                             text = {
                                 Text(
+                                    text = stringResource(R.string.v30_duration_custom),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.primaryText
+                                )
+                            },
+                            onClick = {
+                                showInlineDurationMenu = false
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showInlineCustomDurationDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
                                     text = stringResource(R.string.v30_duration_clear),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = colors.secondaryText
@@ -1516,6 +1530,16 @@ private fun CollapsedTaskInlineBadges(
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onUpdateStandaloneDuration(null)
                             }
+                        )
+                    }
+                    if (showInlineCustomDurationDialog) {
+                        ThingsCustomDurationDialog(
+                            currentDurationMinutes = task.durationMinutes,
+                            onApply = { customMins ->
+                                showInlineCustomDurationDialog = false
+                                onUpdateStandaloneDuration(customMins)
+                            },
+                            onDismiss = { showInlineCustomDurationDialog = false }
                         )
                     }
                 }
@@ -2432,6 +2456,7 @@ private fun ExpandedTaskCardBody(
                     ) {
                         if (onUpdateStandaloneDuration != null) {
                             var showDurationPickerMenu by remember(task.id) { mutableStateOf(false) }
+                            var showCustomDurationDialog by remember(task.id) { mutableStateOf(false) }
                             val durText = formatDurationCompact(task.durationMinutes)
                             Box {
                                 ThingsTagPill(
@@ -2450,14 +2475,8 @@ private fun ExpandedTaskCardBody(
                                     onDismissRequest = { showDurationPickerMenu = false },
                                     modifier = Modifier.background(colors.cardElevatedSurface)
                                 ) {
-                                    listOf(
-                                        5 to "5m",
-                                        15 to "15m",
-                                        30 to "30m",
-                                        60 to "1h",
-                                        120 to "2h",
-                                        240 to "4h"
-                                    ).forEach { (mins, label) ->
+                                    STANDALONE_DURATION_PRESETS.forEach { mins ->
+                                        val label = formatDurationCompact(mins)
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
@@ -2475,8 +2494,22 @@ private fun ExpandedTaskCardBody(
                                             }
                                         )
                                     }
+                                    HorizontalDivider(color = colors.hairlineDivider)
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = stringResource(R.string.v30_duration_custom),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = colors.primaryText
+                                            )
+                                        },
+                                        onClick = {
+                                            showDurationPickerMenu = false
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            showCustomDurationDialog = true
+                                        }
+                                    )
                                     if (task.durationMinutes != null) {
-                                        HorizontalDivider(color = colors.hairlineDivider)
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
@@ -2493,6 +2526,16 @@ private fun ExpandedTaskCardBody(
                                         )
                                     }
                                 }
+                            }
+                            if (showCustomDurationDialog) {
+                                ThingsCustomDurationDialog(
+                                    currentDurationMinutes = task.durationMinutes,
+                                    onApply = { customMins ->
+                                        showCustomDurationDialog = false
+                                        onUpdateStandaloneDuration(customMins)
+                                    },
+                                    onDismiss = { showCustomDurationDialog = false }
+                                )
                             }
                         }
 
@@ -3184,7 +3227,7 @@ private fun TaskContextDropdownMenu(
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.secondaryText
                 )
-                listOf(15 to "15m", 30 to "30m", 60 to "1h").forEach { (mins, lbl) ->
+                listOf(15 to "15m", 30 to "30m", 60 to "1h", 480 to "1d").forEach { (mins, lbl) ->
                     ThingsTagPill(
                         title = lbl,
                         onClick = {
@@ -3748,3 +3791,86 @@ private fun InlineChecklistRow(
         }
     }
 }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ThingsCustomDurationDialog(
+    currentDurationMinutes: Int?,
+    onApply: (Int?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    var rawInput by remember(currentDurationMinutes) {
+        mutableStateOf(currentDurationMinutes?.let { formatDurationCompact(it) }.orEmpty())
+    }
+    val parsedMinutes = parseCustomDurationMinutes(rawInput)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.cardElevatedSurface,
+        title = {
+            Text(
+                text = stringResource(R.string.v30_duration_custom_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.primaryText
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(15, 30, 45, 60, 120, 240, 480, 960, 1440, 2400).forEach { preset ->
+                        val label = formatDurationCompact(preset)
+                        ThingsTagPill(
+                            title = label,
+                            onClick = { onApply(preset) }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = rawInput,
+                    onValueChange = { rawInput = it },
+                    singleLine = true,
+                    placeholder = {
+                        Text(text = stringResource(R.string.v30_duration_custom_placeholder))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if ((currentDurationMinutes ?: 0) > 0) {
+                    TextButton(onClick = { onApply(null) }) {
+                        Text(
+                            text = stringResource(R.string.v30_duration_clear),
+                            color = colors.deadlineUrgentRed
+                        )
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(text = stringResource(R.string.action_cancel), color = colors.secondaryText)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = parsedMinutes != null,
+                onClick = {
+                    if (parsedMinutes != null) {
+                        onApply(parsedMinutes)
+                    }
+                }
+            ) {
+                Text(
+                    text = parsedMinutes?.let { "${stringResource(R.string.action_done)} (${formatDurationCompact(it)})" }
+                        ?: stringResource(R.string.action_done),
+                    color = if (parsedMinutes != null) colors.thingsBlue else colors.tertiaryText
+                )
+            }
+        }
+    )
+}
+

@@ -26,7 +26,7 @@ export const STALLED_PROJECT_THRESHOLD_MS = STALLED_PROJECT_THRESHOLD_DAYS * 86_
 export const DEFAULT_TIMEBLOCK_DURATION_MINUTES = 30;
 export const DEFAULT_DAILY_CAPACITY_MINUTES = 480;
 export const TIMEBLOCK_DURATION_PRESETS = [15, 30, 45, 60, 90, 120] as const;
-export const STANDALONE_DURATION_PRESETS = [5, 15, 30, 60, 120, 240] as const;
+export const STANDALONE_DURATION_PRESETS = [5, 15, 30, 60, 120, 240, 480] as const;
 export const TIMEBLOCK_QUICK_START_MINUTES = [
   480, // 08:00
   540, // 09:00
@@ -2340,14 +2340,92 @@ export function resolveTopBarLayoutTier(workspaceWidthPx: number): TopBarLayoutT
 }
 
 /**
- * Formats standalone duration minutes into compact human-readable form ("15m", "45m", "1h", "1h 30m").
+ * Formats standalone duration minutes into compact human-readable form ("15m", "45m", "1h", "1h 30m", "1d", "2d 4h").
+ * Uses 480m = 1 workday (8h), matching Project Roadmap span days and Today Capacity budget.
  */
 export function formatStandaloneDuration(minutes: number): string {
   const safe = Math.max(0, Math.trunc(Number.isFinite(minutes) ? minutes : 0));
   if (safe < 60) return `${safe}m`;
+  if (safe >= DEFAULT_DAILY_CAPACITY_MINUTES) {
+    const d = Math.floor(safe / DEFAULT_DAILY_CAPACITY_MINUTES);
+    const rem = safe % DEFAULT_DAILY_CAPACITY_MINUTES;
+    const h = Math.floor(rem / 60);
+    const m = rem % 60;
+    const parts = [`${d}d`];
+    if (h > 0) parts.push(`${h}h`);
+    if (m > 0) parts.push(`${m}m`);
+    return parts.join(' ');
+  }
   const h = Math.floor(safe / 60);
   const m = safe % 60;
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+const CUSTOM_DURATION_DAY_UNITS = new Set([
+  'd', 'day', 'days', 't', 'tag', 'tage', 'j', 'jour', 'jours', 'g', 'giorno', 'giorni', 'dia', 'dias', 'día', 'días'
+]);
+const CUSTOM_DURATION_HOUR_UNITS = new Set([
+  'h', 'hr', 'hrs', 'hour', 'hours', 'std', 'stunde', 'stunden', 'heure', 'heures', 'ora', 'ore', 'hora', 'horas'
+]);
+const CUSTOM_DURATION_MIN_UNITS = new Set([
+  'm', 'min', 'mins', 'minute', 'minutes', 'minuten', 'minuto', 'minuti', 'minutos'
+]);
+
+/**
+ * Parses flexible custom duration input (e.g. "45m", "90", "1.5h", "1:30", "1d", "2,5d", "1d 4h", "3t")
+ * into positive integer minutes (clamped to 1..48000), or null if invalid.
+ */
+export function parseCustomDurationMinutes(rawInput: string): number | null {
+  const normalized = String(rawInput ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/,/g, '.');
+  if (!normalized) return null;
+
+  const colonMatch = /^(\d+)\s*:\s*(\d{1,2})$/.exec(normalized);
+  if (colonMatch) {
+    const hh = Number.parseInt(colonMatch[1], 10);
+    const mm = Number.parseInt(colonMatch[2], 10);
+    if (hh >= 0 && mm >= 0 && mm < 60) {
+      const total = hh * 60 + mm;
+      return total > 0 ? Math.min(48_000, total) : null;
+    }
+    return null;
+  }
+
+  if (/^\d+(?:\.\d+)?$/.test(normalized)) {
+    const plain = Math.round(Number.parseFloat(normalized));
+    return Number.isFinite(plain) && plain > 0 ? Math.min(48_000, plain) : null;
+  }
+
+  const tokenRegex = /(\d+(?:\.\d+)?)\s*([a-zäöüßáéíóúàèìòù]+)/gi;
+  const matches = Array.from(normalized.matchAll(tokenRegex));
+  if (matches.length === 0) return null;
+
+  const stripped = normalized
+    .replace(tokenRegex, '')
+    .replace(/\+/g, '')
+    .trim();
+  if (stripped.length > 0) return null;
+
+  let totalMinutes = 0;
+  for (const m of matches) {
+    const val = Number.parseFloat(m[1]);
+    const unit = m[2];
+    if (!Number.isFinite(val)) return null;
+    if (CUSTOM_DURATION_DAY_UNITS.has(unit)) {
+      totalMinutes += val * DEFAULT_DAILY_CAPACITY_MINUTES;
+    } else if (CUSTOM_DURATION_HOUR_UNITS.has(unit)) {
+      totalMinutes += val * 60;
+    } else if (CUSTOM_DURATION_MIN_UNITS.has(unit)) {
+      totalMinutes += val;
+    } else {
+      return null;
+    }
+  }
+
+  const rounded = Math.round(totalMinutes);
+  return rounded > 0 ? Math.min(48_000, rounded) : null;
 }
 
 /**

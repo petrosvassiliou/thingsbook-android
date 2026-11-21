@@ -143,4 +143,44 @@ class V3Beta7LayoutPolishTest {
         // 1 declaration + 3 invocations = 4 occurrences
         assertTrue("ExpandableTaskCard must consolidate properties into 3 SoftBentoPropertyGroup sections", groupCalls == 4)
     }
+
+    @Test
+    fun `v3_0_0_beta_13 supports 1_day and custom durations, subtle pill hover, instant macOS task click selection, and full_presence app icons across platforms`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        // 1. Duration formatting & custom duration parser (480m = 1d workday)
+        assertTrue(com.pv.thingsbook.domain.model.STANDALONE_DURATION_PRESETS.contains(480))
+        org.junit.Assert.assertEquals("1d", com.pv.thingsbook.domain.model.formatDurationCompact(480))
+        org.junit.Assert.assertEquals("1d 4h", com.pv.thingsbook.domain.model.formatDurationCompact(720))
+        org.junit.Assert.assertEquals("2d", com.pv.thingsbook.domain.model.formatDurationCompact(960))
+        org.junit.Assert.assertEquals(480, com.pv.thingsbook.domain.model.parseCustomDurationMinutes("1d"))
+        org.junit.Assert.assertEquals(1200, com.pv.thingsbook.domain.model.parseCustomDurationMinutes("2,5d"))
+        org.junit.Assert.assertEquals(720, com.pv.thingsbook.domain.model.parseCustomDurationMinutes("1d 4h"))
+        org.junit.Assert.assertEquals(1440, com.pv.thingsbook.domain.model.parseCustomDurationMinutes("3t"))
+        org.junit.Assert.assertEquals(90, com.pv.thingsbook.domain.model.parseCustomDurationMinutes("1:30"))
+        org.junit.Assert.assertEquals(45, com.pv.thingsbook.domain.model.parseCustomDurationMinutes("45"))
+        org.junit.Assert.assertNull(com.pv.thingsbook.domain.model.parseCustomDurationMinutes("invalid"))
+
+        // 2. Subtle hover on Android ThingsTagPill & macOS BentoMenuPill / BentoWrappingChip
+        val badgesKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsBadges.kt").readText()
+        assertTrue(badgesKt.contains("collectIsHoveredAsState"))
+        val macModalSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/TaskBentoModalView.swift").readText()
+        assertTrue(macModalSwift.contains("private struct BentoMenuPill"))
+        assertTrue(macModalSwift.contains("private struct BentoWrappingChip"))
+        assertTrue(macModalSwift.contains("CustomDurationPopoverView"))
+
+        // 3. Zero TapGesture(count: 2) disambiguation delay on macOS task selection
+        val macRowSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/TaskRowCardView.swift").readText()
+        assertTrue(macRowSwift.contains(".thingsInstantTaskTap("))
+        assertFalse(macRowSwift.contains("TapGesture(count: 2)"))
+
+        // 4. Full-presence app icon sizing on macOS, ChromeOS PWA, and Android
+        val macIconSvg = File(repoRoot, "macos/Resources/Assets/AppIcon.svg").readText()
+        val pwaFaviconSvg = File(repoRoot, "chromeos-pwa/public/favicon.svg").readText()
+        val androidFgXml = File(appSrcMain, "res/drawable/ic_launcher_foreground.xml").readText()
+        assertTrue(macIconSvg.contains("""width="864" height="864""""))
+        assertTrue(pwaFaviconSvg.contains("""width="504" height="504""""))
+        assertTrue(androidFgXml.contains("""android:scaleX="1.18""""))
+    }
 }

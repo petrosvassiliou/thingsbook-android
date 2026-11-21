@@ -528,6 +528,16 @@ public final class ThingsbookStore: ObservableObject {
         return logbookTasks.first(where: { $0.id == id && !$0.isDeleted })
     }
 
+    public func taskIncludingTrash(byId id: String) -> TaskItem? {
+        if let open = allOpenTasks.first(where: { $0.id == id }) {
+            return open
+        }
+        if let logged = logbookTasks.first(where: { $0.id == id }) {
+            return logged
+        }
+        return trashedTasks.first(where: { $0.id == id })
+    }
+
     private func containerGroupKey(for task: TaskItem) -> String {
         if let pid = task.projectId, let proj = project(byId: pid) {
             if let aid = proj.areaId, let area = area(byId: aid) {
@@ -635,7 +645,14 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func dragPayload(for taskId: String) -> String {
-        TaskDragPayloadCodec.encode(
+        if selectedTaskIds.count <= 1 || !selectedTaskIds.contains(taskId) {
+            return TaskDragPayloadCodec.encode(
+                primaryTaskId: taskId,
+                selectedSet: [],
+                orderedSelectedIds: []
+            )
+        }
+        return TaskDragPayloadCodec.encode(
             primaryTaskId: taskId,
             selectedSet: selectedTaskIds,
             orderedSelectedIds: orderedTaskIds(matching: selectedTaskIds)
@@ -671,15 +688,13 @@ public final class ThingsbookStore: ObservableObject {
                 let low = min(aIdx, bIdx)
                 let high = max(aIdx, bIdx)
                 let rangeIds = Set(visible[low...high])
-                withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
-                    if isCmd {
-                        selectedTaskIds.formUnion(rangeIds)
-                    } else {
-                        selectedTaskIds = rangeIds
-                    }
-                    if selectedTaskIds.count > 1 {
-                        expandedTaskId = nil
-                    }
+                if isCmd {
+                    selectedTaskIds.formUnion(rangeIds)
+                } else {
+                    selectedTaskIds = rangeIds
+                }
+                if selectedTaskIds.count > 1 {
+                    expandedTaskId = nil
                 }
                 if lastSelectedTaskId == nil {
                     lastSelectedTaskId = anchorId
@@ -689,22 +704,22 @@ public final class ThingsbookStore: ObservableObject {
         }
 
         if isCmd {
-            withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
-                if selectedTaskIds.contains(taskId) {
-                    selectedTaskIds.remove(taskId)
-                } else {
-                    selectedTaskIds.insert(taskId)
-                    lastSelectedTaskId = taskId
-                }
-                if selectedTaskIds.count > 1 {
-                    expandedTaskId = nil
-                }
+            if selectedTaskIds.contains(taskId) {
+                selectedTaskIds.remove(taskId)
+            } else {
+                selectedTaskIds.insert(taskId)
+                lastSelectedTaskId = taskId
+            }
+            if selectedTaskIds.count > 1 {
+                expandedTaskId = nil
             }
             return
         }
 
-        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+        if selectedTaskIds != [taskId] {
             selectedTaskIds = [taskId]
+        }
+        if lastSelectedTaskId != taskId {
             lastSelectedTaskId = taskId
         }
     }
@@ -2728,14 +2743,13 @@ public extension View {
         if store.isTimelineFullScreen {
             self
         } else {
-            let payload = store.dragPayload(for: task.id)
             let isMulti = store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1
             let previewTitle = isMulti
                 ? store.trf("v30_drag_multi_count", store.selectedTaskIds.count)
                 : (task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? store.tr("macos_untitled_todo")
                     : task.title)
-            self.draggable(payload) {
+            self.draggable(store.dragPayload(for: task.id)) {
                 HStack(spacing: 7) {
                     Image(systemName: isMulti ? "square.stack.3d.up.fill" : "checkmark.circle")
                         .font(.system(size: 12, weight: .semibold))

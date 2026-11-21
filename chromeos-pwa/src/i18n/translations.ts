@@ -390,6 +390,8 @@ export interface TranslationStrings {
   effortDeepFocus: string;
   durationLabel: string;
   durationClear: string;
+  durationCustom: string;
+  durationCustomPlaceholder: string;
   todayCapacitySummary: (planned: string, free: string) => string;
   waitingOnLabel: string;
   waitingOnBadge: (count: number) => string;
@@ -874,6 +876,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     effortDeepFocus: 'Deep Focus',
     durationLabel: 'Duration',
     durationClear: 'Clear duration',
+    durationCustom: 'Custom',
+    durationCustomPlaceholder: 'e.g. 45m, 1.5h, 2d',
     todayCapacitySummary: (planned, free) => `${planned} planned · ${free ?? '0m'} free`,
     waitingOnLabel: 'Waiting On…',
     waitingOnBadge: (count) =>
@@ -1362,6 +1366,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     effortDeepFocus: 'Tiefer Fokus',
     durationLabel: 'Dauer',
     durationClear: 'Dauer löschen',
+    durationCustom: 'Eigene',
+    durationCustomPlaceholder: 'z. B. 45m, 1,5h, 2d',
     todayCapacitySummary: (planned, free) => `${planned} geplant · ${free ?? '0m'} frei`,
     waitingOnLabel: 'Wartet auf…',
     waitingOnBadge: (count) =>
@@ -1848,6 +1854,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     effortDeepFocus: 'Concentration',
     durationLabel: 'Durée',
     durationClear: 'Effacer la durée',
+    durationCustom: 'Personnalisée',
+    durationCustomPlaceholder: 'ex. 45m, 1,5h, 2j',
     todayCapacitySummary: (planned, free) => `${planned} planifié · ${free ?? '0m'} libre`,
     waitingOnLabel: 'En attente de…',
     waitingOnBadge: (count) =>
@@ -2334,6 +2342,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     effortDeepFocus: 'Focus profondo',
     durationLabel: 'Durata',
     durationClear: 'Cancella durata',
+    durationCustom: 'Personalizzata',
+    durationCustomPlaceholder: 'es. 45m, 1,5h, 2g',
     todayCapacitySummary: (planned, free) => `${planned} pianificati · ${free ?? '0m'} liberi`,
     waitingOnLabel: 'In attesa di…',
     waitingOnBadge: (count) =>
@@ -2820,6 +2830,8 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     effortDeepFocus: 'Enfoque profundo',
     durationLabel: 'Duración',
     durationClear: 'Borrar duración',
+    durationCustom: 'Personalizada',
+    durationCustomPlaceholder: 'p. ej. 45m, 1,5h, 2d',
     todayCapacitySummary: (planned, free) => `${planned} planificado · ${free ?? '0m'} libre`,
     waitingOnLabel: 'Esperando a…',
     waitingOnBadge: (count) =>

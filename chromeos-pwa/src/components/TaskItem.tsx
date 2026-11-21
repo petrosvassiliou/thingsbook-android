@@ -65,6 +65,7 @@ import {
   formatTimeblockRange,
   isTaskActivelyBlocked,
   parseClockToMinutes,
+  parseCustomDurationMinutes,
   shouldAutoFocusTitleOnExpand,
   shouldShowQuickThisEveningPill
 } from '../domain/v2Utils';
@@ -340,6 +341,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const [fileDropOver, setFileDropOver] = useState(false);
   const [loadingAi, setLoadingAi] = useState(false);
   const [focusSubtaskId, setFocusSubtaskId] = useState<string | null>(null);
+  const [customDurationDraft, setCustomDurationDraft] = useState('');
 
   const strikeTimerRef = useRef<number | null>(null);
   const glideTimerRef = useRef<number | null>(null);
@@ -376,6 +378,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     setTimeblockOpen(false);
     setEffortDurationOpen(false);
     setInlineMoreMenuOpen(false);
+    setCustomDurationDraft('');
   } else {
     if (prevServerTitle !== task.title) {
       setPrevServerTitle(task.title);
@@ -1547,6 +1550,50 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                       )}
                     </div>
 
+                    <div className="v3-custom-duration-row">
+                      <span className="v2-timeblock-label">{t.durationCustom}</span>
+                      <input
+                        type="text"
+                        className="v3-custom-duration-input"
+                        data-testid="task-custom-duration-input"
+                        value={customDurationDraft}
+                        placeholder={t.durationCustomPlaceholder}
+                        onChange={(e) => setCustomDurationDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const mins = parseCustomDurationMinutes(customDurationDraft);
+                            if (mins != null) {
+                              setCustomDurationDraft('');
+                              void localDb.upsertTask({ id: task.id, durationMinutes: mins });
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className={`chip-btn ${parseCustomDurationMinutes(customDurationDraft) != null ? 'active' : ''}`}
+                        data-testid="task-custom-duration-apply"
+                        disabled={parseCustomDurationMinutes(customDurationDraft) == null}
+                        onClick={() => {
+                          const mins = parseCustomDurationMinutes(customDurationDraft);
+                          if (mins != null) {
+                            setCustomDurationDraft('');
+                            void localDb.upsertTask({ id: task.id, durationMinutes: mins });
+                          }
+                        }}
+                      >
+                        <Check size={11.5} />
+                        <span>
+                          {(() => {
+                            const mins = parseCustomDurationMinutes(customDurationDraft);
+                            return mins != null ? formatStandaloneDuration(mins) : t.actionDone;
+                          })()}
+                        </span>
+                      </button>
+                    </div>
+
                     <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
                       <span className="v2-timeblock-label">{t.effortLabel}</span>
                       <div className="v2-timeblock-slots">
@@ -2401,6 +2448,42 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             }}
                           >
                             <X size={11} />
+                          </button>
+                        </div>
+                        <div className="v3-custom-duration-row compact">
+                          <input
+                            type="text"
+                            className="v3-custom-duration-input"
+                            value={customDurationDraft}
+                            placeholder={t.durationCustomPlaceholder}
+                            onChange={(e) => setCustomDurationDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const mins = parseCustomDurationMinutes(customDurationDraft);
+                                if (mins != null) {
+                                  setCustomDurationDraft('');
+                                  setCollapsedBadgePopover(null);
+                                  void localDb.upsertTask({ id: task.id, durationMinutes: mins });
+                                }
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="chip-btn active"
+                            disabled={parseCustomDurationMinutes(customDurationDraft) == null}
+                            onClick={() => {
+                              const mins = parseCustomDurationMinutes(customDurationDraft);
+                              if (mins != null) {
+                                setCustomDurationDraft('');
+                                setCollapsedBadgePopover(null);
+                                void localDb.upsertTask({ id: task.id, durationMinutes: mins });
+                              }
+                            }}
+                          >
+                            <Check size={11} />
                           </button>
                         </div>
                       </div>

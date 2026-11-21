@@ -827,14 +827,14 @@ private struct KanbanTaskCardView: View {
         .onHover { hovering in
             isHovering = hovering
         }
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
+        .thingsInstantTaskTap(
+            onSingleClick: { modifiers in
+                store.handleRowClick(taskId: task.id, modifiers: modifiers)
+            },
+            onDoubleClick: {
                 onOpenDetail()
             }
         )
-        .onTapGesture {
-            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-        }
         .thingsTaskDraggable(store: store, task: task)
         .thingsDropTarget(cornerRadius: 11) { payloads in
             store.dropTasksIntoProjectSection(
@@ -987,13 +987,16 @@ private struct KanbanTaskCardView: View {
                 store.updateTask(copy)
             }
             Menu(store.tr("v30_duration_label")) {
-                ForEach([5, 15, 30, 60, 120, 240], id: \.self) { mins in
+                ForEach(TaskItem.standaloneDurationPresets + [960, 1440, 2400], id: \.self) { mins in
                     Button(TaskItem.formatCompactDuration(mins)) {
                         store.setTaskStandaloneDuration(latestTask.id, durationMinutes: mins)
                     }
                 }
+                Divider()
+                Button(store.tr("v30_duration_custom")) {
+                    onOpenDetail()
+                }
                 if (latestTask.durationMinutes ?? 0) > 0 {
-                    Divider()
                     Button(store.tr("v30_duration_clear"), role: .destructive) {
                         store.setTaskStandaloneDuration(latestTask.id, durationMinutes: nil)
                     }
@@ -1613,14 +1616,14 @@ public struct ProjectRoadmapWorkspaceView: View {
             rowContent
         } else {
             rowContent
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded {
+                .thingsInstantTaskTap(
+                    onSingleClick: { modifiers in
+                        store.handleRowClick(taskId: bar.id, modifiers: modifiers)
+                    },
+                    onDoubleClick: {
                         store.openTaskModal(bar.id)
                     }
                 )
-                .onTapGesture {
-                    store.handleRowClick(taskId: bar.id, modifiers: NSEvent.modifierFlags)
-                }
                 .contextMenu {
                     Button {
                         store.openTaskModal(bar.id)
@@ -2033,14 +2036,14 @@ public struct ProjectRoadmapWorkspaceView: View {
             taskBarContent
         } else {
             taskBarContent
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded {
+                .thingsInstantTaskTap(
+                    onSingleClick: { modifiers in
+                        store.handleRowClick(taskId: task.id, modifiers: modifiers)
+                    },
+                    onDoubleClick: {
                         store.openTaskModal(task.id)
                     }
                 )
-                .onTapGesture {
-                    store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-                }
                 .gesture(
                     LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
                         .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("roadmapTimelineGrid")))
@@ -2267,14 +2270,14 @@ public struct ProjectRoadmapWorkspaceView: View {
         .padding(.vertical, 8)
         .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
+        .thingsInstantTaskTap(
+            onSingleClick: { modifiers in
+                store.handleRowClick(taskId: task.id, modifiers: modifiers)
+            },
+            onDoubleClick: {
                 store.openTaskModal(task.id)
             }
         )
-        .onTapGesture {
-            store.handleRowClick(taskId: task.id, modifiers: NSEvent.modifierFlags)
-        }
         .contextMenu {
             Button {
                 store.openTaskModal(task.id)

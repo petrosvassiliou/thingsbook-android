@@ -26,10 +26,16 @@ public struct TaskBentoModalView: View {
     @State private var isDependenciesPopoverOpen = false
     @State private var isTagPopoverOpen = false
     @State private var isMovePopoverOpen = false
+    @State private var isCustomDurationPopoverOpen = false
 
     @State private var isGeneratingChecklist = false
     @State private var isEditingNotes = false
     @State private var isFileDropTargeted = false
+    @State private var isHoveringPin = false
+    @State private var isHoveringMic = false
+    @State private var isHoveringMagic = false
+    @State private var isHoveringAttachBar = false
+    @State private var isHoveringDelete = false
     @State private var isHoveringDone = false
     @State private var isHoveringClose = false
     @State private var didCommitAndDismiss = false
@@ -211,21 +217,36 @@ public struct TaskBentoModalView: View {
             } label: {
                 Image(systemName: current.isPinned ? "pin.fill" : "pin")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(current.isPinned ? ThingsMacPalette.todayYellow : .secondary)
+                    .foregroundStyle(
+                        current.isPinned
+                            ? ThingsMacPalette.todayYellow
+                            : (isHoveringPin ? ThingsMacPalette.accentBlue : .secondary)
+                    )
                     .frame(width: 28, height: 28)
                     .background(
                         RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .fill(current.isPinned ? ThingsMacPalette.todayYellow.opacity(0.14) : ThingsMacPalette.subtleContainer)
+                            .fill(
+                                current.isPinned
+                                    ? ThingsMacPalette.todayYellow.opacity(isHoveringPin ? 0.20 : 0.14)
+                                    : (isHoveringPin ? ThingsMacPalette.accentBlue.opacity(0.08) : ThingsMacPalette.subtleContainer)
+                            )
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 7.5, style: .continuous)
                             .strokeBorder(
-                                current.isPinned ? ThingsMacPalette.todayYellow.opacity(0.32) : Color.primary.opacity(0.08),
+                                current.isPinned
+                                    ? ThingsMacPalette.todayYellow.opacity(isHoveringPin ? 0.48 : 0.32)
+                                    : (isHoveringPin ? ThingsMacPalette.accentBlue.opacity(0.36) : Color.primary.opacity(0.08)),
                                 lineWidth: 0.8
                             )
                     )
             }
             .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHoveringPin = hovering
+                }
+            }
             .thingsTooltip(store.tr(current.isPinned ? "v25_unpin_task" : "v25_pin_task"))
 
             // Live Voice Dictation Button
@@ -234,21 +255,36 @@ public struct TaskBentoModalView: View {
             } label: {
                 Image(systemName: voiceController.isRecording ? "waveform.circle.fill" : "mic.fill")
                     .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(voiceController.isRecording ? .white : .secondary)
+                    .foregroundStyle(
+                        voiceController.isRecording
+                            ? .white
+                            : (isHoveringMic ? ThingsMacPalette.accentBlue : .secondary)
+                    )
                     .frame(width: 28, height: 28)
                     .background(
                         RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .fill(voiceController.isRecording ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.subtleContainer)
+                            .fill(
+                                voiceController.isRecording
+                                    ? ThingsMacPalette.deadlineCrimson
+                                    : (isHoveringMic ? ThingsMacPalette.accentBlue.opacity(0.08) : ThingsMacPalette.subtleContainer)
+                            )
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 7.5, style: .continuous)
                             .strokeBorder(
-                                voiceController.isRecording ? ThingsMacPalette.deadlineCrimson : Color.primary.opacity(0.08),
+                                voiceController.isRecording
+                                    ? ThingsMacPalette.deadlineCrimson
+                                    : (isHoveringMic ? ThingsMacPalette.accentBlue.opacity(0.36) : Color.primary.opacity(0.08)),
                                 lineWidth: 0.8
                             )
                     )
             }
             .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHoveringMic = hovering
+                }
+            }
             .thingsTooltip(store.tr(voiceController.isRecording ? "macos_voice_stop" : "voice_capture_btn"))
 
             // Close Button
@@ -478,11 +514,26 @@ public struct TaskBentoModalView: View {
                     .foregroundStyle(ThingsMacPalette.accentBlue)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3.5)
-                    .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.12)))
+                    .background(
+                        Capsule()
+                            .fill(ThingsMacPalette.accentBlue.opacity(isHoveringMagic ? 0.19 : 0.12))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(
+                                        ThingsMacPalette.accentBlue.opacity(isHoveringMagic ? 0.42 : 0.0),
+                                        lineWidth: 0.8
+                                    )
+                            )
+                    )
                 }
                 .buttonStyle(.plain)
                 .fixedSize(horizontal: true, vertical: false)
                 .disabled(isGeneratingChecklist)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringMagic = hovering
+                    }
+                }
                 .thingsTooltip(store.tr("gemini_magic_breakdown_desc"))
             }
 
@@ -576,7 +627,7 @@ public struct TaskBentoModalView: View {
                         .padding(.vertical, 4)
                         .background(
                             Capsule(style: .continuous)
-                                .fill(ThingsMacPalette.accentBlue.opacity(0.11))
+                                .fill(ThingsMacPalette.accentBlue.opacity(isHoveringAttachBar ? 0.18 : 0.11))
                         )
                     }
                     .padding(.horizontal, 12)
@@ -584,11 +635,17 @@ public struct TaskBentoModalView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .fill(isFileDropTargeted ? ThingsMacPalette.accentBlue.opacity(0.08) : ThingsMacPalette.subtleContainer)
+                            .fill(
+                                isFileDropTargeted
+                                    ? ThingsMacPalette.accentBlue.opacity(0.08)
+                                    : (isHoveringAttachBar ? ThingsMacPalette.accentBlue.opacity(0.045) : ThingsMacPalette.subtleContainer)
+                            )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 13, style: .continuous)
                                     .strokeBorder(
-                                        isFileDropTargeted ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.065),
+                                        isFileDropTargeted
+                                            ? ThingsMacPalette.accentBlue
+                                            : (isHoveringAttachBar ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.065)),
                                         lineWidth: isFileDropTargeted ? 1.3 : 0.85
                                     )
                             )
@@ -596,6 +653,11 @@ public struct TaskBentoModalView: View {
                     .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringAttachBar = hovering
+                    }
+                }
                 .thingsTooltip(store.tr("macos_attachment_drop_hint"))
             }
         }
@@ -767,7 +829,14 @@ public struct TaskBentoModalView: View {
             )
 
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                Menu {
+                BentoMenuPill(
+                    title: currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"),
+                    systemImage: currentEffort?.sfSymbol ?? "bolt",
+                    isActive: currentEffort != nil,
+                    activeTint: effortColor,
+                    helpText: currentEffort.map { "\(store.tr("v30_effort_label")): \(effortLocalizedTitle(for: $0))" }
+                        ?? store.tr("v30_effort_label")
+                ) {
                     ForEach(TaskEffortLevel.allCases, id: \.rawValue) { level in
                         let isSelected = currentEffort == level
                         Button {
@@ -787,39 +856,17 @@ public struct TaskBentoModalView: View {
                             store.setTaskEffort(current.id, effortLevel: nil)
                         }
                     }
-                } label: {
-                    HStack(spacing: 5.5) {
-                        Image(systemName: currentEffort?.sfSymbol ?? "bolt")
-                            .font(.system(size: 11.5, weight: .semibold))
-                        Text(currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"))
-                            .font(.system(size: 12, weight: currentEffort != nil ? .semibold : .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(currentEffort != nil ? effortColor : Color.primary.opacity(0.88))
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .fill(currentEffort != nil ? effortColor.opacity(0.11) : ThingsMacPalette.cardSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                                .strokeBorder(
-                                    currentEffort != nil ? effortColor.opacity(0.32) : Color.primary.opacity(0.11),
-                                    lineWidth: 0.85
-                                )
-                        )
-                )
-                .thingsTooltip(
-                    currentEffort.map { "\(store.tr("v30_effort_label")): \(effortLocalizedTitle(for: $0))" }
-                        ?? store.tr("v30_effort_label")
-                )
 
-                Menu {
-                    ForEach([5, 15, 30, 60, 120, 240], id: \.self) { mins in
+                BentoMenuPill(
+                    title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
+                    systemImage: "timer",
+                    isActive: currentDuration != nil,
+                    activeTint: ThingsMacPalette.anytimeTeal,
+                    helpText: currentDuration.map { "\(store.tr("v30_duration_label")): \(TaskItem.formatCompactDuration($0))" }
+                        ?? store.tr("v30_duration_label")
+                ) {
+                    ForEach(TaskItem.standaloneDurationPresets, id: \.self) { mins in
                         let isSelected = current.durationMinutes == mins
                         Button {
                             commitDraftEditsIfNeeded()
@@ -832,45 +879,29 @@ public struct TaskBentoModalView: View {
                             }
                         }
                     }
+                    Divider()
+                    Button(store.tr("v30_duration_custom")) {
+                        commitDraftEditsIfNeeded()
+                        isCustomDurationPopoverOpen = true
+                    }
                     if currentDuration != nil {
-                        Divider()
                         Button(store.tr("v30_duration_clear"), role: .destructive) {
                             commitDraftEditsIfNeeded()
                             store.setTaskStandaloneDuration(current.id, durationMinutes: nil)
                         }
                     }
-                } label: {
-                    HStack(spacing: 5.5) {
-                        Image(systemName: "timer")
-                            .font(.system(size: 11.5, weight: .semibold))
-                        Text(currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"))
-                            .font(.system(size: 12, weight: currentDuration != nil ? .semibold : .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(currentDuration != nil ? ThingsMacPalette.anytimeTeal : Color.primary.opacity(0.88))
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .fill(currentDuration != nil ? ThingsMacPalette.anytimeTeal.opacity(0.11) : ThingsMacPalette.cardSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                                .strokeBorder(
-                                    currentDuration != nil ? ThingsMacPalette.anytimeTeal.opacity(0.32) : Color.primary.opacity(0.11),
-                                    lineWidth: 0.85
-                                )
-                        )
-                )
-                .thingsTooltip(
-                    currentDuration.map { "\(store.tr("v30_duration_label")): \(TaskItem.formatCompactDuration($0))" }
-                        ?? store.tr("v30_duration_label")
-                )
+                .popover(isPresented: $isCustomDurationPopoverOpen) {
+                    CustomDurationPopoverView(
+                        store: store,
+                        currentDurationMinutes: currentDuration
+                    ) { customMins in
+                        commitDraftEditsIfNeeded()
+                        store.setTaskStandaloneDuration(current.id, durationMinutes: customMins)
+                    }
+                }
 
-                bentoWrappingChipButton(
+                BentoWrappingChip(
                     title: blockedLabel ?? store.tr("v30_blocked_by_label"),
                     systemImage: "hourglass",
                     isActive: isBlockedActive,
@@ -911,7 +942,7 @@ public struct TaskBentoModalView: View {
             )
 
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                bentoWrappingChipButton(
+                BentoWrappingChip(
                     title: breadcrumb ?? store.tr("action_move"),
                     systemImage: "folder",
                     isActive: current.projectId != nil || current.areaId != nil,
@@ -926,7 +957,13 @@ public struct TaskBentoModalView: View {
                 }
 
                 if !projectHeadings.isEmpty {
-                    Menu {
+                    BentoMenuPill(
+                        title: activeHeading?.title ?? store.tr("entity_heading"),
+                        systemImage: "flag.checkered",
+                        isActive: activeHeading != nil,
+                        activeTint: ThingsMacPalette.accentBlue,
+                        helpText: store.tr("entity_heading")
+                    ) {
                         Button {
                             commitDraftEditsIfNeeded()
                             var copy = latestTask
@@ -958,33 +995,7 @@ public struct TaskBentoModalView: View {
                                 }
                             }
                         }
-                    } label: {
-                        HStack(spacing: 5.5) {
-                            Image(systemName: "flag.checkered")
-                                .font(.system(size: 11.5, weight: .semibold))
-                            Text(activeHeading?.title ?? store.tr("entity_heading"))
-                                .font(.system(size: 12, weight: activeHeading != nil ? .semibold : .medium))
-                                .lineLimit(1)
-                        }
-                        .foregroundStyle(activeHeading != nil ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.88))
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .fill(activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.11) : ThingsMacPalette.cardSurface)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                                    .strokeBorder(
-                                        activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.11),
-                                        lineWidth: 0.85
-                                    )
-                            )
-                    )
-                    .thingsTooltip(store.tr("entity_heading"))
                 }
 
                 ForEach(current.tags) { tag in
@@ -1096,16 +1107,24 @@ public struct TaskBentoModalView: View {
                     .padding(.vertical, 5.5)
                     .background(
                         RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .fill(ThingsMacPalette.deadlineCrimson.opacity(0.10))
+                            .fill(ThingsMacPalette.deadlineCrimson.opacity(isHoveringDelete ? 0.16 : 0.10))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                                    .strokeBorder(ThingsMacPalette.deadlineCrimson.opacity(0.26), lineWidth: 0.85)
+                                    .strokeBorder(
+                                        ThingsMacPalette.deadlineCrimson.opacity(isHoveringDelete ? 0.44 : 0.26),
+                                        lineWidth: 0.85
+                                    )
                             )
                     )
                     .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .fixedSize(horizontal: true, vertical: false)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringDelete = hovering
+                    }
+                }
                 .thingsTooltip(store.tr("action_delete"))
             }
 
@@ -1159,7 +1178,7 @@ public struct TaskBentoModalView: View {
             .keyboardShortcut(.return, modifiers: [.command])
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.vertical, 11)
         .background(ThingsMacPalette.subtleContainer.opacity(0.55))
     }
 
@@ -1185,44 +1204,6 @@ public struct TaskBentoModalView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-    }
-
-    private func bentoWrappingChipButton(
-        title: String,
-        systemImage: String,
-        isActive: Bool,
-        activeTint: Color,
-        helpText: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 5.5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .padding(.top, 1)
-                Text(title)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundStyle(isActive ? activeTint : Color.primary.opacity(0.88))
-            .padding(.horizontal, 10.5)
-            .padding(.vertical, 5.5)
-            .background(
-                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                    .fill(isActive ? activeTint.opacity(0.11) : ThingsMacPalette.cardSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .strokeBorder(
-                                isActive ? activeTint.opacity(0.32) : Color.primary.opacity(0.11),
-                                lineWidth: 0.85
-                            )
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .thingsTooltip(helpText)
     }
 
     // MARK: - State, Persistence & Actions
@@ -1511,4 +1492,136 @@ private struct ModalBodyHeightPreferenceKey: PreferenceKey {
         value = max(value, nextValue())
     }
 }
+
+private struct BentoMenuPill<MenuContent: View>: View {
+    let title: String
+    let systemImage: String
+    let isActive: Bool
+    let activeTint: Color
+    let helpText: String
+    @ViewBuilder let menuContent: () -> MenuContent
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            menuContent()
+        } label: {
+            HStack(spacing: 5.5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11.5, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(
+                isActive
+                    ? activeTint
+                    : (isHovering ? Color.primary : Color.primary.opacity(0.88))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                .fill(
+                    isActive
+                        ? activeTint.opacity(isHovering ? 0.17 : 0.11)
+                        : ThingsMacPalette.cardSurface
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(
+                            !isActive && isHovering
+                                ? ThingsMacPalette.accentBlue.opacity(0.075)
+                                : Color.clear
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .strokeBorder(
+                            isActive
+                                ? activeTint.opacity(isHovering ? 0.50 : 0.32)
+                                : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.38) : Color.primary.opacity(0.11)),
+                            lineWidth: 0.85
+                        )
+                )
+        )
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .thingsTooltip(helpText)
+    }
+}
+
+private struct BentoWrappingChip: View {
+    let title: String
+    let systemImage: String
+    let isActive: Bool
+    let activeTint: Color
+    let helpText: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 5.5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .padding(.top, 1)
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(
+                isActive
+                    ? activeTint
+                    : (isHovering ? Color.primary : Color.primary.opacity(0.88))
+            )
+            .padding(.horizontal, 10.5)
+            .padding(.vertical, 5.5)
+            .background(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(
+                        isActive
+                            ? activeTint.opacity(isHovering ? 0.17 : 0.11)
+                            : ThingsMacPalette.cardSurface
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(
+                                !isActive && isHovering
+                                    ? ThingsMacPalette.accentBlue.opacity(0.075)
+                                    : Color.clear
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(
+                                isActive
+                                    ? activeTint.opacity(isHovering ? 0.50 : 0.32)
+                                    : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.38) : Color.primary.opacity(0.11)),
+                                lineWidth: 0.85
+                            )
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .thingsTooltip(helpText)
+    }
+}
+
 

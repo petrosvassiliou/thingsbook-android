@@ -770,9 +770,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(103, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-beta.12", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-beta.12 pre-release contains -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(104, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0-beta.13", BuildConfig.VERSION_NAME)
+        assertTrue("3.0.0-beta.13 pre-release contains -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2048,7 +2048,7 @@ class V2UpgradeAndFeaturesTest {
         }
 
         val infoPlist = File(repoRoot, "macos/Resources/Info.plist").readText()
-        assertTrue(infoPlist.contains("<string>AppIconGlacierV3</string>"))
+        assertTrue(infoPlist.contains("<string>AppIconGlacierV4</string>"))
         assertTrue(infoPlist.contains("<string>com.thingsbook.macos</string>"))
     }
 

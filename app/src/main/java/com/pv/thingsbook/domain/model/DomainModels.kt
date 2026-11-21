@@ -166,8 +166,21 @@ data class TaskItem(
     val isDeleted: Boolean = false
 )
 
+val STANDALONE_DURATION_PRESETS: List<Int> = listOf(5, 15, 30, 60, 120, 240, 480)
+
 fun formatDurationCompact(minutes: Int): String {
     val safeMins = minutes.coerceAtLeast(1)
+    if (safeMins >= 480) {
+        val days = safeMins / 480
+        val rem = safeMins % 480
+        val hours = rem / 60
+        val mins = rem % 60
+        return buildList {
+            add("${days}d")
+            if (hours > 0) add("${hours}h")
+            if (mins > 0) add("${mins}m")
+        }.joinToString(" ")
+    }
     val hours = safeMins / 60
     val rem = safeMins % 60
     return when {
@@ -179,6 +192,64 @@ fun formatDurationCompact(minutes: Int): String {
 
 fun formatDurationCompact(minutes: Int?): String? =
     minutes?.takeIf { it > 0 }?.let { formatDurationCompact(it) }
+
+private val CUSTOM_DURATION_DAY_UNITS = setOf(
+    "d", "day", "days", "t", "tag", "tage", "j", "jour", "jours", "g", "giorno", "giorni", "dia", "dias", "día", "días"
+)
+private val CUSTOM_DURATION_HOUR_UNITS = setOf(
+    "h", "hr", "hrs", "hour", "hours", "std", "stunde", "stunden", "heure", "heures", "ora", "ore", "hora", "horas"
+)
+private val CUSTOM_DURATION_MIN_UNITS = setOf(
+    "m", "min", "mins", "minute", "minutes", "minuten", "minuto", "minuti", "minutos"
+)
+private val CUSTOM_DURATION_TOKEN_REGEX = Regex("""(\d+(?:\.\d+)?)\s*([a-zA-Zäöüßáéíóúàèìòù]+)""")
+
+fun parseCustomDurationMinutes(rawInput: String): Int? {
+    val normalized = rawInput.trim().lowercase().replace(',', '.')
+    if (normalized.isEmpty()) return null
+
+    val colonParts = normalized.split(':')
+    if (colonParts.size == 2) {
+        val hh = colonParts[0].trim().toIntOrNull()
+        val mm = colonParts[1].trim().toIntOrNull()
+        if (hh != null && mm != null && hh >= 0 && mm in 0..59) {
+            val total = hh * 60 + mm
+            return if (total > 0) total.coerceAtMost(48_000) else null
+        }
+        return null
+    }
+
+    normalized.toDoubleOrNull()?.let { plain ->
+        if (plain.isFinite()) {
+            val rounded = kotlin.math.round(plain).toInt()
+            return if (rounded > 0) rounded.coerceAtMost(48_000) else null
+        }
+    }
+
+    val matches = CUSTOM_DURATION_TOKEN_REGEX.findAll(normalized).toList()
+    if (matches.isEmpty()) return null
+
+    val stripped = normalized
+        .replace(CUSTOM_DURATION_TOKEN_REGEX, "")
+        .replace("+", "")
+        .trim()
+    if (stripped.isNotEmpty()) return null
+
+    var totalMinutes = 0.0
+    for (match in matches) {
+        val value = match.groupValues[1].toDoubleOrNull() ?: return null
+        val unit = match.groupValues[2]
+        totalMinutes += when {
+            unit in CUSTOM_DURATION_DAY_UNITS -> value * 480.0
+            unit in CUSTOM_DURATION_HOUR_UNITS -> value * 60.0
+            unit in CUSTOM_DURATION_MIN_UNITS -> value
+            else -> return null
+        }
+    }
+
+    val rounded = kotlin.math.round(totalMinutes).toInt()
+    return if (rounded > 0) rounded.coerceAtMost(48_000) else null
+}
 
 fun wouldCreateDependencyCycle(
     taskId: String,

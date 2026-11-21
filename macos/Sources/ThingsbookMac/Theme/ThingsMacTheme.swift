@@ -214,6 +214,8 @@ public struct TagPillBadge: View {
     public var helpText: String? = nil
     public var onTap: (() -> Void)? = nil
 
+    @State private var isHovering = false
+
     public init(
         title: String,
         isSelected: Bool = false,
@@ -229,6 +231,7 @@ public struct TagPillBadge: View {
     }
 
     public var body: some View {
+        let interactiveHover = isHovering && onTap != nil
         let content = HStack(spacing: 4) {
             if showIcon {
                 Image(systemName: "square.grid.2x2")
@@ -239,21 +242,39 @@ public struct TagPillBadge: View {
                 .lineLimit(1)
         }
         .fixedSize(horizontal: true, vertical: false)
-        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+        .foregroundStyle(
+            isSelected
+                ? Color.white
+                : (interactiveHover ? ThingsMacPalette.accentBlue : Color.secondary)
+        )
         .padding(.horizontal, 9)
         .padding(.vertical, 3.5)
         .background(
             Capsule(style: .continuous)
-                .fill(isSelected ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.055))
+                .fill(
+                    isSelected
+                        ? ThingsMacPalette.accentBlue.opacity(interactiveHover ? 0.90 : 1.0)
+                        : (interactiveHover ? ThingsMacPalette.accentBlue.opacity(0.09) : Color.primary.opacity(0.055))
+                )
         )
         .overlay(
             Capsule(style: .continuous)
-                .strokeBorder(isSelected ? Color.clear : Color.primary.opacity(0.08), lineWidth: 0.75)
+                .strokeBorder(
+                    isSelected
+                        ? Color.clear
+                        : (interactiveHover ? ThingsMacPalette.accentBlue.opacity(0.34) : Color.primary.opacity(0.08)),
+                    lineWidth: 0.75
+                )
         )
 
         if let onTap {
             Button(action: onTap) { content }
                 .buttonStyle(.plain)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHovering = hovering
+                    }
+                }
                 .thingsTooltip(helpText ?? "#\(title)")
         } else if let helpText {
             content.thingsTooltip(helpText)
@@ -422,17 +443,25 @@ public struct ThingsActionChipButton: View {
                 RoundedRectangle(cornerRadius: 7.5, style: .continuous)
                     .fill(
                         isActive
-                            ? activeTint.opacity(isHovering ? 0.18 : 0.11)
-                            : (isHovering ? Color.primary.opacity(0.08) : ThingsMacPalette.subtleContainer)
+                            ? activeTint.opacity(isHovering ? 0.17 : 0.11)
+                            : ThingsMacPalette.cardSurface
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(
+                                !isActive && isHovering
+                                    ? ThingsMacPalette.accentBlue.opacity(0.075)
+                                    : Color.clear
+                            )
                     )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 7.5, style: .continuous)
                     .strokeBorder(
                         isActive
-                            ? activeTint.opacity(isHovering ? 0.48 : 0.32)
-                            : Color.primary.opacity(isHovering ? 0.24 : 0.13),
-                        lineWidth: 0.9
+                            ? activeTint.opacity(isHovering ? 0.50 : 0.32)
+                            : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.38) : Color.primary.opacity(0.11)),
+                        lineWidth: 0.85
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
@@ -1125,4 +1154,236 @@ public final class ThingsMacTooltipController {
         Int64(ProcessInfo.processInfo.systemUptime * 1000.0)
     }
 }
+
+// MARK: - Instantaneous (0 ms) Task Row Click + Native Double-Click Open
+
+private struct ThingsInstantTaskTapModifier: ViewModifier {
+    let isEnabled: Bool
+    let onSingleClick: (NSEvent.ModifierFlags) -> Void
+    let onDoubleClick: () -> Void
+
+    @State private var lastPlainClickUptime: TimeInterval = 0
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.onTapGesture {
+                let modifiers = NSEvent.modifierFlags.intersection([.shift, .command, .control, .option])
+                if !modifiers.isEmpty {
+                    lastPlainClickUptime = 0
+                    onSingleClick(modifiers)
+                    return
+                }
+                let now = ProcessInfo.processInfo.systemUptime
+                let threshold = max(0.18, min(0.65, NSEvent.doubleClickInterval))
+                let appKitClickCount = NSApp.currentEvent?.clickCount ?? 1
+                if appKitClickCount >= 2 || (lastPlainClickUptime > 0 && (now - lastPlainClickUptime) <= threshold) {
+                    lastPlainClickUptime = 0
+                    onDoubleClick()
+                } else {
+                    lastPlainClickUptime = now
+                    onSingleClick(modifiers)
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+public extension View {
+    /// Fires `onSingleClick` immediately (0 ms, without waiting for `TapGesture(count: 2)` timeout)
+    /// and invokes `onDoubleClick` when a second plain click arrives within `NSEvent.doubleClickInterval`.
+    func thingsInstantTaskTap(
+        isEnabled: Bool = true,
+        onSingleClick: @escaping (NSEvent.ModifierFlags) -> Void,
+        onDoubleClick: @escaping () -> Void
+    ) -> some View {
+        modifier(
+            ThingsInstantTaskTapModifier(
+                isEnabled: isEnabled,
+                onSingleClick: onSingleClick,
+                onDoubleClick: onDoubleClick
+            )
+        )
+    }
+}
+
+// MARK: - Custom Duration Popover (1 Day + Multi-Day / Hours / Minutes / Shorthand)
+
+public struct CustomDurationPopoverView: View {
+    @ObservedObject var store: ThingsbookStore
+    public let currentDurationMinutes: Int?
+    public let onApply: (Int?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var days: Int = 0
+    @State private var hours: Int = 0
+    @State private var minutes: Int = 30
+    @State private var shorthandText: String = ""
+
+    public init(
+        store: ThingsbookStore,
+        currentDurationMinutes: Int?,
+        onApply: @escaping (Int?) -> Void
+    ) {
+        self.store = store
+        self.currentDurationMinutes = currentDurationMinutes
+        self.onApply = onApply
+    }
+
+    private var computedTotalMinutes: Int {
+        if let parsed = TaskItem.parseCustomDurationMinutes(shorthandText) {
+            return parsed
+        }
+        return max(0, days * 480 + hours * 60 + minutes)
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(store.tr("v30_duration_custom_title"), systemImage: "timer")
+                    .font(.system(size: 13, weight: .bold))
+                Spacer()
+                if computedTotalMinutes > 0 {
+                    Text(TaskItem.formatCompactDuration(computedTotalMinutes))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.13)))
+                }
+            }
+
+            ThingsFlowLayout(horizontalSpacing: 5, verticalSpacing: 5) {
+                ForEach([15, 30, 45, 60, 90, 120, 240, 480, 960, 1440, 2400], id: \.self) { preset in
+                    let isSelected = computedTotalMinutes == preset && shorthandText.isEmpty
+                    Button {
+                        shorthandText = ""
+                        syncFromMinutes(preset)
+                        onApply(preset)
+                        dismiss()
+                    } label: {
+                        Text(TaskItem.formatCompactDuration(preset))
+                            .font(.system(size: 11.5, weight: isSelected ? .bold : .medium, design: .rounded))
+                            .foregroundStyle(isSelected ? ThingsMacPalette.anytimeTeal : Color.primary.opacity(0.86))
+                            .padding(.horizontal, 8.5)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                                    .fill(isSelected ? ThingsMacPalette.anytimeTeal.opacity(0.14) : ThingsMacPalette.subtleContainer)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                                            .strokeBorder(
+                                                isSelected ? ThingsMacPalette.anytimeTeal.opacity(0.38) : Color.primary.opacity(0.10),
+                                                lineWidth: 0.8
+                                            )
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 8) {
+                stepperUnitBox(label: store.tr("v30_duration_days_short"), value: $days, step: 1, range: 0...60)
+                stepperUnitBox(label: store.tr("v30_duration_hours_short"), value: $hours, step: 1, range: 0...23)
+                stepperUnitBox(label: store.tr("v30_duration_minutes_short"), value: $minutes, step: 5, range: 0...55)
+            }
+
+            TextField(store.tr("v30_duration_custom_placeholder"), text: $shorthandText)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12.5))
+                .onSubmit {
+                    if computedTotalMinutes > 0 {
+                        onApply(computedTotalMinutes)
+                        dismiss()
+                    }
+                }
+
+            HStack {
+                if (currentDurationMinutes ?? 0) > 0 {
+                    Button(store.tr("v30_duration_clear"), role: .destructive) {
+                        onApply(nil)
+                        dismiss()
+                    }
+                    .controlSize(.small)
+                }
+                Spacer()
+                Button(store.tr("action_done")) {
+                    guard computedTotalMinutes > 0 else { return }
+                    onApply(computedTotalMinutes)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(computedTotalMinutes <= 0)
+            }
+        }
+        .padding(14)
+        .frame(width: 304)
+        .onAppear {
+            syncFromMinutes(currentDurationMinutes ?? 60)
+        }
+    }
+
+    private func syncFromMinutes(_ total: Int) {
+        let safe = max(0, total)
+        days = safe / 480
+        let rem = safe % 480
+        hours = rem / 60
+        minutes = rem % 60
+    }
+
+    private func stepperUnitBox(
+        label: String,
+        value: Binding<Int>,
+        step: Int,
+        range: ClosedRange<Int>
+    ) -> some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                Button {
+                    shorthandText = ""
+                    value.wrappedValue = max(range.lowerBound, value.wrappedValue - step)
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color.primary.opacity(0.07)))
+                }
+                .buttonStyle(.plain)
+
+                Text("\(value.wrappedValue)")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .frame(minWidth: 22)
+
+                Button {
+                    shorthandText = ""
+                    value.wrappedValue = min(range.upperBound, value.wrappedValue + step)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color.primary.opacity(0.07)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
+                    )
+            )
+        }
+    }
+}
+
 

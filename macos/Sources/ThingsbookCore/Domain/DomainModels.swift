@@ -485,10 +485,22 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         return nil
     }
 
+    public static let standaloneDurationPresets: [Int] = [5, 15, 30, 60, 120, 240, 480]
+
     public static func formatCompactDuration(_ minutes: Int) -> String {
         let clamped = max(0, minutes)
         if clamped < 60 {
             return "\(clamped)m"
+        }
+        if clamped >= 480 {
+            let d = clamped / 480
+            let rem = clamped % 480
+            let h = rem / 60
+            let m = rem % 60
+            var parts: [String] = ["\(d)d"]
+            if h > 0 { parts.append("\(h)h") }
+            if m > 0 { parts.append("\(m)m") }
+            return parts.joined(separator: " ")
         }
         let h = clamped / 60
         let m = clamped % 60
@@ -496,6 +508,68 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
             return "\(h)h"
         }
         return "\(h)h \(m)m"
+    }
+
+    public static func parseCustomDurationMinutes(_ rawInput: String) -> Int? {
+        let normalized = rawInput
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: ",", with: ".")
+        guard !normalized.isEmpty else { return nil }
+
+        // Support hh:mm clock duration (e.g. "1:30" -> 90m)
+        let colonParts = normalized.split(separator: ":", omittingEmptySubsequences: false)
+        if colonParts.count == 2,
+           let hh = Int(colonParts[0].trimmingCharacters(in: .whitespaces)),
+           let mm = Int(colonParts[1].trimmingCharacters(in: .whitespaces)),
+           hh >= 0, mm >= 0, mm < 60 {
+            let total = hh * 60 + mm
+            return total > 0 ? min(48_000, total) : nil
+        }
+
+        // Plain integer/decimal without unit defaults to minutes (e.g. "45" -> 45m)
+        if let plainMinutes = Double(normalized), plainMinutes.isFinite {
+            let rounded = Int(plainMinutes.rounded())
+            return rounded > 0 ? min(48_000, rounded) : nil
+        }
+
+        // Tokenize <number><unit> pairs across EN/DE/FR/IT/ES (1d = 480m workday)
+        let pattern = #"(\d+(?:\.\d+)?)\s*([a-zA-Zäöüßáéíóúàèìòù]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let nsRange = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        let matches = regex.matches(in: normalized, range: nsRange)
+        guard !matches.isEmpty else { return nil }
+
+        // Ensure no stray unmatched characters remain outside whitespace/+
+        var stripped = regex.stringByReplacingMatches(in: normalized, range: nsRange, withTemplate: "")
+        stripped = stripped.replacingOccurrences(of: "+", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard stripped.isEmpty else { return nil }
+
+        let dayUnits: Set<String> = ["d", "day", "days", "t", "tag", "tage", "j", "jour", "jours", "g", "giorno", "giorni", "dia", "dias", "día", "días"]
+        let hourUnits: Set<String> = ["h", "hr", "hrs", "hour", "hours", "std", "stunde", "stunden", "heure", "heures", "ora", "ore", "hora", "horas"]
+        let minUnits: Set<String> = ["m", "min", "mins", "minute", "minutes", "minuten", "minuto", "minuti", "minutos"]
+
+        var totalMinutes: Double = 0
+        for match in matches {
+            guard let numRange = Range(match.range(at: 1), in: normalized),
+                  let unitRange = Range(match.range(at: 2), in: normalized),
+                  let val = Double(normalized[numRange]) else {
+                return nil
+            }
+            let unit = String(normalized[unitRange])
+            if dayUnits.contains(unit) {
+                totalMinutes += val * 480.0
+            } else if hourUnits.contains(unit) {
+                totalMinutes += val * 60.0
+            } else if minUnits.contains(unit) {
+                totalMinutes += val
+            } else {
+                return nil
+            }
+        }
+
+        let rounded = Int(totalMinutes.rounded())
+        return rounded > 0 ? min(48_000, rounded) : nil
     }
 
     public static func formatMinutesOfDay(_ minutes: Int) -> String {

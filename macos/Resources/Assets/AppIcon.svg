@@ -17,64 +17,64 @@
       <stop offset="100%" stop-color="#B9E3FF" stop-opacity="0.86"/>
     </linearGradient>
     <linearGradient id="leftPageFront" x1="15%" y1="10%" x2="95%" y2="92%">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
-      <stop offset="66%" stop-color="#DCF0FF" stop-opacity="0.88"/>
-      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.92"/>
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.97"/>
+      <stop offset="66%" stop-color="#DCF0FF" stop-opacity="0.90"/>
+      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.94"/>
     </linearGradient>
     <linearGradient id="rightPageFront" x1="85%" y1="10%" x2="5%" y2="92%">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
-      <stop offset="66%" stop-color="#DCF0FF" stop-opacity="0.88"/>
-      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.92"/>
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.97"/>
+      <stop offset="66%" stop-color="#DCF0FF" stop-opacity="0.90"/>
+      <stop offset="100%" stop-color="#FFEAD0" stop-opacity="0.94"/>
     </linearGradient>
-    <radialGradient id="spineWarmth" cx="50%" cy="62%" r="22%">
-      <stop offset="0%" stop-color="#FFE3B3" stop-opacity="0.72"/>
+    <radialGradient id="spineWarmth" cx="50%" cy="62%" r="25%">
+      <stop offset="0%" stop-color="#FFE3B3" stop-opacity="0.74"/>
       <stop offset="100%" stop-color="#FFE3B3" stop-opacity="0.0"/>
     </radialGradient>
     <filter id="dropShadow" x="-8%" y="-6%" width="116%" height="118%">
-      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#0B3B68" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0B3B68" flood-opacity="0.28"/>
     </filter>
     <filter id="bookShadow" x="-12%" y="-10%" width="124%" height="128%">
-      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0B477D" flood-opacity="0.24"/>
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0B477D" flood-opacity="0.25"/>
     </filter>
     <clipPath id="higSquircle">
-      <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4"/>
+      <rect x="80" y="80" width="864" height="864" rx="194.4" ry="194.4"/>
     </clipPath>
   </defs>
 
-  <!-- Outer macOS Dock Shadow + Glacier Squircle Body -->
+  <!-- Outer macOS Dock Shadow + Glacier 864x864 Squircle Body -->
   <g filter="url(#dropShadow)">
-    <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4" fill="url(#glacierBg)"/>
+    <rect x="80" y="80" width="864" height="864" rx="194.4" ry="194.4" fill="url(#glacierBg)"/>
   </g>
 
   <g clip-path="url(#higSquircle)">
     <!-- Liquid Glass Top Dome Specular Reflection -->
-    <path d="M100,100 L924,100 L924,430 C720,515 304,515 100,430 Z" fill="url(#glassDome)"/>
+    <path d="M80,80 L944,80 L944,426 C730,516 294,516 80,426 Z" fill="url(#glassDome)"/>
 
     <!-- Crystalline Caustic Light Shimmer in Lower Basin -->
-    <path d="M130,740 C285,650 420,690 512,775 C604,690 739,650 894,740" fill="none" stroke="#E4F6FF" stroke-opacity="0.30" stroke-width="14" stroke-linecap="round"/>
-    <path d="M235,885 C345,760 445,735 512,702 C579,735 679,760 789,885" fill="none" stroke="#FFFFFF" stroke-opacity="0.24" stroke-width="11" stroke-linecap="round"/>
-    <path d="M350,915 C415,820 470,785 512,742 C554,785 609,820 674,915" fill="none" stroke="#DDF3FF" stroke-opacity="0.28" stroke-width="8" stroke-linecap="round"/>
+    <path d="M112,756 C276,660 416,702 512,792 C608,702 748,660 912,756" fill="none" stroke="#E4F6FF" stroke-opacity="0.30" stroke-width="14.5" stroke-linecap="round"/>
+    <path d="M222,904 C338,772 442,746 512,712 C582,746 686,772 802,904" fill="none" stroke="#FFFFFF" stroke-opacity="0.24" stroke-width="11.5" stroke-linecap="round"/>
+    <path d="M342,936 C410,836 468,798 512,754 C556,798 614,836 682,936" fill="none" stroke="#DDF3FF" stroke-opacity="0.28" stroke-width="8.5" stroke-linecap="round"/>
 
     <!-- Warm Golden-Ivory Spine Illumination -->
-    <circle cx="512" cy="590" r="195" fill="url(#spineWarmth)"/>
+    <circle cx="512" cy="596" r="220" fill="url(#spineWarmth)"/>
 
-    <!-- Sculpted Frosted-Crystal Open Book -->
-    <g filter="url(#bookShadow)">
+    <!-- Bold Sculpted Frosted-Crystal Open Book (532px span, centered optically) -->
+    <g filter="url(#bookShadow)" transform="translate(512 522) scale(1.20) translate(-512 -522)">
       <!-- Back Translucent Book Leaves -->
       <path d="M294,376 C294,363 306,354 319,357 C402,377 466,421 505,479 L505,716 C462,666 396,632 314,620 C302,618 294,608 294,596 Z"
-            fill="#DFF2FF" fill-opacity="0.62" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="5"/>
+            fill="#DFF2FF" fill-opacity="0.64" stroke="#FFFFFF" stroke-opacity="0.74" stroke-width="5"/>
       <path d="M730,376 C730,363 718,354 705,357 C622,377 558,421 519,479 L519,716 C562,666 628,632 710,620 C722,618 730,608 730,596 Z"
-            fill="#DFF2FF" fill-opacity="0.62" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="5"/>
+            fill="#DFF2FF" fill-opacity="0.64" stroke="#FFFFFF" stroke-opacity="0.74" stroke-width="5"/>
 
       <!-- Front Frosted-Glass Book Pages -->
       <path d="M328,342 C328,329 341,320 353,326 C426,357 479,406 506,468 L506,716 C474,655 419,608 345,580 C334,576 328,566 328,554 Z"
-            fill="url(#leftPageFront)" stroke="#FFFFFF" stroke-opacity="0.94" stroke-width="6.5"/>
+            fill="url(#leftPageFront)" stroke="#FFFFFF" stroke-opacity="0.95" stroke-width="6.5"/>
       <path d="M696,342 C696,329 683,320 671,326 C598,357 545,406 518,468 L518,716 C550,655 605,608 679,580 C690,576 696,566 696,554 Z"
-            fill="url(#rightPageFront)" stroke="#FFFFFF" stroke-opacity="0.94" stroke-width="6.5"/>
+            fill="url(#rightPageFront)" stroke="#FFFFFF" stroke-opacity="0.95" stroke-width="6.5"/>
     </g>
   </g>
 
   <!-- Outer & Inner Liquid Glass Specular Rim Highlights -->
-  <rect x="103" y="103" width="818" height="818" rx="182.4" ry="182.4" fill="none" stroke="#7AC5FF" stroke-opacity="0.55" stroke-width="5"/>
-  <rect x="116" y="116" width="792" height="792" rx="172" ry="172" fill="none" stroke="url(#glassRim)" stroke-width="6.5"/>
+  <rect x="83" y="83" width="858" height="858" rx="191.4" ry="191.4" fill="none" stroke="#7AC5FF" stroke-opacity="0.55" stroke-width="5"/>
+  <rect x="96" y="96" width="832" height="832" rx="181" ry="181" fill="none" stroke="url(#glassRim)" stroke-width="6.5"/>
 </svg>

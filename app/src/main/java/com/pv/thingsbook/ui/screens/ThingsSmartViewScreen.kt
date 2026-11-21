@@ -123,6 +123,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
+import androidx.compose.material.icons.outlined.VerticalSplit
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.verticalScroll
@@ -151,6 +152,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -180,6 +182,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -191,6 +194,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pv.thingsbook.BuildConfig
@@ -268,6 +272,7 @@ import com.pv.thingsbook.ui.components.ThingsWeeklyReviewModal
 import com.pv.thingsbook.ui.components.ThingsWhenBadge
 import com.pv.thingsbook.ui.components.ThingsbookBrandSymbol
 import com.pv.thingsbook.ui.components.ThisEveningHeaderBadge
+import com.pv.thingsbook.ui.components.WorkspaceInspectorPanel
 import com.pv.thingsbook.ui.components.rememberThingsMarkdownVisualTransformation
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import com.pv.thingsbook.ui.viewmodel.ActiveNavigationTarget
@@ -358,6 +363,7 @@ fun ThingsSmartViewScreen(
     val selectedFilterTagId by viewModel.selectedFilterTagId.collectAsState()
     val isQuickFindOpen by viewModel.isQuickFindOpen.collectAsState()
     val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
+    val isInspectorVisible by viewModel.isInspectorVisible.collectAsState()
     val selectedTaskIds by viewModel.selectedTaskIds.collectAsState()
     val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
     val showMultiSelectionBar = selectedTaskIds.size > 1 || (isMultiSelectMode && selectedTaskIds.isNotEmpty())
@@ -1044,6 +1050,61 @@ fun ThingsSmartViewScreen(
             (currentProjectWorkspaceMode == ProjectWorkspaceMode.BOARD ||
                 currentProjectWorkspaceMode == ProjectWorkspaceMode.ROADMAP)
 
+        val deletedTaskIdsForInspector = remember(deletedTasks) {
+            deletedTasks.mapTo(HashSet()) { it.id }
+        }
+        val selectedInspectorTask: TaskItem? = remember(
+            selectedTaskIds,
+            primaryTasks,
+            allOpenTasks,
+            logbookTasks,
+            somedayTasks,
+            inboxTasks,
+            todayTasks,
+            eveningTasks,
+            upcomingTasks,
+            anytimeTasks,
+            projectTasks,
+            areaTasks,
+            deletedTaskIdsForInspector
+        ) {
+            if (selectedTaskIds.size != 1) {
+                null
+            } else {
+                resolveUnifiedModalTask(
+                    expandedTaskId = selectedTaskIds.first(),
+                    primaryTasks = primaryTasks,
+                    allOpenTasks = allOpenTasks,
+                    logbookTasks = logbookTasks,
+                    somedayTasks = somedayTasks,
+                    inboxTasks = inboxTasks,
+                    todayTasks = todayTasks,
+                    eveningTasks = eveningTasks,
+                    upcomingTasks = upcomingTasks,
+                    anytimeTasks = anytimeTasks,
+                    projectTasks = projectTasks,
+                    areaTasks = areaTasks,
+                    deletedTaskIds = deletedTaskIdsForInspector
+                )
+            }
+        }
+        val completedTodayCount = remember(logbookTasks, todayDayStartMillis, todayDayEndMillis) {
+            logbookTasks.count { task ->
+                !task.isDeleted &&
+                    task.status == TaskStatus.COMPLETED &&
+                    task.completedAt != null &&
+                    task.completedAt in todayDayStartMillis until todayDayEndMillis
+            }
+        }
+        var measuredDetailPaneWidthDp by remember { mutableStateOf<Dp?>(null) }
+        val estimatedDetailPaneWidthDp = (configuration.screenWidthDp.dp - if (showSidebar) 273.dp else 0.dp)
+            .coerceAtLeast(0.dp)
+        val effectiveDetailPaneWidthDp = measuredDetailPaneWidthDp ?: estimatedDetailPaneWidthDp
+        val outerShowInspectorPane = effectiveDetailPaneWidthDp >= 940.dp &&
+            !isEffectiveTimelineFullScreen &&
+            !isExpandedProjectWorkspace &&
+            isInspectorVisible
+
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -1101,12 +1162,22 @@ fun ThingsSmartViewScreen(
                 )
             }
 
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
                 contentAlignment = Alignment.TopStart
             ) {
+                val detailPaneWidth = maxWidth
+                SideEffect {
+                    if (measuredDetailPaneWidthDp != detailPaneWidth) {
+                        measuredDetailPaneWidthDp = detailPaneWidth
+                    }
+                }
+                val canShowInspectorToggle = detailPaneWidth >= 940.dp &&
+                    !isEffectiveTimelineFullScreen &&
+                    !isExpandedProjectWorkspace
+
                 Column(
                     modifier = Modifier.fillMaxSize()
                 ) {
@@ -1117,6 +1188,8 @@ fun ThingsSmartViewScreen(
                             isSidebarVisible = if (isWideScreen) isSidebarVisible else isMobileDrawerOpen,
                             isQuickFindOpen = isQuickFindOpen,
                             syncStatus = topSyncStatus,
+                            canShowInspectorToggle = canShowInspectorToggle,
+                            isInspectorVisible = isInspectorVisible,
                             onToggleSidebar = {
                                 if (isWideScreen) {
                                     viewModel.toggleSidebarVisible()
@@ -1124,6 +1197,7 @@ fun ThingsSmartViewScreen(
                                     isMobileDrawerOpen = !isMobileDrawerOpen
                                 }
                             },
+                            onToggleInspector = { viewModel.toggleInspectorVisible() },
                             onOpenQuickFind = { viewModel.setQuickFindOpen(!isQuickFindOpen) },
                             onOpenVoiceCapture = { viewModel.openVoiceQuickCapture() },
                             onOpenGeminiHub = { viewModel.setGeminiModalOpen(true) },
@@ -1133,22 +1207,45 @@ fun ThingsSmartViewScreen(
                         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                     }
 
-                    Column(
-                        modifier = Modifier
-                            .padding(
-                                start = if (showSidebar) 4.dp else 0.dp,
-                                end = if (showSidebar) 16.dp else 0.dp
-                            )
-                            .widthIn(
-                                max = when {
-                                    isEffectiveTimelineFullScreen -> 4000.dp
-                                    isExpandedProjectWorkspace -> 2400.dp
-                                    isWideScreen -> 1040.dp
-                                    else -> 2000.dp
-                                }
-                            )
-                            .fillMaxSize()
-                    ) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val canFitInspector = maxWidth >= 940.dp &&
+                            !isEffectiveTimelineFullScreen &&
+                            !isExpandedProjectWorkspace
+                        val showInspectorPane = canFitInspector && isInspectorVisible
+
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                contentAlignment = Alignment.TopStart
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .padding(
+                                            start = if (showSidebar) 4.dp else 0.dp,
+                                            end = when {
+                                                showInspectorPane -> 8.dp
+                                                showSidebar -> 16.dp
+                                                else -> 0.dp
+                                            }
+                                        )
+                                        .then(
+                                            if (showInspectorPane) {
+                                                Modifier
+                                            } else {
+                                                Modifier.widthIn(
+                                                    max = when {
+                                                        isEffectiveTimelineFullScreen -> 4000.dp
+                                                        isExpandedProjectWorkspace -> 2400.dp
+                                                        isWideScreen -> 1440.dp
+                                                        else -> 2000.dp
+                                                    }
+                                                )
+                                            }
+                                        )
+                                        .fillMaxSize()
+                                ) {
                         if (!isEffectiveTimelineFullScreen) {
                             ThingsTopHeaderAndQuickFindSection(
                                 viewModel = viewModel,
@@ -1436,17 +1533,99 @@ fun ThingsSmartViewScreen(
                             .fillMaxSize()
                             .weight(1f)
                     )
+                                }
+                            }
+
+                            if (showInspectorPane) {
+                                VerticalDivider(
+                                    color = colors.hairlineDivider,
+                                    thickness = 1.dp,
+                                    modifier = Modifier.fillMaxHeight()
+                                )
+                                WorkspaceInspectorPanel(
+                                    selectedTask = selectedInspectorTask,
+                                    primaryTasks = allVisibleViewTasks,
+                                    todayTasks = todayTasks,
+                                    eveningTasks = eveningTasks,
+                                    allOpenTasks = allOpenTasks,
+                                    todayCalendarEvents = rawTodayCalendarEventsTop,
+                                    calendarEventsEnabled = calendarEventsEnabledTop,
+                                    todayPlannedMinutes = todayCapacitySummary.first,
+                                    todayFreeMinutes = todayCapacitySummary.second,
+                                    completedTodayCount = completedTodayCount,
+                                    areas = areas,
+                                    projects = activeProjects,
+                                    todayDate = todayDateTop,
+                                    locale = activeLocale,
+                                    activeFocusTaskId = focusTimerState?.taskId,
+                                    onCloseInspector = { viewModel.setInspectorVisible(false) },
+                                    onClearSelection = { viewModel.clearTaskSelection() },
+                                    onSelectTask = { taskId -> viewModel.selectSingleTask(taskId) },
+                                    onExpandTask = { taskId -> viewModel.expandTask(taskId) },
+                                    onUpdateTaskStatus = { taskId, status ->
+                                        viewModel.updateTaskStatus(taskId, status)
+                                    },
+                                    onUpdateTaskTitle = { task, newTitle ->
+                                        viewModel.updateTaskTitleAndNotes(task, newTitle, task.notes)
+                                    },
+                                    onUpdateTaskNotes = { task, newNotes ->
+                                        viewModel.updateTaskTitleAndNotes(task, task.title, newNotes)
+                                    },
+                                    onUpdateTaskSchedule = { task, state, whenDate ->
+                                        viewModel.updateTaskSchedule(task, state, whenDate)
+                                    },
+                                    onTogglePin = { taskId -> viewModel.toggleTaskPinned(taskId) },
+                                    onToggleMilestone = { taskId, isMilestone ->
+                                        viewModel.setTaskMilestone(taskId, isMilestone)
+                                    },
+                                    onUpdateDuration = { taskId, mins ->
+                                        viewModel.setStandaloneTaskDuration(taskId, mins)
+                                    },
+                                    onUpdateEffort = { taskId, effort ->
+                                        viewModel.setTaskEffortLevel(taskId, effort)
+                                    },
+                                    onStartFocusTimer = { task ->
+                                        viewModel.startFocusTimer(task.id, task.title, task.durationMinutes)
+                                    },
+                                    onAddChecklistItem = { taskId, title ->
+                                        viewModel.addChecklistItem(taskId, title)
+                                    },
+                                    onToggleChecklistItem = { itemId, completed ->
+                                        viewModel.toggleChecklistItem(itemId, completed)
+                                    },
+                                    onDeleteChecklistItem = { itemId ->
+                                        viewModel.deleteChecklistItem(itemId)
+                                    },
+                                    onNavigateToProject = { projectId -> viewModel.selectProject(projectId) },
+                                    onNavigateToArea = { areaId -> viewModel.selectArea(areaId) }
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // App Version Badge at bottom-left when Sidebar is hidden or on phones (hidden when soft keyboard or full-screen timeline is open)
-        val isKeyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-        if (!showSidebar && !isKeyboardOpen && !isEffectiveTimelineFullScreen) {
+        // App Version Badge at bottom-left when Sidebar is hidden or on phones (hidden when soft keyboard, selection bar, or full-screen timeline is open)
+        val overlayDensity = LocalDensity.current
+        val isKeyboardOpen = WindowInsets.ime.getBottom(overlayDensity) > 0
+        var multiSelectBarHeightPx by remember { mutableIntStateOf(0) }
+        LaunchedEffect(showMultiSelectionBar, isEffectiveTimelineFullScreen) {
+            if (!showMultiSelectionBar || isEffectiveTimelineFullScreen) {
+                multiSelectBarHeightPx = 0
+            }
+        }
+        val activeSelectionBarClearanceDp = if (!isEffectiveTimelineFullScreen && showMultiSelectionBar) {
+            with(overlayDensity) { multiSelectBarHeightPx.toDp() }.coerceAtLeast(64.dp) + 8.dp
+        } else {
+            0.dp
+        }
+
+        if (!showSidebar && !isKeyboardOpen && !isEffectiveTimelineFullScreen && !showMultiSelectionBar) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
+                    .navigationBarsPadding()
                     .padding(start = 16.dp, bottom = 14.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(colors.tagPillBg.copy(alpha = 0.72f))
@@ -1496,7 +1675,9 @@ fun ThingsSmartViewScreen(
                 onClearSelection = { viewModel.clearTaskSelection() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 22.dp)
+                    .navigationBarsPadding()
+                    .onSizeChanged { size -> multiSelectBarHeightPx = size.height }
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
             )
         }
 
@@ -1507,7 +1688,8 @@ fun ThingsSmartViewScreen(
             onDismiss = { viewModel.dismissUndoSnackbar() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = if (showMultiSelectionBar) 76.dp else 18.dp)
+                .navigationBarsPadding()
+                .padding(bottom = if (showMultiSelectionBar) activeSelectionBarClearanceDp + 6.dp else 18.dp)
         )
 
         // v2 Celebration Toast / Snackbar (Weekly Review completed, Template saved, etc.)
@@ -1516,16 +1698,18 @@ fun ThingsSmartViewScreen(
             onDismiss = { viewModel.dismissCelebrationToast() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
                 .padding(
                     bottom = when {
-                        !undoSnackbarMessage.isNullOrBlank() && showMultiSelectionBar -> 132.dp
-                        !undoSnackbarMessage.isNullOrBlank() || showMultiSelectionBar -> 76.dp
+                        !undoSnackbarMessage.isNullOrBlank() && showMultiSelectionBar -> activeSelectionBarClearanceDp + 62.dp
+                        showMultiSelectionBar -> activeSelectionBarClearanceDp + 6.dp
+                        !undoSnackbarMessage.isNullOrBlank() -> 76.dp
                         else -> 22.dp
                     }
                 )
         )
 
-        // Expandable Context-Sensitive "Magic Plus" Menu + Drag & Drop FAB (bottom-right, hidden in Full Screen Timeline)
+        // Expandable Context-Sensitive "Magic Plus" Menu + Drag & Drop FAB (bottom-right, lifted cleanly above Selection Bar when active)
         if (!isEffectiveTimelineFullScreen) {
             MagicPlusOverlaySection(
                 viewModel = viewModel,
@@ -1535,6 +1719,8 @@ fun ThingsSmartViewScreen(
                 projectHeadings = projectHeadings,
                 areasCount = areas.size,
                 projectDragController = projectDragController,
+                showInspectorPane = outerShowInspectorPane,
+                extraBottomClearance = activeSelectionBarClearanceDp,
                 onDragStateChanged = { state -> magicDragState = state },
                 onRequestCreateProject = { areaId ->
                     projectDialogPreselectedAreaId = areaId
@@ -1927,6 +2113,8 @@ private fun MagicPlusOverlaySection(
     projectHeadings: List<Heading>,
     areasCount: Int,
     projectDragController: ProjectDragDropController,
+    showInspectorPane: Boolean = false,
+    extraBottomClearance: Dp = 0.dp,
     onDragStateChanged: (MagicPlusDragState) -> Unit,
     onRequestCreateProject: (String?) -> Unit
 ) {
@@ -2016,7 +2204,11 @@ private fun MagicPlusOverlaySection(
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 28.dp),
+                .navigationBarsPadding()
+                .padding(
+                    end = if (showInspectorPane) 24.dp + 353.dp else 24.dp,
+                    bottom = 24.dp + extraBottomClearance
+                ),
             positionalDropHandler = positionalHandler
         )
     }
@@ -2925,7 +3117,13 @@ private fun ThingsMainTaskLazyList(
         modifier = Modifier
             .fillMaxSize()
             .imePadding(),
-        contentPadding = PaddingValues(bottom = if (isImeVisible) 28.dp else 110.dp)
+        contentPadding = PaddingValues(
+            bottom = when {
+                isImeVisible -> 28.dp
+                isSelectionModeActive -> 196.dp
+                else -> 110.dp
+            }
+        )
     ) {
         item(key = navTarget.topScrollAnchorKey()) {
             Spacer(modifier = Modifier.height(0.dp))
@@ -4274,6 +4472,7 @@ private fun ThingsBackupDialogsHost(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ThingsMultiSelectionBar(
     selectedCount: Int,
@@ -4294,19 +4493,11 @@ private fun ThingsMultiSelectionBar(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
 
-    Surface(
-        modifier = modifier.clip(RoundedCornerShape(16.dp)),
-        color = colors.cardElevatedSurface,
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = 10.dp,
-        shadowElevation = 8.dp
-    ) {
+    @Composable
+    fun SelectionCountAndSelectAllCluster() {
         Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -4339,77 +4530,15 @@ private fun ThingsMultiSelectionBar(
                     }
                 }
             }
+        }
+    }
 
-            ThingsHoverTooltip(text = stringResource(R.string.view_today)) {
-                ThingsTagPill(
-                    title = "★ ${stringResource(R.string.view_today)}",
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onScheduleToday()
-                    }
-                )
-            }
-
-            ThingsHoverTooltip(text = stringResource(R.string.date_tomorrow)) {
-                ThingsTagPill(
-                    title = "📅 ${stringResource(R.string.date_tomorrow)}",
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onScheduleTomorrow()
-                    }
-                )
-            }
-
-            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_someday)) {
-                ThingsTagPill(
-                    title = "📦 ${stringResource(R.string.v25_batch_someday)}",
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onScheduleSomeday()
-                    }
-                )
-            }
-
-            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_tags)) {
-                ThingsTagPill(
-                    title = "🏷️ ${stringResource(R.string.v25_batch_tags)}",
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onOpenBatchTags()
-                    }
-                )
-            }
-
-            ThingsHoverTooltip(text = stringResource(R.string.v25_batch_pin)) {
-                ThingsTagPill(
-                    title = "📌 ${stringResource(R.string.v25_batch_pin)}",
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onBatchPin()
-                    }
-                )
-            }
-
-            ThingsHoverTooltip(text = "${stringResource(R.string.v25_batch_duplicate)} (Ctrl+D)") {
-                ThingsTagPill(
-                    title = "⧉ ${stringResource(R.string.v25_batch_duplicate)}",
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onBatchDuplicate()
-                    }
-                )
-            }
-
-            ThingsHoverTooltip(text = stringResource(R.string.move_dialog_title)) {
-                ThingsTagPill(
-                    title = "📁 ${stringResource(R.string.action_move)}",
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onOpenBatchMove()
-                    }
-                )
-            }
-
+    @Composable
+    fun TrailingPrimaryActionsCluster() {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             ThingsHoverTooltip(text = stringResource(R.string.action_complete)) {
                 ThingsTagPill(
                     title = "✓ ${stringResource(R.string.action_complete)}",
@@ -4451,6 +4580,130 @@ private fun ThingsMultiSelectionBar(
                         tint = colors.secondaryText,
                         modifier = Modifier.size(18.dp)
                     )
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun BatchPropertyPillsContent() {
+        ThingsHoverTooltip(text = stringResource(R.string.view_today)) {
+            ThingsTagPill(
+                title = "★ ${stringResource(R.string.view_today)}",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onScheduleToday()
+                }
+            )
+        }
+
+        ThingsHoverTooltip(text = stringResource(R.string.date_tomorrow)) {
+            ThingsTagPill(
+                title = "📅 ${stringResource(R.string.date_tomorrow)}",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onScheduleTomorrow()
+                }
+            )
+        }
+
+        ThingsHoverTooltip(text = stringResource(R.string.v25_batch_someday)) {
+            ThingsTagPill(
+                title = "📦 ${stringResource(R.string.v25_batch_someday)}",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onScheduleSomeday()
+                }
+            )
+        }
+
+        ThingsHoverTooltip(text = stringResource(R.string.v25_batch_tags)) {
+            ThingsTagPill(
+                title = "🏷️ ${stringResource(R.string.v25_batch_tags)}",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onOpenBatchTags()
+                }
+            )
+        }
+
+        ThingsHoverTooltip(text = stringResource(R.string.v25_batch_pin)) {
+            ThingsTagPill(
+                title = "📌 ${stringResource(R.string.v25_batch_pin)}",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onBatchPin()
+                }
+            )
+        }
+
+        ThingsHoverTooltip(text = "${stringResource(R.string.v25_batch_duplicate)} (Ctrl+D)") {
+            ThingsTagPill(
+                title = "⧉ ${stringResource(R.string.v25_batch_duplicate)}",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onBatchDuplicate()
+                }
+            )
+        }
+
+        ThingsHoverTooltip(text = stringResource(R.string.move_dialog_title)) {
+            ThingsTagPill(
+                title = "📁 ${stringResource(R.string.action_move)}",
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onOpenBatchMove()
+                }
+            )
+        }
+    }
+
+    BoxWithConstraints(modifier = modifier) {
+        val isWideSingleBar = maxWidth >= 980.dp
+        Surface(
+            modifier = Modifier
+                .then(if (isWideSingleBar) Modifier.widthIn(max = 1120.dp) else Modifier.fillMaxWidth())
+                .clip(RoundedCornerShape(18.dp)),
+            color = colors.cardSurface,
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(1.dp, colors.thingsBlue.copy(alpha = 0.28f)),
+            tonalElevation = 8.dp,
+            shadowElevation = 12.dp
+        ) {
+            if (isWideSingleBar) {
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically
+                ) {
+                    SelectionCountAndSelectAllCluster()
+                    BatchPropertyPillsContent()
+                    TrailingPrimaryActionsCluster()
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        SelectionCountAndSelectAllCluster()
+                        TrailingPrimaryActionsCluster()
+                    }
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BatchPropertyPillsContent()
+                    }
                 }
             }
         }
@@ -4633,7 +4886,10 @@ private fun TopThingsbookBar(
     isSidebarVisible: Boolean,
     isQuickFindOpen: Boolean,
     syncStatus: CloudSyncStatus,
+    canShowInspectorToggle: Boolean = false,
+    isInspectorVisible: Boolean = true,
     onToggleSidebar: () -> Unit,
+    onToggleInspector: () -> Unit = {},
     onOpenQuickFind: () -> Unit,
     onOpenVoiceCapture: () -> Unit,
     onOpenGeminiHub: () -> Unit,
@@ -4722,7 +4978,7 @@ private fun TopThingsbookBar(
                     }
                 }
 
-                // Right cluster: 🎙️ Voice (>= 420dp) + ✨ Gemini + ☁️ Cloud Sync + ⚙️ Settings
+                // Right cluster: 🎙️ Voice (>= 420dp) + ✨ Gemini + ☁️ Cloud Sync + ◫ Inspector Toggle + ⚙️ Settings
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(if (barWidth >= 520.dp) 4.dp else 2.dp)
@@ -4792,6 +5048,23 @@ private fun TopThingsbookBar(
                                 tint = syncTint,
                                 modifier = Modifier.size(iconGlyphSize)
                             )
+                        }
+                    }
+
+                    if (canShowInspectorToggle) {
+                        val inspectorTooltip = stringResource(R.string.v30_inspector_toggle_tooltip)
+                        ThingsHoverTooltip(text = inspectorTooltip) {
+                            IconButton(
+                                onClick = onToggleInspector,
+                                modifier = Modifier.size(iconButtonSize)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.VerticalSplit,
+                                    contentDescription = inspectorTooltip,
+                                    tint = if (isInspectorVisible) colors.thingsBlue else colors.secondaryText,
+                                    modifier = Modifier.size(iconGlyphSize)
+                                )
+                            }
                         }
                     }
 

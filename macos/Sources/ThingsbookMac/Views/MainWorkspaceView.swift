@@ -70,83 +70,110 @@ public struct MainWorkspaceView: View {
         }
     }
 
+    private var isWideProjectWorkspace: Bool {
+        guard case .project(let projId) = store.selectedDestination,
+              let project = store.project(byId: projId) else {
+            return false
+        }
+        let mode = ProjectViewMode.normalized(project.viewMode)
+        return mode == .board || mode == .roadmap
+    }
+
+    private var canShowInspector: Bool {
+        geoDetailWidth >= 900 && !store.isTimelineFullScreen && !isWideProjectWorkspace
+    }
+
     public var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(store: store)
                     .navigationSplitViewColumnWidth(min: 252, ideal: 274, max: 340)
             } detail: {
-                ZStack(alignment: .bottom) {
-                    VStack(spacing: 0) {
-                        Rectangle()
-                            .fill(Color(nsColor: .separatorColor).opacity(0.65))
-                            .frame(height: 1)
+                let isInspectorOpen = canShowInspector && store.isInspectorVisible
 
-                        if !store.isTimelineFullScreen, let focus = store.focusTimer {
-                            focusTimerBanner(focus)
-                                .padding(.horizontal, 36)
-                                .padding(.top, 14)
-                                .padding(.bottom, 4)
-                        }
-                        SmartViewCanvas(store: store)
-                            .clipped()
-                    }
-                    .background(
-                        ThingsMacPalette.canvasBackground
-                            .ignoresSafeArea(.container, edges: .top)
-                    )
-                    .background(
-                        MacWindowTitlebarConfigurator(
-                            targetToolbarWidth: CGFloat(toolbarMetrics.totalBarWidth)
-                        ) { winW, sidebarW, measuredDetailW in
-                            if winW > 300, abs(winW - windowContentWidth) >= 1.5 {
-                                windowContentWidth = winW
-                            }
-                            if sidebarW >= 0, abs(sidebarW - liveSidebarFrameWidth) >= 1.5 {
-                                liveSidebarFrameWidth = sidebarW
-                            }
-                            if measuredDetailW > 300, abs(measuredDetailW - splitDetailWidth) >= 1.5 {
-                                splitDetailWidth = measuredDetailW
-                            }
-                        }
-                    )
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .preference(
-                                    key: DetailPaneWidthPreferenceKey.self,
-                                    value: geo.size.width
-                                )
-                                .onChange(of: geo.size.width, initial: true) { _, newWidth in
-                                    if newWidth > 300, abs(newWidth - geoDetailWidth) >= 1.5 {
-                                        geoDetailWidth = newWidth
-                                    }
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor).opacity(0.65))
+                        .frame(height: 1)
+
+                    HStack(spacing: 0) {
+                        ZStack(alignment: .bottom) {
+                            VStack(spacing: 0) {
+                                if !store.isTimelineFullScreen, let focus = store.focusTimer {
+                                    focusTimerBanner(focus)
+                                        .padding(.horizontal, 26)
+                                        .padding(.top, 14)
+                                        .padding(.bottom, 4)
                                 }
-                        }
-                    )
-
-                    // Bottom Overlays: Multi-select bar, Undo Banner, Toast & Magic Plus Button
-                    if !store.isTimelineFullScreen {
-                        HStack(alignment: .bottom, spacing: 14) {
-                            Spacer()
-
-                            if store.selectedTaskIds.count > 1 {
-                                multiSelectBar
-                            } else if let undo = store.undoBanner {
-                                undoPillBanner(undo)
-                            } else if let toast = store.toastMessage {
-                                toastPill(toast)
+                                SmartViewCanvas(store: store, isInspectorOpen: isInspectorOpen)
+                                    .clipped()
                             }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                            Spacer()
+                            // Bottom Overlays: Multi-select bar, Undo Banner, Toast & Magic Plus Button
+                            if !store.isTimelineFullScreen {
+                                HStack(alignment: .bottom, spacing: 14) {
+                                    Spacer()
 
-                            magicPlusButton
+                                    if store.selectedTaskIds.count > 1 {
+                                        multiSelectBar
+                                    } else if let undo = store.undoBanner {
+                                        undoPillBanner(undo)
+                                    } else if let toast = store.toastMessage {
+                                        toastPill(toast)
+                                    }
+
+                                    Spacer()
+
+                                    magicPlusButton
+                                }
+                                .padding(.horizontal, 28)
+                                .padding(.bottom, 22)
+                            }
                         }
-                        .padding(.horizontal, 28)
-                        .padding(.bottom, 22)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .coordinateSpace(name: MacMagicPlusCoordinateSpace.name)
+
+                        if isInspectorOpen {
+                            Divider()
+                            WorkspaceInspectorPanelView(store: store)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
                     }
                 }
-                .coordinateSpace(name: MacMagicPlusCoordinateSpace.name)
+                .background(
+                    ThingsMacPalette.canvasBackground
+                        .ignoresSafeArea(.container, edges: .top)
+                )
+                .background(
+                    MacWindowTitlebarConfigurator(
+                        targetToolbarWidth: CGFloat(toolbarMetrics.totalBarWidth)
+                    ) { winW, sidebarW, measuredDetailW in
+                        if winW > 300, abs(winW - windowContentWidth) >= 1.5 {
+                            windowContentWidth = winW
+                        }
+                        if sidebarW >= 0, abs(sidebarW - liveSidebarFrameWidth) >= 1.5 {
+                            liveSidebarFrameWidth = sidebarW
+                        }
+                        if measuredDetailW > 300, abs(measuredDetailW - splitDetailWidth) >= 1.5 {
+                            splitDetailWidth = measuredDetailW
+                        }
+                    }
+                )
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .preference(
+                                key: DetailPaneWidthPreferenceKey.self,
+                                value: geo.size.width
+                            )
+                            .onChange(of: geo.size.width, initial: true) { _, newWidth in
+                                if newWidth > 300, abs(newWidth - geoDetailWidth) >= 1.5 {
+                                    geoDetailWidth = newWidth
+                                }
+                            }
+                    }
+                )
                 .onPreferenceChange(DetailPaneWidthPreferenceKey.self) { newWidth in
                     if newWidth > 300, abs(newWidth - geoDetailWidth) >= 1.5 {
                         geoDetailWidth = newWidth
@@ -469,7 +496,7 @@ public struct MainWorkspaceView: View {
                         .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 1)
                 )
         )
-        .frame(maxWidth: 880)
+        .frame(maxWidth: (canShowInspector && store.isInspectorVisible) ? .infinity : 1360, alignment: .leading)
     }
 
     // MARK: - Magic Plus Button & Popover Menu
@@ -1170,6 +1197,24 @@ public struct MainWorkspaceView: View {
                     guard !isToolbarDisabled else { return }
                     store.settingsTab = .general
                     store.isSettingsPresented = true
+                }
+
+                if canShowInspector {
+                    MacToolbarIconButton(
+                        width: btnW,
+                        height: btnH,
+                        isActive: store.isInspectorVisible,
+                        isDisabled: isToolbarDisabled,
+                        helpText: store.tr("v30_inspector_toggle_tooltip"),
+                        action: {
+                            guard !isToolbarDisabled else { return }
+                            store.toggleInspector()
+                        }
+                    ) {
+                        Image(systemName: "sidebar.right")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .thingsTooltip(store.tr("v30_inspector_toggle_tooltip"))
                 }
             }
         }

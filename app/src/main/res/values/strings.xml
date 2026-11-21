@@ -599,4 +599,8 @@
     <string name="v30_mark_as_milestone">Mark as Milestone</string>
     <string name="v30_remove_milestone">Remove Milestone</string>
     <string name="v30_external_import_target_area">Target Area for Import</string>
+    <string name="v30_inspector_title">Inspector</string>
+    <string name="v30_inspector_overview_title">Overview</string>
+    <string name="v30_inspector_upcoming_deadlines">Upcoming Deadlines &amp; Milestones</string>
+    <string name="v30_inspector_toggle_tooltip">Toggle Inspector Panel</string>
 </resources>

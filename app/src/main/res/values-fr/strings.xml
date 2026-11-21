@@ -599,4 +599,8 @@
     <string name="v30_mark_as_milestone">Marquer comme jalon</string>
     <string name="v30_remove_milestone">Retirer le jalon</string>
     <string name="v30_external_import_target_area">Domaine cible pour l\'import</string>
+    <string name="v30_inspector_title">Inspecteur</string>
+    <string name="v30_inspector_overview_title">Aperçu</string>
+    <string name="v30_inspector_upcoming_deadlines">Échéances &amp; jalons à venir</string>
+    <string name="v30_inspector_toggle_tooltip">Afficher/masquer le panneau Inspecteur</string>
 </resources>

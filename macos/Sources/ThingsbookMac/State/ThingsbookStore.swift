@@ -85,6 +85,18 @@ public final class ThingsbookStore: ObservableObject {
             }
         }
     }
+    public static let inspectorVisibleDefaultsKey = "thingsbook.macos.inspectorVisible"
+    @Published public var isInspectorVisible: Bool = (UserDefaults.standard.object(forKey: "thingsbook.macos.inspectorVisible") as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(isInspectorVisible, forKey: Self.inspectorVisibleDefaultsKey)
+        }
+    }
+
+    public func toggleInspector() {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
+            isInspectorVisible.toggle()
+        }
+    }
 
     @Published public var inboxTasks: [TaskItem] = []
     @Published public var todayDaytimeTasks: [TaskItem] = []
@@ -740,6 +752,14 @@ public final class ThingsbookStore: ObservableObject {
             selectedTaskIds = [taskId]
             lastSelectedTaskId = taskId
             expandedTaskId = taskId
+        }
+    }
+
+    public func clearSelection() {
+        flushModalDraftsIfNeeded()
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+            selectedTaskIds.removeAll()
+            lastSelectedTaskId = nil
         }
     }
 
@@ -1538,6 +1558,39 @@ public final class ThingsbookStore: ObservableObject {
         if preferences.calendarEventsEnabled {
             Task { await refreshCalendarEvents() }
         }
+    }
+
+    public func checklistItems(for taskId: String) -> [ChecklistItem] {
+        (taskIncludingTrash(byId: taskId)?.checklistItems ?? [])
+            .filter { !$0.isDeleted }
+            .sorted {
+                if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                return $0.createdAt < $1.createdAt
+            }
+    }
+
+    public func toggleChecklistItem(_ item: ChecklistItem) {
+        flushModalDraftsIfNeeded()
+        var copy = checklistItems(for: item.taskId).first(where: { $0.id == item.id }) ?? item
+        copy.isCompleted.toggle()
+        try? database.updateChecklistItem(copy)
+        reloadSnapshot()
+    }
+
+    @discardableResult
+    public func addChecklistItem(taskId: String, title: String) -> ChecklistItem? {
+        flushModalDraftsIfNeeded()
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return nil }
+        let created = try? database.addChecklistItem(taskId: taskId, title: clean)
+        reloadSnapshot()
+        return created
+    }
+
+    public func deleteChecklistItem(_ item: ChecklistItem) {
+        flushModalDraftsIfNeeded()
+        try? database.deleteChecklistItem(id: item.id, taskId: item.taskId)
+        reloadSnapshot()
     }
 
     public func moveChecklistItem(_ item: ChecklistItem, in items: [ChecklistItem], direction: Int) {

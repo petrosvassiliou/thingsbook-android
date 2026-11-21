@@ -112,12 +112,52 @@ public final class ThingsStrings: @unchecked Sendable {
 
     private let tables: [String: [String: String]]
 
+    private static let builtinFallbackStrings: [String: [String: String]] = [
+        "en": [
+            "v30_inspector_title": "Inspector",
+            "v30_inspector_overview_title": "Overview",
+            "v30_inspector_upcoming_deadlines": "Upcoming Deadlines & Milestones",
+            "v30_inspector_toggle_tooltip": "Toggle Inspector Panel"
+        ],
+        "de": [
+            "v30_inspector_title": "Inspektor",
+            "v30_inspector_overview_title": "Übersicht",
+            "v30_inspector_upcoming_deadlines": "Anstehende Fristen & Meilensteine",
+            "v30_inspector_toggle_tooltip": "Inspektor-Seitenleiste ein-/ausblenden"
+        ],
+        "fr": [
+            "v30_inspector_title": "Inspecteur",
+            "v30_inspector_overview_title": "Aperçu",
+            "v30_inspector_upcoming_deadlines": "Échéances & jalons à venir",
+            "v30_inspector_toggle_tooltip": "Afficher/masquer le panneau Inspecteur"
+        ],
+        "it": [
+            "v30_inspector_title": "Ispettore",
+            "v30_inspector_overview_title": "Panoramica",
+            "v30_inspector_upcoming_deadlines": "Scadenze e traguardi imminenti",
+            "v30_inspector_toggle_tooltip": "Mostra/nascondi pannello Ispettore"
+        ],
+        "es": [
+            "v30_inspector_title": "Inspector",
+            "v30_inspector_overview_title": "Resumen",
+            "v30_inspector_upcoming_deadlines": "Próximas fechas límite e hitos",
+            "v30_inspector_toggle_tooltip": "Mostrar/ocultar panel Inspector"
+        ]
+    ]
+
     public init() {
         var loaded: [String: [String: String]] = [:]
         if let url = ThingsResourceLoader.url(forResource: "strings", withExtension: "json"),
            let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode([String: [String: String]].self, from: data) {
             loaded = decoded
+        }
+        for (lang, fallbackMap) in Self.builtinFallbackStrings {
+            var table = loaded[lang] ?? [:]
+            for (k, v) in fallbackMap where table[k] == nil {
+                table[k] = v
+            }
+            loaded[lang] = table
         }
         self.tables = loaded
     }

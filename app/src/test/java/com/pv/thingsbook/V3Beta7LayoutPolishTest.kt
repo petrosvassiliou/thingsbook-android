@@ -275,13 +275,13 @@ class V3Beta7LayoutPolishTest {
             .substringAfter("contentAlignment = Alignment.TopStart\n            ) {")
             .substringBefore("ThingsMainTaskLazyList(")
         val topBarCallIdx = workspaceBoxChunk.indexOf("TopThingsbookBar(")
-        val widthIn1040Idx = workspaceBoxChunk.indexOf("isWideScreen -> 1040.dp")
+        val widthInWideIdx = workspaceBoxChunk.indexOf("isWideScreen -> 1440.dp")
         assertTrue("TopThingsbookBar must render in outer full-width Column", topBarCallIdx > 0)
-        assertTrue("TopThingsbookBar must appear BEFORE the 1040.dp bounded content Column", widthIn1040Idx > topBarCallIdx)
+        assertTrue("TopThingsbookBar must appear BEFORE the wide-screen bounded content Column", widthInWideIdx > topBarCallIdx)
         val quickFindHeaderChunk = smartViewKt
             .substringAfter("private fun ThingsTopHeaderAndQuickFindSection(")
             .substringBefore("private fun ThingsTaskRowItem(")
-        assertFalse("ThingsTopHeaderAndQuickFindSection must not duplicate TopThingsbookBar inside 1040.dp Column", quickFindHeaderChunk.contains("TopThingsbookBar("))
+        assertFalse("ThingsTopHeaderAndQuickFindSection must not duplicate TopThingsbookBar inside content Column", quickFindHeaderChunk.contains("TopThingsbookBar("))
 
         // 5. Cross-platform task click parity: 0ms single-click selects, <=380ms double-click or Open Details button opens modal
         val viewModelKt = File(appSrcMain, "java/com/pv/thingsbook/ui/viewmodel/ThingsbookViewModel.kt").readText()

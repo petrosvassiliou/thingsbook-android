@@ -2294,6 +2294,9 @@ class ThingsbookViewModel @Inject constructor(
     private val _isSidebarVisible = MutableStateFlow(settingsPrefs.getBoolean("sidebar_visible", true))
     val isSidebarVisible: StateFlow<Boolean> = _isSidebarVisible.asStateFlow()
 
+    private val _isInspectorVisible = MutableStateFlow(settingsPrefs.getBoolean("inspector_visible", true))
+    val isInspectorVisible: StateFlow<Boolean> = _isInspectorVisible.asStateFlow()
+
     private val _isLocalOnlyDbMode = MutableStateFlow(
         settingsPrefs.getBoolean("local_only_db_mode", false) ||
             coreSettingsPrefs.getBoolean("local_only_db_mode", false)
@@ -2496,6 +2499,16 @@ class ThingsbookViewModel @Inject constructor(
     fun setSidebarVisible(visible: Boolean) {
         _isSidebarVisible.value = visible
         runCatching { settingsPrefs.edit().putBoolean("sidebar_visible", visible).apply() }
+    }
+
+    fun toggleInspectorVisible() {
+        val next = selectionStateHolder.toggleInspectorVisible()
+        runCatching { settingsPrefs.edit().putBoolean("inspector_visible", next).apply() }
+    }
+
+    fun setInspectorVisible(visible: Boolean) {
+        selectionStateHolder.setInspectorVisible(visible)
+        runCatching { settingsPrefs.edit().putBoolean("inspector_visible", visible).apply() }
     }
 
     fun setLocalOnlyDbMode(localOnly: Boolean) {
@@ -2988,7 +3001,8 @@ class ThingsbookViewModel @Inject constructor(
     internal val selectionStateHolder = TaskSelectionStateHolder(
         _selectedTaskIds = _selectedTaskIds,
         _isMultiSelectMode = _isMultiSelectMode,
-        _expandedTaskId = _expandedTaskId
+        _expandedTaskId = _expandedTaskId,
+        _isInspectorVisible = _isInspectorVisible
     )
 
     fun selectSingleTask(taskId: String) {
@@ -4665,17 +4679,29 @@ data class ThingsbookStatistics(
 internal class TaskSelectionStateHolder(
     private val _selectedTaskIds: MutableStateFlow<Set<String>> = MutableStateFlow(emptySet()),
     private val _isMultiSelectMode: MutableStateFlow<Boolean> = MutableStateFlow(false),
-    private val _expandedTaskId: MutableStateFlow<String?> = MutableStateFlow(null)
+    private val _expandedTaskId: MutableStateFlow<String?> = MutableStateFlow(null),
+    private val _isInspectorVisible: MutableStateFlow<Boolean> = MutableStateFlow(true)
 ) {
     val selectedTaskIds: StateFlow<Set<String>> = _selectedTaskIds.asStateFlow()
     val isMultiSelectMode: StateFlow<Boolean> = _isMultiSelectMode.asStateFlow()
     val expandedTaskId: StateFlow<String?> = _expandedTaskId.asStateFlow()
+    val isInspectorVisible: StateFlow<Boolean> = _isInspectorVisible.asStateFlow()
 
     var lastSelectedAnchorTaskId: String? = null
         private set
 
     val showMultiSelectionBar: Boolean
         get() = _selectedTaskIds.value.size > 1 || (_isMultiSelectMode.value && _selectedTaskIds.value.isNotEmpty())
+
+    fun toggleInspectorVisible(): Boolean {
+        val next = !_isInspectorVisible.value
+        _isInspectorVisible.value = next
+        return next
+    }
+
+    fun setInspectorVisible(visible: Boolean) {
+        _isInspectorVisible.value = visible
+    }
 
     fun selectSingleTask(taskId: String) {
         _expandedTaskId.value = null

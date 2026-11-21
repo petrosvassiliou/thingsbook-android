@@ -409,15 +409,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.16")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.16")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 107)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.17")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.17")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 108)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.16", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.16", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.16", current: "3.0.0-beta.15"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.16"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.16"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.17", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.17", current: "2.5.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.17", current: "3.0.0-beta.16"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.17"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.17"))
         XCTAssertTrue(TaskItem.standaloneDurationPresets.contains(480))
         XCTAssertEqual(TaskItem.formatCompactDuration(480), "1d")
         XCTAssertEqual(TaskItem.formatCompactDuration(720), "1d 4h")
@@ -5559,5 +5559,49 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(pngData.starts(with: pngMagic))
         XCTAssertGreaterThan(pngData.count, 256)
     }
+
+    // MARK: - v3.0.0-beta.17 Wide-Screen & Inspector Localization Parity
+
+    func testV30Beta17InspectorLocalizationKeysAllLanguages() {
+        let strings = ThingsStrings.shared
+        let inspectorKeys = [
+            "v30_inspector_title",
+            "v30_inspector_overview_title",
+            "v30_inspector_upcoming_deadlines",
+            "v30_inspector_toggle_tooltip"
+        ]
+
+        let explicitLanguages: [AppLanguage] = [.en, .de, .fr, .it, .es]
+        for lang in explicitLanguages {
+            let langKeys = strings.keys(for: lang.rawValue)
+            for key in inspectorKeys {
+                XCTAssertTrue(langKeys.contains(key), "Missing \(key) in \(lang.rawValue) table")
+                let resolved = strings.text(key, lang: lang)
+                XCTAssertFalse(resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Empty value for \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(resolved, key, "Key \(key) leaked raw identifier in \(lang.rawValue)")
+            }
+        }
+
+        for lang in AppLanguage.allCases {
+            for key in inspectorKeys {
+                let resolved = strings.text(key, lang: lang)
+                XCTAssertFalse(resolved.isEmpty, "Empty value for \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(resolved, key, "Key \(key) leaked raw identifier in \(lang.rawValue)")
+            }
+        }
+
+        XCTAssertEqual(strings.text("v30_inspector_title", lang: .en), "Inspector")
+        XCTAssertEqual(strings.text("v30_inspector_title", lang: .de), "Inspektor")
+        XCTAssertEqual(strings.text("v30_inspector_title", lang: .fr), "Inspecteur")
+        XCTAssertEqual(strings.text("v30_inspector_title", lang: .it), "Ispettore")
+        XCTAssertEqual(strings.text("v30_inspector_title", lang: .es), "Inspector")
+
+        XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .en), "Overview")
+        XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .de), "Übersicht")
+        XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .fr), "Aperçu")
+        XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .it), "Panoramica")
+        XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .es), "Resumen")
+    }
 }
+
 

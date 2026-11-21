@@ -452,12 +452,23 @@ async function main() {
     cdp.assertZeroErrors('initial app boot');
     console.log('[2/9] App booted cleanly with 0 console errors & 0 runtime exceptions');
 
-    // Hover stability check on Sidebar Bento tiles, Mini-Bento cards, and Task rows
+    // Hover stability check on Sidebar Bento tiles, Mini-Bento cards, Task rows, and Wide-Screen Inspector Panel
+    await cdp.waitForSelector('[data-testid="workspace-inspector-panel"][data-inspector-mode="overview"]');
+    const initialInspectorBox = await cdp.evalJs(`
+      const panel = document.querySelector('[data-testid="workspace-inspector-panel"]');
+      const r = panel?.getBoundingClientRect();
+      return r ? { width: Math.round(r.width), mode: panel.getAttribute('data-inspector-mode') } : null;
+    `);
+    assert(
+      initialInspectorBox && initialInspectorBox.width === 356 && initialInspectorBox.mode === 'overview',
+      `Expected 356px WorkspaceInspectorPanel in overview mode at 1440px, got ${JSON.stringify(initialInspectorBox)}`
+    );
     await assertHoverZeroShift(cdp, '.bento-focus-grid .bento-tile:nth-child(1)', 'Sidebar Bento Tile');
     await assertHoverZeroShift(cdp, '.bento-mini-grid .bento-mini-card:nth-child(1)', 'Sidebar Mini Card');
     await assertHoverZeroShift(cdp, '.task-row', 'Collapsed Task Row');
-    await auditVisibleButtonsAndHoverStability(cdp, 'Today initial view');
-    console.log('[3/9] Verified 0px hover size shift across Sidebar Bento tiles, Mini cards, and Task rows');
+    await assertHoverZeroShift(cdp, '.inspector-bento-card', 'Inspector Soft Bento Card');
+    await auditVisibleButtonsAndHoverStability(cdp, 'Today initial view + Overview Inspector');
+    console.log('[3/9] Verified 0px hover size shift across Sidebar Bento tiles, Mini cards, Task rows, and 356px Overview Inspector');
 
     // Navigate all 7 Smart Views + Today Timeline + Full Screen
     const smartViewChecks = [
@@ -887,14 +898,40 @@ async function main() {
     await cdp.waitForSelector('[data-testid="task-row-milestone-pill"]');
     await assertHoverZeroShift(cdp, '.things-checkbox.milestone', 'Milestone Diamond Checkbox');
 
-    // macOS 1:1 Selection Parity E2E Check:
-    // Plain-click Task 1 -> ONLY Task 1 has .selected and .multi-select-bar is NOT shown;
-    // Plain-click Task 2 -> Task 1 deselects and ONLY Task 2 has .selected!
+    // macOS 1:1 Selection Parity + Wide-Screen Selected Task Inspector E2E Check:
+    // Before clicking a task, Inspector is in Overview mode (showing Pinned & Upcoming Deadlines/Milestones)
+    const overviewBeforeClick = await cdp.evalJs(`
+      const panel = document.querySelector('[data-testid="workspace-inspector-panel"]');
+      const hasPinned = Boolean(document.querySelector('[data-testid="inspector-overview-pinned-card"]'));
+      const hasDeadlines = Boolean(document.querySelector('[data-testid="inspector-overview-deadlines-card"]'));
+      return {
+        mode: panel?.getAttribute('data-inspector-mode') || null,
+        hasPinned,
+        hasDeadlines
+      };
+    `);
+    assert(
+      overviewBeforeClick.mode === 'overview' && overviewBeforeClick.hasPinned && overviewBeforeClick.hasDeadlines,
+      `Expected Inspector in Overview mode with Pinned & Deadlines cards before task selection, got ${JSON.stringify(overviewBeforeClick)}`
+    );
+
+    // Plain-click Task 1 -> ONLY Task 1 has .selected, .multi-select-bar is NOT shown, and Inspector switches to Mode A ("Kurzer Check")!
     await cdp.clickSelector(`.task-row[data-task-id="${seededIds.taskShortId}"] .task-row-title`);
     const selAfterFirstClick = await cdp.evalJs(`
       const selected = Array.from(document.querySelectorAll('.task-row.selected')).map((el) => el.getAttribute('data-task-id'));
       const multiBar = document.querySelector('.multi-select-bar');
-      return { selected, hasMultiBar: Boolean(multiBar) };
+      const panel = document.querySelector('[data-testid="workspace-inspector-panel"]');
+      const inspectorTitleVal = document.querySelector('[data-testid="inspector-task-title-input"]')?.value || '';
+      const hasOpenModalBtn = Boolean(document.querySelector('[data-testid="inspector-open-modal-btn"]'));
+      const hasMilestoneBtn = Boolean(document.querySelector('[data-testid="inspector-milestone-btn"]'));
+      return {
+        selected,
+        hasMultiBar: Boolean(multiBar),
+        inspectorMode: panel?.getAttribute('data-inspector-mode') || null,
+        inspectorTitleVal,
+        hasOpenModalBtn,
+        hasMilestoneBtn
+      };
     `);
     assert(
       selAfterFirstClick.selected.length === 1 && selAfterFirstClick.selected[0] === seededIds.taskShortId,
@@ -904,12 +941,28 @@ async function main() {
       !selAfterFirstClick.hasMultiBar,
       'Expected .multi-select-bar NOT to appear for a single plain-clicked task'
     );
+    assert(
+      selAfterFirstClick.inspectorMode === 'task' &&
+        selAfterFirstClick.inspectorTitleVal === 'Kurzer Check' &&
+        selAfterFirstClick.hasOpenModalBtn &&
+        selAfterFirstClick.hasMilestoneBtn,
+      `Expected Inspector to switch to Selected Task Inspector mode for "Kurzer Check", got ${JSON.stringify(selAfterFirstClick)}`
+    );
+    await auditVisibleButtonsAndHoverStability(cdp, 'Selected Task Inspector (Kurzer Check)');
 
+    // Plain-click Task 2 -> Task 1 deselects, ONLY Task 2 has .selected, and Inspector updates live to "Migrationskonzept"!
     await cdp.clickSelector(`.task-row[data-task-id="${seededIds.taskDeId}"] .task-row-title`);
     const selAfterSecondClick = await cdp.evalJs(`
       const selected = Array.from(document.querySelectorAll('.task-row.selected')).map((el) => el.getAttribute('data-task-id'));
       const multiBar = document.querySelector('.multi-select-bar');
-      return { selected, hasMultiBar: Boolean(multiBar) };
+      const panel = document.querySelector('[data-testid="workspace-inspector-panel"]');
+      const inspectorTitleVal = document.querySelector('[data-testid="inspector-task-title-input"]')?.value || '';
+      return {
+        selected,
+        hasMultiBar: Boolean(multiBar),
+        inspectorMode: panel?.getAttribute('data-inspector-mode') || null,
+        inspectorTitleVal
+      };
     `);
     assert(
       selAfterSecondClick.selected.length === 1 && selAfterSecondClick.selected[0] === seededIds.taskDeId,
@@ -919,6 +972,15 @@ async function main() {
       !selAfterSecondClick.hasMultiBar,
       'Expected .multi-select-bar NOT to appear after plain-clicking Task 2'
     );
+    assert(
+      selAfterSecondClick.inspectorMode === 'task' &&
+        selAfterSecondClick.inspectorTitleVal === 'Migrationskonzept',
+      `Expected Inspector to switch to "Migrationskonzept" on plain-click, got ${JSON.stringify(selAfterSecondClick)}`
+    );
+
+    // Deselect from Inspector header -> returns cleanly to Overview mode
+    await cdp.clickSelector('[data-testid="inspector-deselect-btn"]');
+    await cdp.waitForSelector('[data-testid="workspace-inspector-panel"][data-inspector-mode="overview"]');
 
     // Quick Find via Ctrl+K (modifiers: 2 = Ctrl)
     await cdp.pressKey('k', 'KeyK', 75, 2);

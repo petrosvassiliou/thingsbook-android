@@ -3,6 +3,7 @@ import ThingsbookCore
 
 public struct SmartViewCanvas: View {
     @ObservedObject var store: ThingsbookStore
+    public var isInspectorOpen: Bool = false
 
     @State private var newHeadingTitle = ""
     @State private var isAddingHeading = false
@@ -11,8 +12,9 @@ public struct SmartViewCanvas: View {
     @State private var showProjectLoggedItems = false
     @FocusState private var isRenameHeadingFocused: Bool
 
-    public init(store: ThingsbookStore) {
+    public init(store: ThingsbookStore, isInspectorOpen: Bool = false) {
         self.store = store
+        self.isInspectorOpen = isInspectorOpen
     }
 
     private var isWideProjectWorkspace: Bool {
@@ -84,7 +86,7 @@ public struct SmartViewCanvas: View {
             .padding(.horizontal, isAnyTimelineFullScreen ? 20 : 26)
             .padding(.top, isAnyTimelineFullScreen ? 14 : 24)
             .padding(.bottom, isAnyTimelineFullScreen ? 22 : 96)
-            .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen) ? .infinity : 960, alignment: .leading)
+            .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen || isInspectorOpen) ? .infinity : 1360, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(ThingsMacPalette.canvasBackground)

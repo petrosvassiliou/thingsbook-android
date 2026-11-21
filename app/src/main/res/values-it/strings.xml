@@ -599,4 +599,8 @@
     <string name="v30_mark_as_milestone">Segna come traguardo</string>
     <string name="v30_remove_milestone">Rimuovi traguardo</string>
     <string name="v30_external_import_target_area">Area di destinazione per l\'importazione</string>
+    <string name="v30_inspector_title">Ispettore</string>
+    <string name="v30_inspector_overview_title">Panoramica</string>
+    <string name="v30_inspector_upcoming_deadlines">Scadenze e traguardi imminenti</string>
+    <string name="v30_inspector_toggle_tooltip">Mostra/nascondi pannello Ispettore</string>
 </resources>

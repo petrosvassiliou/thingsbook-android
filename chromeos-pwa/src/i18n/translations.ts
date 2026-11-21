@@ -515,6 +515,10 @@ export interface TranslationStrings {
   milestoneLabel: string;
   markAsMilestone: string;
   removeMilestone: string;
+  inspectorTitle: string;
+  inspectorOverviewTitle: string;
+  inspectorUpcomingDeadlines: string;
+  inspectorToggleTooltip: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -1035,7 +1039,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalImportTargetArea: 'Target Area for Import',
     milestoneLabel: 'Milestone',
     markAsMilestone: 'Mark as Milestone',
-    removeMilestone: 'Remove Milestone'
+    removeMilestone: 'Remove Milestone',
+    inspectorTitle: 'Inspector',
+    inspectorOverviewTitle: 'Overview',
+    inspectorUpcomingDeadlines: 'Upcoming Deadlines & Milestones',
+    inspectorToggleTooltip: 'Toggle Inspector Panel'
   },
   de: {
     appName: 'Thingsbook',
@@ -1557,7 +1565,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalImportTargetArea: 'Ziel-Bereich für Import',
     milestoneLabel: 'Meilenstein',
     markAsMilestone: 'Als Meilenstein markieren',
-    removeMilestone: 'Meilenstein entfernen'
+    removeMilestone: 'Meilenstein entfernen',
+    inspectorTitle: 'Inspektor',
+    inspectorOverviewTitle: 'Übersicht',
+    inspectorUpcomingDeadlines: 'Anstehende Fristen & Meilensteine',
+    inspectorToggleTooltip: 'Inspektor-Seitenleiste ein-/ausblenden'
   },
   fr: {
     appName: 'Thingsbook',
@@ -2078,7 +2090,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalImportTargetArea: 'Domaine cible pour l’import',
     milestoneLabel: 'Jalon',
     markAsMilestone: 'Marquer comme jalon',
-    removeMilestone: 'Retirer le jalon'
+    removeMilestone: 'Retirer le jalon',
+    inspectorTitle: 'Inspecteur',
+    inspectorOverviewTitle: 'Aperçu',
+    inspectorUpcomingDeadlines: 'Échéances & jalons à venir',
+    inspectorToggleTooltip: 'Afficher/masquer le panneau Inspecteur'
   },
   it: {
     appName: 'Thingsbook',
@@ -2598,7 +2614,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalImportTargetArea: 'Area di destinazione per l’importazione',
     milestoneLabel: 'Traguardo',
     markAsMilestone: 'Segna come traguardo',
-    removeMilestone: 'Rimuovi traguardo'
+    removeMilestone: 'Rimuovi traguardo',
+    inspectorTitle: 'Ispettore',
+    inspectorOverviewTitle: 'Panoramica',
+    inspectorUpcomingDeadlines: 'Scadenze e traguardi imminenti',
+    inspectorToggleTooltip: 'Mostra/nascondi pannello Ispettore'
   },
   es: {
     appName: 'Thingsbook',
@@ -3119,7 +3139,11 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     externalImportTargetArea: 'Área de destino para la importación',
     milestoneLabel: 'Hito',
     markAsMilestone: 'Marcar como hito',
-    removeMilestone: 'Quitar hito'
+    removeMilestone: 'Quitar hito',
+    inspectorTitle: 'Inspector',
+    inspectorOverviewTitle: 'Resumen',
+    inspectorUpcomingDeadlines: 'Próximas fechas límite e hitos',
+    inspectorToggleTooltip: 'Mostrar/ocultar panel Inspector'
   }
 };
 

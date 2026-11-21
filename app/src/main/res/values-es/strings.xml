@@ -599,4 +599,8 @@
     <string name="v30_mark_as_milestone">Marcar como hito</string>
     <string name="v30_remove_milestone">Quitar hito</string>
     <string name="v30_external_import_target_area">Área de destino para la importación</string>
+    <string name="v30_inspector_title">Inspector</string>
+    <string name="v30_inspector_overview_title">Resumen</string>
+    <string name="v30_inspector_upcoming_deadlines">Próximas fechas límite e hitos</string>
+    <string name="v30_inspector_toggle_tooltip">Mostrar/ocultar panel Inspector</string>
 </resources>

@@ -31,6 +31,7 @@ import {
   Moon,
   MoreHorizontal,
   PanelLeftClose,
+  PanelRight,
   Pin,
   PinOff,
   Plus,
@@ -173,6 +174,7 @@ import {
   type WeeklyReviewStep
 } from './components/WeeklyReviewModal';
 import { DeadlineModal, RepeatModal, WhenModal } from './components/WhenAndRepeatModals';
+import { WorkspaceInspectorPanel } from './components/WorkspaceInspectorPanel';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -218,6 +220,18 @@ function parseSharedDraft(
   };
 }
 
+const INSPECTOR_OPEN_STORAGE_KEY = 'thingsbook_inspector_open_v1';
+
+function loadInitialInspectorOpen(): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return true;
+    const raw = window.localStorage.getItem(INSPECTOR_OPEN_STORAGE_KEY);
+    return raw === 'false' ? false : true;
+  } catch {
+    return true;
+  }
+}
+
 export const App: React.FC = () => {
   const [prefs, setPrefs] = useState<AppPreferences>(() => loadPreferences());
   const [snapshot, setSnapshot] = useState<DataSnapshot>(() => localDb.getSnapshot());
@@ -226,6 +240,23 @@ export const App: React.FC = () => {
   const [isWideScreen, setIsWideScreen] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 700 : true
   );
+  const [isInspectorViewport, setIsInspectorViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1200 : true
+  );
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(() =>
+    loadInitialInspectorOpen()
+  );
+  const toggleInspectorOpen = useCallback(() => {
+    setInspectorOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage?.setItem(INSPECTOR_OPEN_STORAGE_KEY, String(next));
+      } catch {
+        // Ignore storage write errors in restricted contexts
+      }
+      return next;
+    });
+  }, []);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const [activeNav, setActiveNav] = useState<ActiveNavigation>({
@@ -411,10 +442,11 @@ export const App: React.FC = () => {
     return () => mq.removeEventListener('change', applyTheme);
   }, [prefs.themeMode]);
 
-  // 700px Responsive Breakpoint & Live Workspace Width Listener
+  // 700px Responsive Breakpoint, 1200px Inspector Breakpoint & Live Workspace Width Listener
   useEffect(() => {
     const syncWidths = () => {
       setIsWideScreen(window.innerWidth >= 700);
+      setIsInspectorViewport(window.innerWidth >= 1200);
       const el = workspaceContainerRef.current;
       if (el && el.clientWidth > 0) {
         setWorkspaceWidthPx(el.clientWidth);
@@ -2809,6 +2841,82 @@ export const App: React.FC = () => {
   ]);
 
   const effectiveSidebarVisible = isWideScreen ? prefs.sidebarVisible : mobileDrawerOpen;
+  const isWideProjectCanvas =
+    activeNav.kind === 'project' &&
+    (activeProjectViewMode === 'board' || activeProjectViewMode === 'roadmap');
+  const canShowInspector =
+    isInspectorViewport && !isAnyTimelineFullScreen && !isWideProjectCanvas;
+  const effectiveInspectorOpen = canShowInspector && inspectorOpen;
+  const isMultiSelectBarVisible =
+    !isAnyTimelineFullScreen &&
+    selectedTaskIds.length > 0 &&
+    !expandedTaskId &&
+    (selectedTaskIds.length > 1 || isExplicitMultiSelect);
+
+  const selectedInspectorTask = useMemo(() => {
+    if (selectedTaskIds.length !== 1) return null;
+    const tk = tasksByIdMap.get(selectedTaskIds[0]);
+    return tk && !tk.isDeleted ? tk : null;
+  }, [selectedTaskIds, tasksByIdMap]);
+
+  const todayCompletedCount = useMemo(
+    () =>
+      snapshot.tasks.filter(
+        (tk) =>
+          !tk.isDeleted &&
+          tk.status === 'COMPLETED' &&
+          tk.completedAt != null &&
+          tk.completedAt >= todayStartMs &&
+          tk.completedAt <= endOfToday
+      ).length,
+    [snapshot.tasks, todayStartMs, endOfToday]
+  );
+
+  const visibleViewTasks = useMemo(
+    () => filterByTag(currentViewBaseTasks),
+    [filterByTag, currentViewBaseTasks]
+  );
+
+  const handleSelectTaskFromInspector = useCallback(
+    (tk: TaskRecord) => {
+      const inCurrentView = currentViewBaseTasks.some((x) => x.id === tk.id);
+      if (!inCurrentView) {
+        if (
+          tk.projectId &&
+          normalizeProjectViewMode(allNonDeletedProjectsMap.get(tk.projectId)?.viewMode) ===
+            'list'
+        ) {
+          setActiveNav({ kind: 'project', projectId: tk.projectId });
+        } else if (
+          (tk.whenDate != null && tk.whenDate <= endOfToday) ||
+          (tk.deadline != null && tk.deadline <= endOfToday) ||
+          tk.scheduleState === 'TODAY' ||
+          tk.scheduleState === 'THIS_EVENING'
+        ) {
+          setActiveNav({ kind: 'smart', view: 'TODAY' });
+        } else if (
+          (tk.whenDate != null && tk.whenDate > endOfToday) ||
+          (tk.deadline != null && tk.deadline > endOfToday) ||
+          tk.scheduleState === 'UPCOMING'
+        ) {
+          setActiveNav({ kind: 'smart', view: 'UPCOMING' });
+        } else if (tk.areaId) {
+          setActiveNav({ kind: 'area', areaId: tk.areaId });
+        } else if (tk.scheduleState === 'SOMEDAY') {
+          setActiveNav({ kind: 'smart', view: 'SOMEDAY' });
+        } else if (tk.scheduleState === 'ANYTIME') {
+          setActiveNav({ kind: 'smart', view: 'ANYTIME' });
+        } else {
+          setActiveNav({ kind: 'smart', view: 'INBOX' });
+        }
+        setSelectedFilterTagId(null);
+      }
+      lastSelectedAnchorIdRef.current = tk.id;
+      setIsExplicitMultiSelect(false);
+      setSelectedTaskIds([tk.id]);
+    },
+    [currentViewBaseTasks, allNonDeletedProjectsMap, endOfToday]
+  );
 
   return (
     <div
@@ -2876,7 +2984,12 @@ export const App: React.FC = () => {
       />
 
       {/* Right Workspace */}
-      <main ref={workspaceContainerRef} className="workspace">
+      <main
+        ref={workspaceContainerRef}
+        className={`workspace ${effectiveInspectorOpen ? 'inspector-split-open' : ''} ${
+          isMultiSelectBarVisible ? 'multi-bar-visible' : ''
+        }`}
+      >
         {/* TopThingsbookBar (Calm Single-Row Bar; hidden when Timeline/Roadmap Full Screen is active) */}
         {!isAnyTimelineFullScreen && (
           <header
@@ -3004,6 +3117,19 @@ export const App: React.FC = () => {
                 </button>
               )}
 
+              {canShowInspector && (
+                <button
+                  type="button"
+                  className={`icon-btn ${inspectorOpen ? 'active' : ''}`}
+                  data-testid="topbar-inspector-toggle"
+                  title={t.inspectorToggleTooltip}
+                  aria-label={t.inspectorToggleTooltip}
+                  onClick={toggleInspectorOpen}
+                >
+                  <PanelRight size={17.5} />
+                </button>
+              )}
+
               {/* Pinned Far-Right Settings Icon */}
               <button
                 type="button"
@@ -3068,7 +3194,8 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* Main Scrollable View Content */}
+        {/* Main Scrollable View Content + Wide-Screen Soft Bento Inspector Split */}
+        <div className="workspace-body-split">
         <div
           ref={workspaceScrollRef}
           className={`workspace-scroll ${
@@ -3082,11 +3209,10 @@ export const App: React.FC = () => {
         >
           <div
             className={`workspace-container ${
-              activeNav.kind === 'project' &&
-              (activeProjectViewMode === 'board' || activeProjectViewMode === 'roadmap')
-                ? 'wide-project-canvas'
-                : ''
-            } ${isAnyTimelineFullScreen ? 'timeline-fullscreen-container' : ''}`}
+              isWideProjectCanvas ? 'wide-project-canvas' : ''
+            } ${effectiveInspectorOpen ? 'inspector-open' : ''} ${
+              isAnyTimelineFullScreen ? 'timeline-fullscreen-container' : ''
+            }`}
           >
             {/* Welcome Setup Banner (only when sample tasks exist & not dismissed & not signed in) */}
             {!isAnyTimelineFullScreen &&
@@ -5227,6 +5353,40 @@ export const App: React.FC = () => {
               );
             })()}
           </div>
+        </div>
+
+        {effectiveInspectorOpen && (
+          <WorkspaceInspectorPanel
+            selectedTask={selectedInspectorTask}
+            todayTasks={[...todayDaytimeTasks, ...todayEveningTasks]}
+            todayCompletedCount={todayCompletedCount}
+            todayCalendarEvents={activeTodayCalendarEvents}
+            todayStartMs={todayStartMs}
+            endOfTodayMs={endOfToday}
+            allOpenTasks={openInActiveProj}
+            visibleViewTasks={visibleViewTasks}
+            checklistItems={snapshot.checklistItems}
+            areasMap={areasMap}
+            projectsMap={allNonDeletedProjectsMap}
+            tagsMap={tagsMap}
+            lang={lang}
+            t={t}
+            onSelectTaskFromInspector={handleSelectTaskFromInspector}
+            onOpenTaskEditor={(taskId) => {
+              setSelectedTaskIds([]);
+              setExpandedTaskId(taskId);
+            }}
+            onClearSelection={() => setSelectedTaskIds([])}
+            onCollapsePanel={toggleInspectorOpen}
+            onOpenWhenModal={(taskId) => setWhenModalTaskId(taskId)}
+            onOpenDeadlineModal={(taskId) =>
+              setDeadlineModalTarget({ kind: 'task', taskId })
+            }
+            onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
+            onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+            onStartFocusTimer={handleStartFocusTimer}
+          />
+        )}
         </div>
 
         {/* Floating Multi-Selection Bar (ThingsMultiSelectionBar; hidden in Timeline/Roadmap Full Screen) */}

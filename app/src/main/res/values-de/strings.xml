@@ -599,4 +599,8 @@
     <string name="v30_mark_as_milestone">Als Meilenstein markieren</string>
     <string name="v30_remove_milestone">Meilenstein entfernen</string>
     <string name="v30_external_import_target_area">Ziel-Bereich für Import</string>
+    <string name="v30_inspector_title">Inspektor</string>
+    <string name="v30_inspector_overview_title">Übersicht</string>
+    <string name="v30_inspector_upcoming_deadlines">Anstehende Fristen &amp; Meilensteine</string>
+    <string name="v30_inspector_toggle_tooltip">Inspektor-Seitenleiste ein-/ausblenden</string>
 </resources>

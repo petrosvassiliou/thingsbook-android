@@ -112,4 +112,31 @@ class V3Beta7LayoutPolishTest {
         val bentoHover = Regex("""\.bento-tile:hover\s*\{([^}]*)\}""").find(chromeCss)?.groupValues?.get(1).orEmpty()
         assertTrue(bentoHover.contains("border-color: rgba(56, 152, 236, 0.36);"))
     }
+
+    @Test
+    fun `v3_0_0_beta_11 task modal uses balanced 3_plus_3 Soft Bento layout, content_hugging height, slim empty attachments, and single_row footer across platforms`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
+
+        // 1. macOS: ViewThatFits(in: .vertical) content-hugging height, 3 right-column cards, no duplicate header breadcrumb or footer attach button
+        val macModalSwift = File(repoRoot, "macos/Sources/ThingsbookMac/Views/TaskBentoModalView.swift").readText()
+        assertTrue(macModalSwift.contains("ViewThatFits(in: .vertical)"))
+        assertTrue(macModalSwift.contains("scheduleBentoCard"))
+        assertTrue(macModalSwift.contains("focusAndDependenciesBentoCard"))
+        assertTrue(macModalSwift.contains("organizationBentoCard"))
+        assertFalse(macModalSwift.contains("isHeaderMovePopoverOpen = true"))
+        val footerChunk = macModalSwift.substringAfter("private var modalFooterBar: some View")
+        assertFalse("Footer must not duplicate action_attach_file", footerChunk.contains("action_attach_file"))
+
+        // 2. ChromeOS PWA: 3 .task-bento-prop-tile cards + .attachments-empty slim 1-row bar
+        val chromeTaskItem = File(repoRoot, "chromeos-pwa/src/components/TaskItem.tsx").readText()
+        val propTileCount = Regex("""className="task-bento-prop-tile"""").findAll(chromeTaskItem).count()
+        assertTrue("ChromeOS TaskItem must render 3 balanced property cards", propTileCount == 3)
+
+        // 3. Android: 3 consolidated SoftBentoPropertyGroup sections in ExpandableTaskCard
+        val androidCard = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
+        val groupCalls = Regex("""SoftBentoPropertyGroup\(""").findAll(androidCard).count()
+        // 1 declaration + 3 invocations = 4 occurrences
+        assertTrue("ExpandableTaskCard must consolidate properties into 3 SoftBentoPropertyGroup sections", groupCalls == 4)
+    }
 }

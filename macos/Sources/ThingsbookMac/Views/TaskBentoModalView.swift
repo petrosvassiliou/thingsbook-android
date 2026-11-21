@@ -19,7 +19,6 @@ public struct TaskBentoModalView: View {
     @State private var dictationTargetsTitle: Bool = false
     @State private var dictationBaseNotes: String = ""
 
-    @State private var isHeaderMovePopoverOpen = false
     @State private var isWhenPopoverOpen = false
     @State private var isTimeblockPopoverOpen = false
     @State private var isDeadlinePopoverOpen = false
@@ -46,19 +45,27 @@ public struct TaskBentoModalView: View {
     }
 
     private var resolvedMaxModalHeight: CGFloat {
-        max(320, min(620, (availableHeight ?? 660) - 36))
+        max(340, min(640, (availableHeight ?? 680) - 36))
     }
 
-    private var resolvedMinModalHeight: CGFloat {
-        min(420, resolvedMaxModalHeight)
-    }
-
-    private var resolvedIdealModalHeight: CGFloat {
-        min(560, resolvedMaxModalHeight)
+    private var resolvedMaxBodyHeight: CGFloat {
+        max(210, resolvedMaxModalHeight - 114)
     }
 
     private var latestTask: TaskItem {
         store.task(byId: task.id) ?? task
+    }
+
+    private var modalBodyContent: some View {
+        HStack(alignment: .top, spacing: 14) {
+            leftPrimaryContentColumn
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            rightPropertiesColumn
+                .frame(width: 274, alignment: .topLeading)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 15)
     }
 
     public var body: some View {
@@ -69,17 +76,13 @@ public struct TaskBentoModalView: View {
             Divider()
                 .opacity(0.65)
 
-            ScrollView(.vertical, showsIndicators: true) {
-                HStack(alignment: .top, spacing: 14) {
-                    leftPrimaryContentColumn
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-
-                    rightPropertiesColumn
-                        .frame(width: 265, alignment: .topLeading)
+            ViewThatFits(in: .vertical) {
+                modalBodyContent
+                ScrollView(.vertical, showsIndicators: true) {
+                    modalBodyContent
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
             }
+            .frame(maxHeight: resolvedMaxBodyHeight)
 
             Divider()
                 .opacity(0.65)
@@ -87,12 +90,8 @@ public struct TaskBentoModalView: View {
             modalFooterBar
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(width: 740)
-        .frame(
-            minHeight: resolvedMinModalHeight,
-            idealHeight: resolvedIdealModalHeight,
-            maxHeight: resolvedMaxModalHeight
-        )
+        .frame(width: 724)
+        .frame(maxHeight: resolvedMaxModalHeight)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(ThingsMacPalette.cardSurface)
@@ -169,58 +168,12 @@ public struct TaskBentoModalView: View {
                 .foregroundStyle(current.status == .open ? .primary : .secondary)
                 .strikethrough(current.status == .canceled, color: .secondary)
                 .focused($isTitleFocused)
-                .layoutPriority(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .onSubmit {
                     closeModal()
                 }
 
             Spacer(minLength: 8)
-
-            // Clickable Context Breadcrumb Pill (Area › Project / Project / Area / Inbox)
-            Button {
-                commitDraftEditsIfNeeded()
-                isHeaderMovePopoverOpen = true
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: headerContextIcon(for: current))
-                        .font(.system(size: 10.5, weight: .semibold))
-                    Text(headerContextTitle(for: current))
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .foregroundStyle(
-                    (current.projectId != nil || current.areaId != nil)
-                        ? ThingsMacPalette.accentBlue
-                        : Color.secondary
-                )
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .frame(maxWidth: 200)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(
-                            (current.projectId != nil || current.areaId != nil)
-                                ? ThingsMacPalette.accentBlue.opacity(0.11)
-                                : ThingsMacPalette.subtleContainer
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .strokeBorder(
-                                    (current.projectId != nil || current.areaId != nil)
-                                        ? ThingsMacPalette.accentBlue.opacity(0.26)
-                                        : Color.primary.opacity(0.09),
-                                    lineWidth: 0.8
-                                )
-                        )
-                )
-                .contentShape(Capsule(style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .thingsTooltip(moveButtonTooltip)
-            .popover(isPresented: $isHeaderMovePopoverOpen) {
-                movePopoverContent
-            }
 
             // Pin Button
             Button {
@@ -552,27 +505,33 @@ public struct TaskBentoModalView: View {
     private var attachmentsBentoTile: some View {
         let current = latestTask
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return Group {
             if !current.attachments.isEmpty {
-                AttachmentsStripView(store: store, attachments: current.attachments) {
-                    commitDraftEditsIfNeeded()
-                    store.pickAndAttachFiles(taskId: current.id)
-                }
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(store.tr("attachments_section_title"))
-                        .font(.system(size: 11.5, weight: .bold))
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Button {
+                VStack(alignment: .leading, spacing: 8) {
+                    AttachmentsStripView(store: store, attachments: current.attachments) {
                         commitDraftEditsIfNeeded()
                         store.pickAndAttachFiles(taskId: current.id)
-                    } label: {
+                    }
+                }
+                .padding(12)
+                .background(softBentoTileBackground())
+            } else {
+                Button {
+                    commitDraftEditsIfNeeded()
+                    store.pickAndAttachFiles(taskId: current.id)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isFileDropTargeted ? "arrow.down.doc.fill" : "paperclip")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
+
+                        Text(store.tr("attachments_section_title"))
+                            .font(.system(size: 11.5, weight: .bold))
+                            .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
+                            .fixedSize(horizontal: true, vertical: false)
+
+                        Spacer(minLength: 8)
+
                         HStack(spacing: 3.5) {
                             Image(systemName: "plus")
                                 .font(.system(size: 10, weight: .bold))
@@ -582,59 +541,55 @@ public struct TaskBentoModalView: View {
                         }
                         .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(ThingsMacPalette.accentBlue)
-                    }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr("action_attach_file"))
-                }
-
-                HStack(spacing: 6) {
-                    Image(systemName: isFileDropTargeted ? "arrow.down.doc.fill" : "photo.on.rectangle.angled")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
-                    Text(store.tr("macos_attachment_drop_hint"))
-                        .font(.system(size: 11.5, weight: isFileDropTargeted ? .semibold : .regular))
-                        .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(isFileDropTargeted ? ThingsMacPalette.accentBlue.opacity(0.07) : ThingsMacPalette.cardSurface.opacity(0.75))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(
-                                    isFileDropTargeted ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.08),
-                                    style: StrokeStyle(lineWidth: isFileDropTargeted ? 1.4 : 0.8, dash: [5, 4])
-                                )
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(ThingsMacPalette.accentBlue.opacity(0.11))
                         )
-                )
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(isFileDropTargeted ? ThingsMacPalette.accentBlue.opacity(0.08) : ThingsMacPalette.subtleContainer)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                    .strokeBorder(
+                                        isFileDropTargeted ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.065),
+                                        lineWidth: isFileDropTargeted ? 1.3 : 0.85
+                                    )
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_attachment_drop_hint"))
             }
         }
-        .padding(12)
-        .background(softBentoTileBackground())
     }
 
-    // MARK: - Zone B2: Right Properties & Scheduling Column (~265 pt)
+    // MARK: - Zone B2: Right Properties Column (3 Balanced Soft Bento Cards, ~274 pt)
 
     private var rightPropertiesColumn: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            whenAndTimeblockTile
-            deadlineAndRepeatTile
-            effortAndDurationTile
-            dependenciesTile
-            categoriesTile
-            projectAndAreaTile
+        VStack(alignment: .leading, spacing: 11) {
+            scheduleBentoCard
+            focusAndDependenciesBentoCard
+            organizationBentoCard
         }
     }
 
-    private var whenAndTimeblockTile: some View {
+    private var scheduleBentoCard: some View {
         let current = latestTask
         let whenLabel = whenSummaryLabel(for: current)
+        let dlInfo = current.deadline.map { deadlineSummaryInfo(for: $0) }
 
         return VStack(alignment: .leading, spacing: 8) {
-            bentoSectionHeader(icon: "calendar", title: store.tr("action_when"))
+            bentoSectionHeader(
+                icon: "calendar",
+                title: "\(store.tr("action_when")) · \(store.tr("action_deadline"))"
+            )
 
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 ThingsActionChipButton(
@@ -716,21 +671,7 @@ public struct TaskBentoModalView: View {
                         store.updateTask(copy)
                     }
                 }
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(softBentoTileBackground())
-    }
 
-    private var deadlineAndRepeatTile: some View {
-        let current = latestTask
-        let dlInfo = current.deadline.map { deadlineSummaryInfo(for: $0) }
-
-        return VStack(alignment: .leading, spacing: 8) {
-            bentoSectionHeader(icon: "flag", title: "\(store.tr("action_deadline")) · \(store.tr("action_repeat"))")
-
-            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 ThingsActionChipButton(
                     title: dlInfo?.label ?? store.tr("action_deadline"),
                     systemImage: "flag",
@@ -780,13 +721,19 @@ public struct TaskBentoModalView: View {
         .background(softBentoTileBackground())
     }
 
-    private var effortAndDurationTile: some View {
+    private var focusAndDependenciesBentoCard: some View {
         let current = latestTask
         let currentEffort = current.resolvedEffort
         let currentDuration = (current.durationMinutes ?? 0) > 0 ? current.durationMinutes : nil
+        let effortColor = currentEffort.map { effortTint(for: $0) } ?? ThingsMacPalette.accentBlue
+        let blockedLabel = store.blockedByBadgeText(for: current)
+        let isBlockedActive = blockedLabel != nil || !current.blockedByTaskIds.isEmpty
 
         return VStack(alignment: .leading, spacing: 8) {
-            bentoSectionHeader(icon: "bolt", title: "\(store.tr("v30_effort_label")) · \(store.tr("v30_duration_label"))")
+            bentoSectionHeader(
+                icon: "bolt",
+                title: "\(store.tr("v30_effort_label")) · \(store.tr("v30_duration_label"))"
+            )
 
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 Menu {
@@ -810,16 +757,31 @@ public struct TaskBentoModalView: View {
                         }
                     }
                 } label: {
-                    bentoMenuChipLabel(
-                        title: currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"),
-                        systemImage: currentEffort?.sfSymbol ?? "bolt",
-                        isActive: currentEffort != nil,
-                        activeTint: currentEffort.map { effortTint(for: $0) } ?? ThingsMacPalette.accentBlue
-                    )
+                    HStack(spacing: 5.5) {
+                        Image(systemName: currentEffort?.sfSymbol ?? "bolt")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text(currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"))
+                            .font(.system(size: 12, weight: currentEffort != nil ? .semibold : .medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(currentEffort != nil ? effortColor : Color.primary.opacity(0.88))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(currentEffort != nil ? effortColor.opacity(0.11) : ThingsMacPalette.cardSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .strokeBorder(
+                                    currentEffort != nil ? effortColor.opacity(0.32) : Color.primary.opacity(0.11),
+                                    lineWidth: 0.85
+                                )
+                        )
+                )
                 .thingsTooltip(
                     currentEffort.map { "\(store.tr("v30_effort_label")): \(effortLocalizedTitle(for: $0))" }
                         ?? store.tr("v30_effort_label")
@@ -847,100 +809,48 @@ public struct TaskBentoModalView: View {
                         }
                     }
                 } label: {
-                    bentoMenuChipLabel(
-                        title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
-                        systemImage: "timer",
-                        isActive: currentDuration != nil,
-                        activeTint: ThingsMacPalette.anytimeTeal
-                    )
+                    HStack(spacing: 5.5) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text(currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"))
+                            .font(.system(size: 12, weight: currentDuration != nil ? .semibold : .medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(currentDuration != nil ? ThingsMacPalette.anytimeTeal : Color.primary.opacity(0.88))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(currentDuration != nil ? ThingsMacPalette.anytimeTeal.opacity(0.11) : ThingsMacPalette.cardSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .strokeBorder(
+                                    currentDuration != nil ? ThingsMacPalette.anytimeTeal.opacity(0.32) : Color.primary.opacity(0.11),
+                                    lineWidth: 0.85
+                                )
+                        )
+                )
                 .thingsTooltip(
                     currentDuration.map { "\(store.tr("v30_duration_label")): \(TaskItem.formatCompactDuration($0))" }
                         ?? store.tr("v30_duration_label")
                 )
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(softBentoTileBackground())
-    }
 
-    private var dependenciesTile: some View {
-        let current = latestTask
-        let blockedLabel = store.blockedByBadgeText(for: current)
-        let isBlockedActive = blockedLabel != nil || !current.blockedByTaskIds.isEmpty
-
-        return VStack(alignment: .leading, spacing: 8) {
-            bentoSectionHeader(icon: "hourglass", title: store.tr("v30_blocked_by_label"))
-
-            bentoWrappingChipButton(
-                title: blockedLabel ?? store.tr("v30_blocked_by_label"),
-                systemImage: "hourglass",
-                isActive: isBlockedActive,
-                activeTint: ThingsMacPalette.somedayAmber,
-                helpText: blockedLabel ?? store.tr("v30_blocked_by_label")
-            ) {
-                commitDraftEditsIfNeeded()
-                isDependenciesPopoverOpen = true
-            }
-            .popover(isPresented: $isDependenciesPopoverOpen) {
-                DependenciesPopoverView(store: store, task: current)
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(softBentoTileBackground())
-    }
-
-    private var categoriesTile: some View {
-        let current = latestTask
-
-        return VStack(alignment: .leading, spacing: 8) {
-            bentoSectionHeader(icon: "square.grid.2x2", title: store.tr("action_tags"))
-
-            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                ForEach(current.tags) { tag in
-                    TagPillBadge(
-                        title: tag.title,
-                        isSelected: true,
-                        showIcon: true,
-                        helpText: "#\(tag.title)"
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        isTagPopoverOpen = true
-                    }
-                }
-
-                ThingsActionChipButton(
-                    title: "+ \(store.tr("action_tags"))",
-                    systemImage: "square.grid.2x2",
-                    isActive: false,
-                    helpText: tagsButtonTooltip(for: current)
+                bentoWrappingChipButton(
+                    title: blockedLabel ?? store.tr("v30_blocked_by_label"),
+                    systemImage: "hourglass",
+                    isActive: isBlockedActive,
+                    activeTint: ThingsMacPalette.somedayAmber,
+                    helpText: blockedLabel ?? store.tr("v30_blocked_by_label")
                 ) {
                     commitDraftEditsIfNeeded()
-                    isTagPopoverOpen = true
+                    isDependenciesPopoverOpen = true
                 }
-                .popover(isPresented: $isTagPopoverOpen) {
-                    TagPickerPopoverView(
-                        store: store,
-                        selectedTagIds: Set(current.tagIds),
-                        onToggleTag: { tagId in
-                            let base = latestTask
-                            var tids = Set(base.tagIds)
-                            if tids.contains(tagId) {
-                                tids.remove(tagId)
-                            } else {
-                                tids.insert(tagId)
-                            }
-                            var copy = base
-                            copy.title = draftTitle
-                            copy.notes = draftNotes
-                            store.updateTask(copy, tagIds: Array(tids))
-                        }
-                    )
+                .popover(isPresented: $isDependenciesPopoverOpen) {
+                    DependenciesPopoverView(store: store, task: current)
                 }
             }
         }
@@ -949,7 +859,7 @@ public struct TaskBentoModalView: View {
         .background(softBentoTileBackground())
     }
 
-    private var projectAndAreaTile: some View {
+    private var organizationBentoCard: some View {
         let current = latestTask
         let breadcrumb = contextBreadcrumb(for: current)
         let projectHeadings: [Heading] = {
@@ -966,10 +876,10 @@ public struct TaskBentoModalView: View {
         return VStack(alignment: .leading, spacing: 8) {
             bentoSectionHeader(
                 icon: "folder",
-                title: "\(store.tr("entity_project")) / \(store.tr("entity_area"))"
+                title: "\(store.tr("entity_project")) / \(store.tr("entity_area")) · \(store.tr("action_tags"))"
             )
 
-            VStack(alignment: .leading, spacing: 6) {
+            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 bentoWrappingChipButton(
                     title: breadcrumb ?? store.tr("action_move"),
                     systemImage: "folder",
@@ -1018,33 +928,73 @@ public struct TaskBentoModalView: View {
                             }
                         }
                     } label: {
-                        HStack(alignment: .top, spacing: 5.5) {
+                        HStack(spacing: 5.5) {
                             Image(systemName: "flag.checkered")
                                 .font(.system(size: 11.5, weight: .semibold))
-                                .padding(.top, 1)
                             Text(activeHeading?.title ?? store.tr("entity_heading"))
                                 .font(.system(size: 12, weight: activeHeading != nil ? .semibold : .medium))
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .lineLimit(1)
                         }
                         .foregroundStyle(activeHeading != nil ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.88))
-                        .padding(.horizontal, 10.5)
-                        .padding(.vertical, 5.5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                                .fill(activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.11) : ThingsMacPalette.cardSurface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                                        .strokeBorder(
-                                            activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.11),
-                                            lineWidth: 0.85
-                                        )
-                                )
-                        )
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
+                    .fixedSize()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.11) : ThingsMacPalette.cardSurface)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                    .strokeBorder(
+                                        activeHeading != nil ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.11),
+                                        lineWidth: 0.85
+                                    )
+                            )
+                    )
                     .thingsTooltip(store.tr("entity_heading"))
+                }
+
+                ForEach(current.tags) { tag in
+                    TagPillBadge(
+                        title: tag.title,
+                        isSelected: true,
+                        showIcon: true,
+                        helpText: "#\(tag.title)"
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        isTagPopoverOpen = true
+                    }
+                }
+
+                ThingsActionChipButton(
+                    title: "+ \(store.tr("action_tags"))",
+                    systemImage: "square.grid.2x2",
+                    isActive: false,
+                    helpText: tagsButtonTooltip(for: current)
+                ) {
+                    commitDraftEditsIfNeeded()
+                    isTagPopoverOpen = true
+                }
+                .popover(isPresented: $isTagPopoverOpen) {
+                    TagPickerPopoverView(
+                        store: store,
+                        selectedTagIds: Set(current.tagIds),
+                        onToggleTag: { tagId in
+                            let base = latestTask
+                            var tids = Set(base.tagIds)
+                            if tids.contains(tagId) {
+                                tids.remove(tagId)
+                            } else {
+                                tids.insert(tagId)
+                            }
+                            var copy = base
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            store.updateTask(copy, tagIds: Array(tids))
+                        }
+                    )
                 }
             }
         }
@@ -1068,7 +1018,7 @@ public struct TaskBentoModalView: View {
         }
     }
 
-    // MARK: - Zone C: Bottom Footer Bar
+    // MARK: - Zone C: Single-Row Bottom Footer Bar
 
     private var modalFooterBar: some View {
         let current = latestTask
@@ -1084,15 +1034,6 @@ public struct TaskBentoModalView: View {
                         commitDraftEditsIfNeeded(commitPendingChecklist: true)
                         store.startFocusTimer(for: latestTask)
                     }
-                }
-
-                ThingsActionChipButton(
-                    title: store.tr("action_attach_file"),
-                    systemImage: "paperclip",
-                    helpText: store.tr("action_attach_file")
-                ) {
-                    commitDraftEditsIfNeeded()
-                    store.pickAndAttachFiles(taskId: current.id)
                 }
 
                 ThingsActionChipButton(
@@ -1213,36 +1154,6 @@ public struct TaskBentoModalView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-    }
-
-    private func bentoMenuChipLabel(
-        title: String,
-        systemImage: String,
-        isActive: Bool,
-        activeTint: Color
-    ) -> some View {
-        HStack(spacing: 5.5) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11.5, weight: .semibold))
-            Text(title)
-                .font(.system(size: 12, weight: isActive ? .semibold : .medium))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-        .foregroundStyle(isActive ? activeTint : Color.primary.opacity(0.88))
-        .padding(.horizontal, 10.5)
-        .padding(.vertical, 5.5)
-        .background(
-            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                .fill(isActive ? activeTint.opacity(0.11) : ThingsMacPalette.cardSurface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .strokeBorder(
-                            isActive ? activeTint.opacity(0.32) : Color.primary.opacity(0.11),
-                            lineWidth: 0.85
-                        )
-                )
-        )
     }
 
     private func bentoWrappingChipButton(
@@ -1457,20 +1368,6 @@ public struct TaskBentoModalView: View {
             return area.title
         }
         return nil
-    }
-
-    private func headerContextTitle(for target: TaskItem) -> String {
-        contextBreadcrumb(for: target) ?? store.tr("view_inbox")
-    }
-
-    private func headerContextIcon(for target: TaskItem) -> String {
-        if target.projectId != nil {
-            return "circle.inset.filled"
-        }
-        if target.areaId != nil {
-            return "folder.fill"
-        }
-        return "tray.fill"
     }
 
     private func whenSummaryLabel(for target: TaskItem) -> String? {

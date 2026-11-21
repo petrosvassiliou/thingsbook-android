@@ -5604,7 +5604,7 @@ button.v2-stalled-pill:hover {
 .task-bento-card .task-card-notes {
   margin: 0;
   width: 100%;
-  min-height: 76px;
+  min-height: 92px;
   padding: 6px 8px;
   border-radius: var(--radius-xs);
   background: var(--bg-card);
@@ -5617,6 +5617,18 @@ button.v2-stalled-pill:hover {
 
 .task-bento-card .attachments-strip-container {
   margin: 0 !important;
+}
+
+.task-bento-card.attachments-empty {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  gap: 10px;
+}
+
+.task-bento-inline-sub {
+  display: contents;
 }
 
 .task-bento-prop-tile {

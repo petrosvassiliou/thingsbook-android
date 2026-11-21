@@ -1158,8 +1158,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 </div>
               </section>
 
-              {/* 3. Attachments Soft Bento Card */}
-              <section className="task-bento-card" data-testid="task-bento-attachments-card">
+              {/* 3. Attachments Soft Bento Card (slim single row when empty, full thumbnail strip when populated) */}
+              <section
+                className={`task-bento-card ${
+                  taskAttachments.length === 0 ? 'attachments-empty' : ''
+                }`}
+                data-testid="task-bento-attachments-card"
+              >
                 <div className="task-bento-card-header">
                   <Paperclip size={12.5} />
                   <span>
@@ -1194,11 +1199,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               </section>
             </div>
 
-            {/* Right Properties Column: 6 Soft Bento Property Tiles with Non-Truncating Pills */}
+            {/* Right Properties Column: 3 Balanced Soft Bento Property Cards (Schedule, Focus & Dependencies, Organization) */}
             <div className="task-bento-props-col">
-              {/* 1. When & Timeblock Tile */}
+              {/* 1. Schedule Card: When, Timeblock, Deadline & Repeat */}
               <div className="task-bento-prop-tile" data-testid="task-bento-tile-when">
-                <span className="task-bento-prop-label">{t.actionWhen}</span>
+                <span className="task-bento-prop-label">
+                  {t.actionWhen} · {t.actionDeadline}
+                </span>
                 <div className="task-bento-prop-pills">
                   <button
                     type="button"
@@ -1299,6 +1306,49 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                       {timeblockRangeLabel ? `🕐 ${timeblockRangeLabel}` : `⏱️ ${t.actionTimeblock}`}
                     </span>
                   </button>
+
+                  <span className="task-bento-inline-sub" data-testid="task-bento-tile-deadline-repeat">
+                    <button
+                      type="button"
+                      data-testid="task-deadline-chip"
+                      className={`chip-btn ${
+                        dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
+                      }`}
+                      title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
+                      onClick={() => {
+                        flushDraftsIfNeeded();
+                        onOpenDeadlineModal(task.id);
+                      }}
+                    >
+                      <Flag
+                        size={12}
+                        style={
+                          dlMeta == null
+                            ? { color: 'var(--deadline-red)', opacity: 0.85 }
+                            : undefined
+                        }
+                      />
+                      <span>{dlMeta ? dlMeta.label : t.actionDeadline}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="task-repeat-chip"
+                      className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
+                      title={t.actionRepeat}
+                      onClick={() => {
+                        flushDraftsIfNeeded();
+                        onOpenRepeatModal(task.id);
+                      }}
+                    >
+                      <Repeat size={12} />
+                      <span>
+                        {task.recurrenceRule != null
+                          ? formatRecurrenceShort(task.recurrenceRule, lang)
+                          : t.actionRepeat}
+                      </span>
+                    </button>
+                  </span>
                 </div>
 
                 {timeblockOpen && (
@@ -1393,56 +1443,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 )}
               </div>
 
-              {/* 2. Deadline & Repeat Tile */}
-              <div className="task-bento-prop-tile" data-testid="task-bento-tile-deadline-repeat">
-                <span className="task-bento-prop-label">
-                  {t.actionDeadline} · {t.actionRepeat}
-                </span>
-                <div className="task-bento-prop-pills">
-                  <button
-                    type="button"
-                    data-testid="task-deadline-chip"
-                    className={`chip-btn ${
-                      dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
-                    }`}
-                    title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
-                    onClick={() => {
-                      flushDraftsIfNeeded();
-                      onOpenDeadlineModal(task.id);
-                    }}
-                  >
-                    <Flag
-                      size={12}
-                      style={
-                        dlMeta == null
-                          ? { color: 'var(--deadline-red)', opacity: 0.85 }
-                          : undefined
-                      }
-                    />
-                    <span>{dlMeta ? dlMeta.label : t.actionDeadline}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    data-testid="task-repeat-chip"
-                    className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
-                    title={t.actionRepeat}
-                    onClick={() => {
-                      flushDraftsIfNeeded();
-                      onOpenRepeatModal(task.id);
-                    }}
-                  >
-                    <Repeat size={12} />
-                    <span>
-                      {task.recurrenceRule != null
-                        ? formatRecurrenceShort(task.recurrenceRule, lang)
-                        : t.actionRepeat}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. Duration & Effort Tile */}
+              {/* 2. Focus & Dependencies Card: Duration, Effort & Waiting On */}
               <div className="task-bento-prop-tile" data-testid="task-bento-tile-duration-effort">
                 <span className="task-bento-prop-label">
                   {t.durationLabel} · {t.effortLabel}
@@ -1473,6 +1474,32 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                             : `${t.durationLabel} · ${t.effortLabel}`}
                     </span>
                   </button>
+
+                  {onOpenDependenciesModal && (
+                    <span className="task-bento-inline-sub" data-testid="task-bento-tile-waiting-on">
+                      <button
+                        type="button"
+                        data-testid="task-waiting-on-chip"
+                        className={`chip-btn ${
+                          isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
+                        }`}
+                        title={t.waitingOnLabel}
+                        onClick={() => {
+                          flushDraftsIfNeeded();
+                          onOpenDependenciesModal(task.id);
+                        }}
+                      >
+                        <Link2 size={12} />
+                        <span>
+                          {blockedSummaryLabel
+                            ? blockedSummaryLabel
+                            : totalBlockerCount > 0
+                              ? `${t.dependencyModalTitle} (${totalBlockerCount})`
+                              : t.waitingOnLabel}
+                        </span>
+                      </button>
+                    </span>
+                  )}
                 </div>
 
                 {effortDurationOpen && (
@@ -1552,76 +1579,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 )}
               </div>
 
-              {/* 4. Waiting On Tile */}
-              {onOpenDependenciesModal && (
-                <div className="task-bento-prop-tile" data-testid="task-bento-tile-waiting-on">
-                  <span className="task-bento-prop-label">{t.waitingOnLabel}</span>
-                  <div className="task-bento-prop-pills">
-                    <button
-                      type="button"
-                      data-testid="task-waiting-on-chip"
-                      className={`chip-btn ${
-                        isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
-                      }`}
-                      title={t.waitingOnLabel}
-                      onClick={() => {
-                        flushDraftsIfNeeded();
-                        onOpenDependenciesModal(task.id);
-                      }}
-                    >
-                      <Link2 size={12} />
-                      <span>
-                        {blockedSummaryLabel
-                          ? blockedSummaryLabel
-                          : totalBlockerCount > 0
-                            ? `${t.dependencyModalTitle} (${totalBlockerCount})`
-                            : t.waitingOnLabel}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* 5. Categories Tile */}
-              <div className="task-bento-prop-tile" data-testid="task-bento-tile-categories">
-                <span className="task-bento-prop-label">{t.entityTags}</span>
-                <div className="task-bento-prop-pills">
-                  {taskTags.map((tg) => (
-                    <button
-                      key={tg.id}
-                      type="button"
-                      className="chip-btn active"
-                      title={`${t.entityTag}: ${tg.title}`}
-                      onClick={() => {
-                        flushDraftsIfNeeded();
-                        onOpenTagsModal(task.id);
-                      }}
-                    >
-                      <LayoutGrid size={11.5} />
-                      <span>{tg.title}</span>
-                    </button>
-                  ))}
-
-                  <button
-                    type="button"
-                    data-testid="task-tags-chip"
-                    className="chip-btn"
-                    title={t.ctxAssignTags}
-                    onClick={() => {
-                      flushDraftsIfNeeded();
-                      onOpenTagsModal(task.id);
-                    }}
-                  >
-                    <Plus size={11.5} />
-                    <span>{t.actionTags}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* 6. Project / Area Tile */}
+              {/* 3. Organization Card: Project / Area & Categories */}
               <div className="task-bento-prop-tile" data-testid="task-bento-tile-container">
                 <span className="task-bento-prop-label">
-                  {t.entityProject} / {t.entityArea}
+                  {t.entityProject} / {t.entityArea} · {t.entityTags}
                 </span>
                 <div className="task-bento-prop-pills">
                   <button
@@ -1637,6 +1598,38 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     <FolderInput size={12} />
                     <span>{containerLabel || t.actionMove}</span>
                   </button>
+
+                  <span className="task-bento-inline-sub" data-testid="task-bento-tile-categories">
+                    {taskTags.map((tg) => (
+                      <button
+                        key={tg.id}
+                        type="button"
+                        className="chip-btn active"
+                        title={`${t.entityTag}: ${tg.title}`}
+                        onClick={() => {
+                          flushDraftsIfNeeded();
+                          onOpenTagsModal(task.id);
+                        }}
+                      >
+                        <LayoutGrid size={11.5} />
+                        <span>{tg.title}</span>
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      data-testid="task-tags-chip"
+                      className="chip-btn"
+                      title={t.ctxAssignTags}
+                      onClick={() => {
+                        flushDraftsIfNeeded();
+                        onOpenTagsModal(task.id);
+                      }}
+                    >
+                      <Plus size={11.5} />
+                      <span>{t.actionTags}</span>
+                    </button>
+                  </span>
                 </div>
               </div>
             </div>

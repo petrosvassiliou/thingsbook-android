@@ -2329,8 +2329,10 @@ private fun ExpandedTaskCardBody(
                     .padding(horizontal = 14.dp, vertical = 13.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 1. When + Today This Evening + Reminder + Timeblock
-                SoftBentoPropertyGroup(label = stringResource(R.string.action_when)) {
+                // 1. Schedule: When + Today This Evening + Reminder + Timeblock + Deadline + Repeat
+                SoftBentoPropertyGroup(
+                    label = "${stringResource(R.string.action_when)} · ${stringResource(R.string.action_deadline)}"
+                ) {
                     ThingsWhenBadge(
                         scheduleState = task.scheduleState,
                         whenDateEpochMillis = task.whenDate,
@@ -2395,12 +2397,7 @@ private fun ExpandedTaskCardBody(
                             onClick = onOpenTimeblockDialog
                         )
                     }
-                }
 
-                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
-
-                // 2. Deadline
-                SoftBentoPropertyGroup(label = stringResource(R.string.action_deadline)) {
                     if (task.deadline != null) {
                         ThingsDeadlineBadge(
                             deadlineEpochMillis = task.deadline,
@@ -2413,10 +2410,22 @@ private fun ExpandedTaskCardBody(
                             onClick = onOpenDeadlineDialog
                         )
                     }
+
+                    if (task.recurrenceRule != null) {
+                        ThingsRepeatBadge(
+                            rule = task.recurrenceRule,
+                            onClick = onOpenRepeatDialog
+                        )
+                    } else {
+                        ThingsTagPill(
+                            title = "🔁 ${stringResource(R.string.action_repeat)}",
+                            onClick = onOpenRepeatDialog
+                        )
+                    }
                 }
 
-                // 3. Duration & Effort
-                if (onUpdateStandaloneDuration != null || onUpdateEffortLevel != null) {
+                // 2. Focus & Dependencies: Duration, Effort & Waiting On
+                if (onUpdateStandaloneDuration != null || onUpdateEffortLevel != null || onOpenDependenciesDialog != null) {
                     HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
                     SoftBentoPropertyGroup(
                         label = "${stringResource(R.string.v30_duration_label)} · ${stringResource(R.string.v30_effort_label)}"
@@ -2537,52 +2546,32 @@ private fun ExpandedTaskCardBody(
                                 }
                             }
                         }
-                    }
-                }
 
-                // 4. Waiting On (Dependencies)
-                if (onOpenDependenciesDialog != null) {
-                    HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
-                    SoftBentoPropertyGroup(label = stringResource(R.string.v30_blocked_by_label)) {
-                        val activeBlockerCount = remember(task.blockedByTaskIds, openTaskIds) {
-                            task.blockedByTaskIds.count { it in openTaskIds }
-                        }
-                        val depLabel = if (activeBlockerCount > 0) {
-                            "⏳ " + stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)
-                        } else {
-                            "⏳ " + stringResource(R.string.v30_blocked_by_action)
-                        }
-                        ThingsTagPill(
-                            title = depLabel,
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onOpenDependenciesDialog()
+                        if (onOpenDependenciesDialog != null) {
+                            val activeBlockerCount = remember(task.blockedByTaskIds, openTaskIds) {
+                                task.blockedByTaskIds.count { it in openTaskIds }
                             }
-                        )
+                            val depLabel = if (activeBlockerCount > 0) {
+                                "⏳ " + stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)
+                            } else {
+                                "⏳ " + stringResource(R.string.v30_blocked_by_action)
+                            }
+                            ThingsTagPill(
+                                title = depLabel,
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onOpenDependenciesDialog()
+                                }
+                            )
+                        }
                     }
                 }
 
                 HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
 
-                // 5. Categories
-                SoftBentoPropertyGroup(label = stringResource(R.string.action_tags)) {
-                    task.tags.forEach { tag ->
-                        ThingsTagPill(
-                            title = tag.title,
-                            onClick = onOpenTagPickerDialog
-                        )
-                    }
-                    ThingsTagPill(
-                        title = "+ " + stringResource(R.string.action_tags),
-                        onClick = onOpenTagPickerDialog
-                    )
-                }
-
-                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
-
-                // 6. Project / Area
+                // 3. Organization: Project / Area & Categories
                 SoftBentoPropertyGroup(
-                    label = "${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)}"
+                    label = "${stringResource(R.string.entity_project)} / ${stringResource(R.string.entity_area)} · ${stringResource(R.string.action_tags)}"
                 ) {
                     val containerLabel = when {
                         assignedProject != null && assignedHeading != null && assignedHeading.title.isNotBlank() ->
@@ -2595,23 +2584,17 @@ private fun ExpandedTaskCardBody(
                         title = containerLabel,
                         onClick = onOpenMoveDialog
                     )
-                }
 
-                HorizontalDivider(color = colors.hairlineDivider.copy(alpha = 0.7f), thickness = 0.65.dp)
-
-                // 7. Repeat
-                SoftBentoPropertyGroup(label = stringResource(R.string.action_repeat)) {
-                    if (task.recurrenceRule != null) {
-                        ThingsRepeatBadge(
-                            rule = task.recurrenceRule,
-                            onClick = onOpenRepeatDialog
-                        )
-                    } else {
+                    task.tags.forEach { tag ->
                         ThingsTagPill(
-                            title = "🔁 ${stringResource(R.string.action_repeat)}",
-                            onClick = onOpenRepeatDialog
+                            title = tag.title,
+                            onClick = onOpenTagPickerDialog
                         )
                     }
+                    ThingsTagPill(
+                        title = "+ " + stringResource(R.string.action_tags),
+                        onClick = onOpenTagPickerDialog
+                    )
                 }
             }
         }

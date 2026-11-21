@@ -122,3 +122,23 @@ test('v3.0.0-beta.10 Sidebar main Bento tiles & mini-cards provide calm sky-blue
   assert.ok(!miniHover.includes('padding'));
   assert.ok(!miniHover.includes('border-width'));
 });
+
+test('v3.0.0-beta.11 Balanced 3+3 Soft Bento Task Modal consolidates right-column property boxes into 3 logical cards and collapses empty Attachments into a slim 1-row bar', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
+  const taskItemSrc = fs.readFileSync(path.join(SRC_DIR, 'components/TaskItem.tsx'), 'utf8');
+
+  const propTileMatches = taskItemSrc.match(/className="task-bento-prop-tile"/g) ?? [];
+  assert.equal(
+    propTileMatches.length,
+    3,
+    'Right properties column must render 3 balanced Soft Bento property cards instead of 6'
+  );
+  assert.ok(taskItemSrc.includes("taskAttachments.length === 0 ? 'attachments-empty' : ''"));
+
+  const attachmentsEmptyCss =
+    css.match(/\.task-bento-card\.attachments-empty\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(attachmentsEmptyCss.includes('flex-direction: row;'));
+
+  const inlineSubCss = css.match(/\.task-bento-inline-sub\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(inlineSubCss.includes('display: contents;'));
+});

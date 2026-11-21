@@ -475,6 +475,7 @@ data class TaskFirestoreDto(
     val recurrenceRule: String? = null,
     val sortOrder: Double = 0.0,
     val isPinned: Boolean = false,
+    val isMilestone: Boolean? = null,
     val effortLevel: String? = null,
     val blockedByTaskIds: List<String> = emptyList(),
     val workspaceId: String? = null,
@@ -491,7 +492,7 @@ data class TaskFirestoreDto(
     @Transient
     val omittedV30TaskFields: Boolean = false
 ) {
-    fun toEntity(): TaskEntity {
+    fun toEntity(existingLocal: TaskEntity? = null): TaskEntity {
         val isPurgedTombstone = isDeleted && (purgedFromTrash || (title.isEmpty() && notes.isEmpty()))
         val cleanBlockers = if (isPurgedTombstone) {
             emptyList()
@@ -518,6 +519,7 @@ data class TaskFirestoreDto(
             },
             sortOrder = sortOrder.finiteOrZero(),
             isPinned = if (isPurgedTombstone) false else isPinned,
+            isMilestone = if (isPurgedTombstone) false else (isMilestone ?: existingLocal?.isMilestone ?: false),
             effortLevel = if (isPurgedTombstone) null else EffortLevel.normalize(effortLevel),
             blockedByJson = firestoreJson.encodeToString(cleanBlockers),
             workspaceId = if (isPurgedTombstone) null else workspaceId?.takeIf { it.isNotBlank() },
@@ -555,6 +557,7 @@ data class TaskFirestoreDto(
             "recurrenceRule" to recurrenceRule,
             "sortOrder" to sortOrder.finiteOrZero(),
             "isPinned" to (if (isPurgedTombstone) false else isPinned),
+            "isMilestone" to (if (isPurgedTombstone) false else (isMilestone ?: false)),
             "effortLevel" to (if (isPurgedTombstone) null else EffortLevel.normalize(effortLevel)),
             "blockedByTaskIds" to cleanBlockers,
             "workspaceId" to (if (isPurgedTombstone) null else workspaceId),
@@ -597,6 +600,7 @@ data class TaskFirestoreDto(
                 recurrenceRule = entity.recurrenceRuleJson,
                 sortOrder = entity.sortOrder.finiteOrZero(),
                 isPinned = if (isPurgedTombstone) false else entity.isPinned,
+                isMilestone = if (isPurgedTombstone) false else entity.isMilestone,
                 effortLevel = if (isPurgedTombstone) null else EffortLevel.normalize(entity.effortLevel),
                 blockedByTaskIds = decodedBlockers,
                 workspaceId = if (isPurgedTombstone) null else entity.workspaceId,
@@ -625,6 +629,7 @@ data class TaskFirestoreDto(
                 !map.containsKey("workspaceId") &&
                 !map.containsKey("assigneeId")
             val rawIsPinned = map["isPinned"] as? Boolean ?: false
+            val rawIsMilestone = map["isMilestone"] as? Boolean
             val rawBlockers = (map["blockedByTaskIds"] as? List<*>)?.filterIsInstance<String>()
                 ?: (map["blockedByJson"] as? String)?.let { raw ->
                     runCatching { firestoreJson.decodeFromString<List<String>>(raw) }.getOrNull()
@@ -648,6 +653,7 @@ data class TaskFirestoreDto(
                 recurrenceRule = (map["recurrenceRule"] as? String)?.takeIf { it.isNotBlank() },
                 sortOrder = ((map["sortOrder"] as? Number)?.toDouble() ?: 0.0).finiteOrZero(),
                 isPinned = if (purged) false else rawIsPinned,
+                isMilestone = if (purged) false else rawIsMilestone,
                 effortLevel = if (purged) null else EffortLevel.normalize(map["effortLevel"] as? String),
                 blockedByTaskIds = if (purged) emptyList() else rawBlockers.map { it.trim() }.filter { it.isNotEmpty() && it != id }.distinct(),
                 workspaceId = if (purged) null else (map["workspaceId"] as? String)?.takeIf { it.isNotBlank() },

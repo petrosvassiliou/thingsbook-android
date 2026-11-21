@@ -760,6 +760,7 @@ public actor FirebaseCloudSyncService {
         var taskTags: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
         var omittedPinTaskIds = Set<String>()
+        var omittedMilestoneTaskIds = Set<String>()
         var omittedV30TaskIds = Set<String>()
         let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(m) else { return nil }
@@ -769,6 +770,9 @@ public actor FirebaseCloudSyncService {
             }
             if parsed.omittedPin {
                 omittedPinTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedMilestone {
+                omittedMilestoneTaskIds.insert(parsed.task.id)
             }
             if parsed.omittedV30Fields {
                 omittedV30TaskIds.insert(parsed.task.id)
@@ -793,6 +797,7 @@ public actor FirebaseCloudSyncService {
                 taskTagIdsByTaskId: taskTags,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
                 taskOmittedPinTaskIds: omittedPinTaskIds,
+                taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                 taskOmittedV30TaskIds: omittedV30TaskIds,
                 checklistItems: checklists,
                 attachments: attachments,
@@ -1233,6 +1238,7 @@ public actor FirebaseCloudSyncService {
                 "recurrenceRule": Self.fsNullableString(recString),
                 "sortOrder": Self.fsDouble(task.sortOrder),
                 "isPinned": Self.fsBool(!task.isDeleted && task.isPinned),
+                "isMilestone": Self.fsBool(!task.isDeleted && task.isMilestone),
                 "effortLevel": Self.fsNullableString(task.isDeleted ? nil : task.effortLevel),
                 "blockedByTaskIds": Self.fsStringArray(task.isDeleted ? [] : task.blockedByTaskIds),
                 "workspaceId": Self.fsNullableString(task.isDeleted ? nil : task.workspaceId),
@@ -1550,6 +1556,7 @@ public actor FirebaseCloudSyncService {
                 "recurrenceRule": recString as Any,
                 "sortOrder": task.sortOrder,
                 "isPinned": !task.isDeleted && task.isPinned,
+                "isMilestone": !task.isDeleted && task.isMilestone,
                 "effortLevel": (task.isDeleted ? nil : task.effortLevel) as Any,
                 "blockedByTaskIds": task.isDeleted ? [] : task.blockedByTaskIds,
                 "workspaceId": (task.isDeleted ? nil : task.workspaceId) as Any,
@@ -1749,6 +1756,7 @@ public actor FirebaseCloudSyncService {
         var taskTagIds: [String: [String]] = [:]
         var omittedTimeblockTaskIds = Set<String>()
         var omittedPinTaskIds = Set<String>()
+        var omittedMilestoneTaskIds = Set<String>()
         var omittedV30TaskIds = Set<String>()
         let tasks: [TaskItem] = taskMaps.compactMap { map -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(map) else { return nil }
@@ -1758,6 +1766,9 @@ public actor FirebaseCloudSyncService {
             }
             if parsed.omittedPin {
                 omittedPinTaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedMilestone {
+                omittedMilestoneTaskIds.insert(parsed.task.id)
             }
             if parsed.omittedV30Fields {
                 omittedV30TaskIds.insert(parsed.task.id)
@@ -1799,6 +1810,7 @@ public actor FirebaseCloudSyncService {
                 taskTagIdsByTaskId: taskTagIds,
                 taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
                 taskOmittedPinTaskIds: omittedPinTaskIds,
+                taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                 taskOmittedV30TaskIds: omittedV30TaskIds,
                 checklistItems: checklists,
                 attachments: attachments,
@@ -1980,6 +1992,7 @@ public actor FirebaseCloudSyncService {
             var taskTags: [String: [String]] = [:]
             var omittedTimeblockTaskIds = Set<String>()
             var omittedPinTaskIds = Set<String>()
+            var omittedMilestoneTaskIds = Set<String>()
             var omittedV30TaskIds = Set<String>()
             let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
                 guard let parsed = Self.parseTaskWithHints(m) else { return nil }
@@ -1989,6 +2002,9 @@ public actor FirebaseCloudSyncService {
                 }
                 if parsed.omittedPin {
                     omittedPinTaskIds.insert(parsed.task.id)
+                }
+                if parsed.omittedMilestone {
+                    omittedMilestoneTaskIds.insert(parsed.task.id)
                 }
                 if parsed.omittedV30Fields {
                     omittedV30TaskIds.insert(parsed.task.id)
@@ -2012,6 +2028,7 @@ public actor FirebaseCloudSyncService {
                     taskTagIdsByTaskId: taskTags,
                     taskOmittedTimeblockTaskIds: omittedTimeblockTaskIds,
                     taskOmittedPinTaskIds: omittedPinTaskIds,
+                    taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                     taskOmittedV30TaskIds: omittedV30TaskIds,
                     checklistItems: checklists,
                     attachments: attachments,
@@ -2536,7 +2553,7 @@ public actor FirebaseCloudSyncService {
 
     public static func parseTaskWithHints(
         _ map: [String: Any]
-    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool, omittedV30Fields: Bool)? {
+    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool, omittedMilestone: Bool, omittedV30Fields: Bool)? {
         guard let id = asString(map["id"]) else { return nil }
         var rule: RecurrenceRule? = nil
         if let recStr = asString(map["recurrenceRule"]), let data = recStr.data(using: .utf8) {
@@ -2547,6 +2564,7 @@ public actor FirebaseCloudSyncService {
         let purged = isDeleted && asBool(map["purgedFromTrash"])
         let omittedTimeblock = !map.keys.contains("scheduledStartMinutes") && !map.keys.contains("durationMinutes")
         let omittedPin = !map.keys.contains("isPinned")
+        let omittedMilestone = !map.keys.contains("isMilestone")
         let omittedV30Fields = !map.keys.contains("effortLevel")
             && !map.keys.contains("blockedByTaskIds")
             && !map.keys.contains("blockedByJson")
@@ -2579,6 +2597,7 @@ public actor FirebaseCloudSyncService {
             recurrenceRule: rule,
             sortOrder: asDouble(map["sortOrder"]),
             isPinned: !isDeleted && asBool(map["isPinned"]),
+            isMilestone: !isDeleted && asBool(map["isMilestone"]),
             effortLevel: isDeleted ? nil : TaskEffortLevel.normalized(asString(map["effortLevel"]))?.rawValue,
             blockedByTaskIds: isDeleted ? [] : blockedIds.filter { $0 != id && !$0.isEmpty },
             workspaceId: isDeleted ? nil : asString(map["workspaceId"]),
@@ -2587,7 +2606,7 @@ public actor FirebaseCloudSyncService {
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: isDeleted
         )
-        return (task, tids, omittedTimeblock, omittedPin, omittedV30Fields)
+        return (task, tids, omittedTimeblock, omittedPin, omittedMilestone, omittedV30Fields)
     }
 
     public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {

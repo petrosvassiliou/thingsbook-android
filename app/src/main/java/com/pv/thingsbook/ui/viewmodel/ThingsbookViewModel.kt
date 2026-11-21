@@ -775,7 +775,7 @@ class ThingsbookViewModel @Inject constructor(
     fun toggleTaskExpansion(taskId: String?) {
         val next = if (_expandedTaskId.value == taskId) null else taskId?.takeIf { it.isNotBlank() }
         if (next != null) {
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
         _expandedTaskId.value = next
     }
@@ -783,7 +783,7 @@ class ThingsbookViewModel @Inject constructor(
     fun expandTask(taskId: String?) {
         val resolved = taskId?.takeIf { it.isNotBlank() }
         if (resolved != null) {
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
         _expandedTaskId.value = resolved
     }
@@ -869,7 +869,9 @@ class ThingsbookViewModel @Inject constructor(
                     _expandedTaskId.value = null
                 }
                 if (taskId in _selectedTaskIds.value) {
-                    _selectedTaskIds.value = _selectedTaskIds.value - taskId
+                    val remaining = _selectedTaskIds.value - taskId
+                    _selectedTaskIds.value = remaining
+                    if (remaining.isEmpty()) _isMultiSelectMode.value = false
                 }
                 if (_focusTimerState.value?.taskId == taskId) {
                     stopFocusTimer()
@@ -1056,7 +1058,9 @@ class ThingsbookViewModel @Inject constructor(
                 _expandedTaskId.value = null
             }
             if (taskId in _selectedTaskIds.value) {
-                _selectedTaskIds.value = _selectedTaskIds.value - taskId
+                val remaining = _selectedTaskIds.value - taskId
+                _selectedTaskIds.value = remaining
+                if (remaining.isEmpty()) _isMultiSelectMode.value = false
             }
             if (_focusTimerState.value?.taskId == taskId) {
                 stopFocusTimer()
@@ -1358,9 +1362,11 @@ class ThingsbookViewModel @Inject constructor(
             if (_expandedTaskId.value in draggedSet) {
                 _expandedTaskId.value = null
             }
-            _selectedTaskIds.value = _selectedTaskIds.value - draggedSet
+            val remaining = _selectedTaskIds.value - draggedSet
+            _selectedTaskIds.value = remaining
+            if (remaining.isEmpty()) _isMultiSelectMode.value = false
         } else if (orderedIds.size > 1) {
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
 
         if (destination is WorkspaceDragDropDestination.SmartView &&
@@ -1725,7 +1731,7 @@ class ThingsbookViewModel @Inject constructor(
         }
         if (deleteAssociatedTasks) {
             _expandedTaskId.value = null
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
         repository.softDeleteProject(projectId, deleteAssociatedTasks = deleteAssociatedTasks)
         registerUndoAction(
@@ -2903,7 +2909,7 @@ class ThingsbookViewModel @Inject constructor(
                     _pendingRestoreSession.value = null
                     _restoreDialogError.value = null
                     _expandedTaskId.value = null
-                    _selectedTaskIds.value = emptySet()
+                    clearTaskSelection()
                     _selectedFilterTagId.value = null
                     _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
 
@@ -2976,45 +2982,33 @@ class ThingsbookViewModel @Inject constructor(
     private val _selectedTaskIds = MutableStateFlow<Set<String>>(emptySet())
     val selectedTaskIds: StateFlow<Set<String>> = _selectedTaskIds.asStateFlow()
 
-    private var lastSelectedAnchorTaskId: String? = null
+    private val _isMultiSelectMode = MutableStateFlow(false)
+    val isMultiSelectMode: StateFlow<Boolean> = _isMultiSelectMode.asStateFlow()
+
+    internal val selectionStateHolder = TaskSelectionStateHolder(
+        _selectedTaskIds = _selectedTaskIds,
+        _isMultiSelectMode = _isMultiSelectMode,
+        _expandedTaskId = _expandedTaskId
+    )
 
     fun selectSingleTask(taskId: String) {
-        _expandedTaskId.value = null
-        _selectedTaskIds.value = setOf(taskId)
-        lastSelectedAnchorTaskId = taskId
+        selectionStateHolder.selectSingleTask(taskId)
     }
 
     fun toggleTaskSelection(taskId: String) {
-        val current = _selectedTaskIds.value
-        if (taskId in current) {
-            _selectedTaskIds.value = current - taskId
-        } else {
-            _expandedTaskId.value = null
-            _selectedTaskIds.value = current + taskId
-            lastSelectedAnchorTaskId = taskId
-        }
+        selectionStateHolder.toggleTaskSelection(taskId)
     }
 
     fun selectTaskRange(visibleTaskIds: List<String>, targetTaskId: String) {
-        val anchor = lastSelectedAnchorTaskId
-        if (anchor == null || anchor !in visibleTaskIds || targetTaskId !in visibleTaskIds) {
-            toggleTaskSelection(targetTaskId)
-            return
-        }
-        val idx1 = visibleTaskIds.indexOf(anchor)
-        val idx2 = visibleTaskIds.indexOf(targetTaskId)
-        val rangeIds = visibleTaskIds.subList(minOf(idx1, idx2), maxOf(idx1, idx2) + 1).toSet()
-        _selectedTaskIds.value = _selectedTaskIds.value + rangeIds
-        lastSelectedAnchorTaskId = targetTaskId
+        selectionStateHolder.selectTaskRange(visibleTaskIds, targetTaskId)
     }
 
     fun selectAllTasks(visibleTaskIds: List<String>) {
-        _selectedTaskIds.value = visibleTaskIds.toSet()
+        selectionStateHolder.selectAllTasks(visibleTaskIds)
     }
 
     fun clearTaskSelection() {
-        _selectedTaskIds.value = emptySet()
-        lastSelectedAnchorTaskId = null
+        selectionStateHolder.clearTaskSelection()
     }
 
     fun batchCompleteSelectedTasks() {
@@ -3024,7 +3018,7 @@ class ThingsbookViewModel @Inject constructor(
             ids.forEach { id ->
                 repository.updateTaskStatus(id, TaskStatus.COMPLETED)
             }
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
     }
 
@@ -3035,7 +3029,7 @@ class ThingsbookViewModel @Inject constructor(
             ids.forEach { id ->
                 repository.softDeleteTask(id)
             }
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
     }
 
@@ -3050,7 +3044,7 @@ class ThingsbookViewModel @Inject constructor(
             ids.forEach { id ->
                 repository.updateTaskSchedule(id, newState, newWhenDate)
             }
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
     }
 
@@ -3066,7 +3060,7 @@ class ThingsbookViewModel @Inject constructor(
             ids.forEach { id ->
                 repository.moveTaskToContainer(id, projectId, headingId, areaId)
             }
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
     }
 
@@ -3094,12 +3088,12 @@ class ThingsbookViewModel @Inject constructor(
         safeVmScope.launch {
             val entities = ids.mapNotNull { repository.getTaskEntityById(it) }.filter { !it.isDeleted }
             if (entities.isEmpty()) {
-                _selectedTaskIds.value = emptySet()
+                clearTaskSelection()
                 return@launch
             }
             val targetPinned = entities.any { !it.isPinned }
             repository.setTasksPinned(ids, targetPinned)
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
     }
 
@@ -3111,7 +3105,7 @@ class ThingsbookViewModel @Inject constructor(
             ids.forEach { id ->
                 repository.duplicateTask(id, copySuffix = copySuffix)
             }
-            _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
         }
     }
 
@@ -3213,7 +3207,7 @@ class ThingsbookViewModel @Inject constructor(
                 true
             }
             _selectedTaskIds.value.isNotEmpty() -> {
-                _selectedTaskIds.value = emptySet()
+                clearTaskSelection()
                 true
             }
             _expandedTaskId.value == null && _isTimelineFullScreen.value -> {
@@ -3685,6 +3679,20 @@ class ThingsbookViewModel @Inject constructor(
             val entity = repository.getTaskEntityById(taskId) ?: return@launch
             if (entity.isDeleted) return@launch
             repository.setTasksPinned(listOf(taskId), !entity.isPinned)
+        }
+    }
+
+    fun setTaskMilestone(taskId: String, isMilestone: Boolean) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            repository.setTaskMilestone(taskId, isMilestone)
+        }
+    }
+
+    fun toggleTaskMilestone(taskId: String) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            repository.toggleTaskMilestone(taskId)
         }
     }
 
@@ -4491,6 +4499,7 @@ class ThingsbookViewModel @Inject constructor(
         if (enabled) {
             _expandedTaskId.value = null
             _selectedTaskIds.value = emptySet()
+            clearTaskSelection()
             _isMagicPlusMenuOpen.value = false
             _isQuickFindOpen.value = false
         }
@@ -4652,5 +4661,73 @@ data class ThingsbookStatistics(
     val areasCount: Int = 0,
     val tagsCount: Int = 0
 )
+
+internal class TaskSelectionStateHolder(
+    private val _selectedTaskIds: MutableStateFlow<Set<String>> = MutableStateFlow(emptySet()),
+    private val _isMultiSelectMode: MutableStateFlow<Boolean> = MutableStateFlow(false),
+    private val _expandedTaskId: MutableStateFlow<String?> = MutableStateFlow(null)
+) {
+    val selectedTaskIds: StateFlow<Set<String>> = _selectedTaskIds.asStateFlow()
+    val isMultiSelectMode: StateFlow<Boolean> = _isMultiSelectMode.asStateFlow()
+    val expandedTaskId: StateFlow<String?> = _expandedTaskId.asStateFlow()
+
+    var lastSelectedAnchorTaskId: String? = null
+        private set
+
+    val showMultiSelectionBar: Boolean
+        get() = _selectedTaskIds.value.size > 1 || (_isMultiSelectMode.value && _selectedTaskIds.value.isNotEmpty())
+
+    fun selectSingleTask(taskId: String) {
+        _expandedTaskId.value = null
+        _isMultiSelectMode.value = false
+        _selectedTaskIds.value = setOf(taskId)
+        lastSelectedAnchorTaskId = taskId
+    }
+
+    fun toggleTaskSelection(taskId: String) {
+        _expandedTaskId.value = null
+        val current = _selectedTaskIds.value
+        val nextSet = if (taskId in current) {
+            current - taskId
+        } else {
+            lastSelectedAnchorTaskId = taskId
+            current + taskId
+        }
+        _selectedTaskIds.value = nextSet
+        _isMultiSelectMode.value = nextSet.isNotEmpty()
+    }
+
+    fun selectTaskRange(visibleTaskIds: List<String>, targetTaskId: String) {
+        val anchor = lastSelectedAnchorTaskId
+        if (anchor == null || anchor !in visibleTaskIds || targetTaskId !in visibleTaskIds) {
+            toggleTaskSelection(targetTaskId)
+            return
+        }
+        _expandedTaskId.value = null
+        val idx1 = visibleTaskIds.indexOf(anchor)
+        val idx2 = visibleTaskIds.indexOf(targetTaskId)
+        val rangeIds = visibleTaskIds.subList(minOf(idx1, idx2), maxOf(idx1, idx2) + 1).toSet()
+        val nextSet = _selectedTaskIds.value + rangeIds
+        _selectedTaskIds.value = nextSet
+        _isMultiSelectMode.value = nextSet.size > 1
+        lastSelectedAnchorTaskId = targetTaskId
+    }
+
+    fun selectAllTasks(visibleTaskIds: List<String>) {
+        val nextSet = visibleTaskIds.toSet()
+        if (nextSet.isNotEmpty()) {
+            _expandedTaskId.value = null
+        }
+        _selectedTaskIds.value = nextSet
+        _isMultiSelectMode.value = nextSet.isNotEmpty()
+    }
+
+    fun clearTaskSelection() {
+        _isMultiSelectMode.value = false
+        _selectedTaskIds.value = emptySet()
+        lastSelectedAnchorTaskId = null
+    }
+}
+
 
 

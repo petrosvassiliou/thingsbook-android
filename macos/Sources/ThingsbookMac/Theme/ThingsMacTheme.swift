@@ -27,6 +27,13 @@ public enum ThingsMacPalette {
     public static let trashGray = Color(red: 0.53, green: 0.56, blue: 0.62)
     public static let areaGreen = accentBlue
     public static let deadlineCrimson = Color(red: 0.89, green: 0.22, blue: 0.28)
+    /// Milestone Royal Violet (#7D3AED in Aqua, #9F67FF in DarkAqua)
+    public static let milestoneViolet = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor(srgbRed: 0.624, green: 0.404, blue: 1.000, alpha: 1.0)
+            : NSColor(srgbRed: 0.490, green: 0.230, blue: 0.930, alpha: 1.0)
+    })
 
     /// Crisp Pure White in Light Mode (#FFFFFF) & Deep Neutral Charcoal in Dark Mode (#121417)
     public static let canvasBackground = Color(nsColor: NSColor(name: nil) { appearance in
@@ -68,6 +75,7 @@ public enum ThingsMacPalette {
 public struct ThingsCheckboxButton: View {
     public let status: TaskStatus
     public let isSomeday: Bool
+    public let isMilestone: Bool
     public let helpText: String
     public let onToggleComplete: () -> Void
     public let onCancelTask: () -> Void
@@ -77,12 +85,14 @@ public struct ThingsCheckboxButton: View {
     public init(
         status: TaskStatus,
         isSomeday: Bool = false,
+        isMilestone: Bool = false,
         helpText: String = "",
         onToggleComplete: @escaping () -> Void,
         onCancelTask: @escaping () -> Void
     ) {
         self.status = status
         self.isSomeday = isSomeday
+        self.isMilestone = isMilestone
         self.helpText = helpText
         self.onToggleComplete = onToggleComplete
         self.onCancelTask = onCancelTask
@@ -97,36 +107,73 @@ public struct ThingsCheckboxButton: View {
             }
         } label: {
             ZStack {
-                switch status {
-                case .open:
-                    RoundedRectangle(cornerRadius: 6.0, style: .continuous)
-                        .strokeBorder(
-                            isHovering ? ThingsMacPalette.accentBlue : Color.secondary.opacity(0.48),
-                            style: StrokeStyle(
-                                lineWidth: 1.55,
-                                dash: isSomeday ? [2.8, 2.2] : []
+                if isMilestone {
+                    switch status {
+                    case .open:
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .strokeBorder(
+                                ThingsMacPalette.milestoneViolet.opacity(isHovering ? 1.0 : 0.88),
+                                style: StrokeStyle(
+                                    lineWidth: 1.65,
+                                    dash: isSomeday ? [2.8, 2.2] : []
+                                )
                             )
-                        )
-                        .background(
-                            RoundedRectangle(cornerRadius: 6.0, style: .continuous)
-                                .fill(isHovering ? ThingsMacPalette.accentBlue.opacity(0.10) : ThingsMacPalette.cardSurface)
-                        )
-                case .completed:
-                    Circle()
-                        .fill(ThingsMacPalette.accentBlue)
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10.0, weight: .bold))
-                        .foregroundStyle(.white)
-                case .canceled:
-                    RoundedRectangle(cornerRadius: 6.0, style: .continuous)
-                        .fill(Color.secondary.opacity(0.28))
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.primary.opacity(0.8))
+                            .background(
+                                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                                    .fill(ThingsMacPalette.milestoneViolet.opacity(isHovering ? 0.22 : 0.11))
+                            )
+                            .frame(width: 13.5, height: 13.5)
+                            .rotationEffect(.degrees(45))
+                    case .completed:
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .fill(ThingsMacPalette.milestoneViolet)
+                            .frame(width: 13.5, height: 13.5)
+                            .rotationEffect(.degrees(45))
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9.0, weight: .bold))
+                            .foregroundStyle(.white)
+                    case .canceled:
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .fill(Color.secondary.opacity(0.28))
+                            .frame(width: 13.5, height: 13.5)
+                            .rotationEffect(.degrees(45))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundStyle(.primary.opacity(0.8))
+                    }
+                } else {
+                    switch status {
+                    case .open:
+                        RoundedRectangle(cornerRadius: 6.0, style: .continuous)
+                            .strokeBorder(
+                                isHovering ? ThingsMacPalette.accentBlue : Color.secondary.opacity(0.48),
+                                style: StrokeStyle(
+                                    lineWidth: 1.55,
+                                    dash: isSomeday ? [2.8, 2.2] : []
+                                )
+                            )
+                            .background(
+                                RoundedRectangle(cornerRadius: 6.0, style: .continuous)
+                                    .fill(isHovering ? ThingsMacPalette.accentBlue.opacity(0.10) : ThingsMacPalette.cardSurface)
+                            )
+                    case .completed:
+                        Circle()
+                            .fill(ThingsMacPalette.accentBlue)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10.0, weight: .bold))
+                            .foregroundStyle(.white)
+                    case .canceled:
+                        RoundedRectangle(cornerRadius: 6.0, style: .continuous)
+                            .fill(Color.secondary.opacity(0.28))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(.primary.opacity(0.8))
+                    }
                 }
             }
             .frame(width: 18, height: 18)
             .animation(.spring(response: 0.24, dampingFraction: 0.72), value: status)
+            .animation(.spring(response: 0.24, dampingFraction: 0.78), value: isMilestone)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

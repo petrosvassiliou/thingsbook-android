@@ -595,4 +595,8 @@
     <string name="area_suggestion_study">Estudios</string>
     <string name="area_suggestion_sport">Deporte</string>
     <string name="area_suggestion_hobby">Afición</string>
+    <string name="v30_milestone_label">Hito</string>
+    <string name="v30_mark_as_milestone">Marcar como hito</string>
+    <string name="v30_remove_milestone">Quitar hito</string>
+    <string name="v30_external_import_target_area">Área de destino para la importación</string>
 </resources>

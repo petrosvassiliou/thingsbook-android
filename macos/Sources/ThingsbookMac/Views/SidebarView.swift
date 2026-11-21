@@ -678,6 +678,13 @@ public struct SidebarView: View {
                     store.newProjectDefaultAreaId = area.id
                     store.isNewProjectSheetPresented = true
                 }
+                Button {
+                    store.newProjectDefaultAreaId = area.id
+                    store.templatesInitialTab = .externalImportExport
+                    store.isTemplatesSheetPresented = true
+                } label: {
+                    Label(store.tr("v30_external_import_export_tab"), systemImage: "arrow.down.doc")
+                }
                 Button(store.tr("areas_rename_label")) {
                     store.editingArea = area
                 }

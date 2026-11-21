@@ -595,4 +595,8 @@
     <string name="area_suggestion_study">Study</string>
     <string name="area_suggestion_sport">Sport</string>
     <string name="area_suggestion_hobby">Hobby</string>
+    <string name="v30_milestone_label">Milestone</string>
+    <string name="v30_mark_as_milestone">Mark as Milestone</string>
+    <string name="v30_remove_milestone">Remove Milestone</string>
+    <string name="v30_external_import_target_area">Target Area for Import</string>
 </resources>

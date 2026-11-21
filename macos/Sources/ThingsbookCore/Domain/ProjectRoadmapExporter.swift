@@ -484,16 +484,29 @@ public enum ProjectRoadmapExporter {
                 if bar.endEpochDay >= layout.startEpochDay && bar.startEpochDay <= layout.endEpochDay {
                     let cStart = max(layout.startEpochDay, bar.startEpochDay)
                     let cEnd = min(layout.endEpochDay, bar.endEpochDay)
-                    let cSpan = max(1, cEnd - cStart + 1)
-                    let x = gridOriginX + CGFloat(cStart - layout.startEpochDay) * dayW + 1.5
-                    let w = max(3.0, CGFloat(cSpan) * dayW - 3.0)
-                    let rect = CGRect(x: x, y: rowMidY - 10.0, width: w, height: 20.0)
-                    taskRectById[bar.id] = rect
-                    ctx.setFillColor(CGColor(srgbRed: 0.94, green: 0.96, blue: 0.99, alpha: 1.0))
-                    ctx.fill(rect)
-                    ctx.setStrokeColor(CGColor(srgbRed: 0.220, green: 0.596, blue: 0.925, alpha: 0.65))
-                    ctx.setLineWidth(0.9)
-                    ctx.stroke(rect)
+                    if bar.isMilestone {
+                        let centerX = gridOriginX + (CGFloat(cStart - layout.startEpochDay) + 0.5) * dayW
+                        let radius: CGFloat = 7.0
+                        taskRectById[bar.id] = CGRect(x: centerX - radius, y: rowMidY - radius, width: radius * 2.0, height: radius * 2.0)
+                        drawMilestoneDiamondAndLabel(
+                            in: ctx,
+                            center: CGPoint(x: centerX, y: rowMidY),
+                            radius: radius,
+                            title: bar.task.title,
+                            fontSize: 9.5
+                        )
+                    } else {
+                        let cSpan = max(1, cEnd - cStart + 1)
+                        let x = gridOriginX + CGFloat(cStart - layout.startEpochDay) * dayW + 1.5
+                        let w = max(3.0, CGFloat(cSpan) * dayW - 3.0)
+                        let rect = CGRect(x: x, y: rowMidY - 10.0, width: w, height: 20.0)
+                        taskRectById[bar.id] = rect
+                        ctx.setFillColor(CGColor(srgbRed: 0.94, green: 0.96, blue: 0.99, alpha: 1.0))
+                        ctx.fill(rect)
+                        ctx.setStrokeColor(CGColor(srgbRed: 0.220, green: 0.596, blue: 0.925, alpha: 0.65))
+                        ctx.setLineWidth(0.9)
+                        ctx.stroke(rect)
+                    }
                 }
                 cursorTopY -= (taskRowHeight + rowSpacing)
             }
@@ -567,16 +580,30 @@ public enum ProjectRoadmapExporter {
         for bar in layout.generalTaskBars where bar.endEpochDay >= layout.startEpochDay && bar.startEpochDay <= layout.endEpochDay {
             let cStart = max(layout.startEpochDay, bar.startEpochDay)
             let cEnd = min(layout.endEpochDay, bar.endEpochDay)
-            let cSpan = max(1, cEnd - cStart + 1)
-            let x = gridOriginX + CGFloat(cStart - layout.startEpochDay) * dayW + 3.0
-            let w = max(dayW - 6.0, CGFloat(cSpan) * dayW - 6.0)
-            let rect = CGRect(x: x, y: currentTopY, width: w, height: 24.0)
-            taskRectById[bar.id] = rect
-            ctx.setFillColor(CGColor(srgbRed: 0.94, green: 0.96, blue: 0.99, alpha: 1.0))
-            ctx.fill(rect)
-            ctx.setStrokeColor(CGColor(srgbRed: 0.220, green: 0.596, blue: 0.925, alpha: 0.65))
-            ctx.setLineWidth(1.0)
-            ctx.stroke(rect)
+            if bar.isMilestone {
+                let centerX = gridOriginX + (CGFloat(cStart - layout.startEpochDay) + 0.5) * dayW
+                let midY = currentTopY + 12.0
+                let radius: CGFloat = 8.5
+                taskRectById[bar.id] = CGRect(x: centerX - radius, y: midY - radius, width: radius * 2.0, height: radius * 2.0)
+                drawMilestoneDiamondAndLabel(
+                    in: ctx,
+                    center: CGPoint(x: centerX, y: midY),
+                    radius: radius,
+                    title: bar.task.title,
+                    fontSize: 11.0
+                )
+            } else {
+                let cSpan = max(1, cEnd - cStart + 1)
+                let x = gridOriginX + CGFloat(cStart - layout.startEpochDay) * dayW + 3.0
+                let w = max(dayW - 6.0, CGFloat(cSpan) * dayW - 6.0)
+                let rect = CGRect(x: x, y: currentTopY, width: w, height: 24.0)
+                taskRectById[bar.id] = rect
+                ctx.setFillColor(CGColor(srgbRed: 0.94, green: 0.96, blue: 0.99, alpha: 1.0))
+                ctx.fill(rect)
+                ctx.setStrokeColor(CGColor(srgbRed: 0.220, green: 0.596, blue: 0.925, alpha: 0.65))
+                ctx.setLineWidth(1.0)
+                ctx.stroke(rect)
+            }
             currentTopY -= 36.0
         }
 
@@ -599,16 +626,30 @@ public enum ProjectRoadmapExporter {
             for bar in (layout.taskBarsByHeading[heading.id] ?? []) where bar.endEpochDay >= layout.startEpochDay && bar.startEpochDay <= layout.endEpochDay {
                 let cStart = max(layout.startEpochDay, bar.startEpochDay)
                 let cEnd = min(layout.endEpochDay, bar.endEpochDay)
-                let cSpan = max(1, cEnd - cStart + 1)
-                let x = gridOriginX + CGFloat(cStart - layout.startEpochDay) * dayW + 3.0
-                let w = max(dayW - 6.0, CGFloat(cSpan) * dayW - 6.0)
-                let rect = CGRect(x: x, y: currentTopY, width: w, height: 24.0)
-                taskRectById[bar.id] = rect
-                ctx.setFillColor(CGColor(srgbRed: 0.94, green: 0.96, blue: 0.99, alpha: 1.0))
-                ctx.fill(rect)
-                ctx.setStrokeColor(CGColor(srgbRed: 0.220, green: 0.596, blue: 0.925, alpha: 0.65))
-                ctx.setLineWidth(1.0)
-                ctx.stroke(rect)
+                if bar.isMilestone {
+                    let centerX = gridOriginX + (CGFloat(cStart - layout.startEpochDay) + 0.5) * dayW
+                    let midY = currentTopY + 12.0
+                    let radius: CGFloat = 8.5
+                    taskRectById[bar.id] = CGRect(x: centerX - radius, y: midY - radius, width: radius * 2.0, height: radius * 2.0)
+                    drawMilestoneDiamondAndLabel(
+                        in: ctx,
+                        center: CGPoint(x: centerX, y: midY),
+                        radius: radius,
+                        title: bar.task.title,
+                        fontSize: 11.0
+                    )
+                } else {
+                    let cSpan = max(1, cEnd - cStart + 1)
+                    let x = gridOriginX + CGFloat(cStart - layout.startEpochDay) * dayW + 3.0
+                    let w = max(dayW - 6.0, CGFloat(cSpan) * dayW - 6.0)
+                    let rect = CGRect(x: x, y: currentTopY, width: w, height: 24.0)
+                    taskRectById[bar.id] = rect
+                    ctx.setFillColor(CGColor(srgbRed: 0.94, green: 0.96, blue: 0.99, alpha: 1.0))
+                    ctx.fill(rect)
+                    ctx.setStrokeColor(CGColor(srgbRed: 0.220, green: 0.596, blue: 0.925, alpha: 0.65))
+                    ctx.setLineWidth(1.0)
+                    ctx.stroke(rect)
+                }
                 currentTopY -= 36.0
             }
         }
@@ -636,6 +677,53 @@ public enum ProjectRoadmapExporter {
 
         let _ = generalLabel
         ctx.restoreGState()
+    }
+
+    fileprivate static let milestoneRoyalVioletNSColor = NSColor(calibratedRed: 0.49, green: 0.23, blue: 0.93, alpha: 1.0)
+    fileprivate static let milestoneRoyalVioletColor = Color(nsColor: NSColor(calibratedRed: 0.49, green: 0.23, blue: 0.93, alpha: 1.0))
+
+    fileprivate static func makeDiamondCGPath(center: CGPoint, radius: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: center.x, y: center.y - radius))
+        path.addLine(to: CGPoint(x: center.x + radius, y: center.y))
+        path.addLine(to: CGPoint(x: center.x, y: center.y + radius))
+        path.addLine(to: CGPoint(x: center.x - radius, y: center.y))
+        path.closeSubpath()
+        return path
+    }
+
+    private static func drawMilestoneDiamondAndLabel(
+        in ctx: CGContext,
+        center: CGPoint,
+        radius: CGFloat,
+        title: String,
+        fontSize: CGFloat
+    ) {
+        let diamond = makeDiamondCGPath(center: center, radius: radius)
+        ctx.saveGState()
+        ctx.addPath(diamond)
+        ctx.setFillColor(milestoneRoyalVioletNSColor.cgColor)
+        ctx.fillPath()
+        ctx.addPath(diamond)
+        ctx.setStrokeColor(CGColor(srgbRed: 1.0, green: 1.0, blue: 1.0, alpha: 0.92))
+        ctx.setLineWidth(1.1)
+        ctx.strokePath()
+        ctx.restoreGState()
+
+        let labelString = "◆ \(title)" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: fontSize),
+            .foregroundColor: milestoneRoyalVioletNSColor
+        ]
+        let prevCtx = NSGraphicsContext.current
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        let textSize = labelString.size(withAttributes: attrs)
+        let labelOrigin = CGPoint(
+            x: center.x + radius + 5.0,
+            y: center.y - textSize.height * 0.5
+        )
+        labelString.draw(at: labelOrigin, withAttributes: attrs)
+        NSGraphicsContext.current = prevCtx
     }
 }
 
@@ -763,9 +851,13 @@ private struct CoreRoadmapPagedPDFPageView: View {
                             .frame(width: labelColumnWidth, height: rHeight, alignment: .leading)
 
                         case .task(let bar):
-                            Text(bar.task.title)
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(.black.opacity(0.86))
+                            Text(bar.isMilestone ? "◆ \(bar.task.title)" : bar.task.title)
+                                .font(.system(size: 10.5, weight: bar.isMilestone ? .bold : .medium))
+                                .foregroundStyle(
+                                    bar.isMilestone
+                                        ? ProjectRoadmapExporter.milestoneRoyalVioletColor
+                                        : .black.opacity(0.86)
+                                )
                                 .lineLimit(2)
                                 .padding(.leading, 16)
                                 .padding(.trailing, 6)
@@ -901,31 +993,63 @@ private struct CoreRoadmapPagedPDFPageView: View {
                                     if tBar.endEpochDay >= layout.startEpochDay && tBar.startEpochDay <= layout.endEpochDay {
                                         let cStart = max(layout.startEpochDay, tBar.startEpochDay)
                                         let cEnd = min(layout.endEpochDay, tBar.endEpochDay)
-                                        let cSpan = max(1, cEnd - cStart + 1)
-                                        let barX = CGFloat(cStart - layout.startEpochDay) * dayW + 1.5
-                                        let barW = max(min(dayW - 2, 10), CGFloat(cSpan) * dayW - 3.0)
-                                        let showInlineTitle = barW >= 46.0
-
-                                        HStack(spacing: 4) {
-                                            if showInlineTitle {
-                                                Text(tBar.task.title)
-                                                    .font(.system(size: 9.5, weight: .semibold))
-                                                    .foregroundStyle(.black.opacity(0.88))
-                                                    .lineLimit(1)
-                                            }
-                                            Spacer(minLength: 0)
-                                        }
-                                        .padding(.horizontal, showInlineTitle ? 6 : 0)
-                                        .frame(width: barW, height: 20)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                .fill(Color.white)
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                        .strokeBorder(skyAccent.opacity(0.52), lineWidth: 0.9)
+                                        if tBar.isMilestone {
+                                            let diamondRadius: CGFloat = 7.0
+                                            let centerX = (CGFloat(cStart - layout.startEpochDay) + 0.5) * dayW
+                                            let diamondPath = Path(
+                                                ProjectRoadmapExporter.makeDiamondCGPath(
+                                                    center: CGPoint(x: diamondRadius, y: diamondRadius),
+                                                    radius: diamondRadius
                                                 )
-                                        )
-                                        .offset(x: barX)
+                                            )
+                                            let estLabelW = CGFloat(tBar.task.title.count) * 6.2 + 24.0
+                                            let placeLeading = (gridW - (centerX + diamondRadius) < estLabelW) && (centerX - diamondRadius >= estLabelW)
+
+                                            ZStack {
+                                                diamondPath
+                                                    .fill(ProjectRoadmapExporter.milestoneRoyalVioletColor)
+                                                diamondPath
+                                                    .stroke(Color.white.opacity(0.92), lineWidth: 1.0)
+                                            }
+                                            .frame(width: diamondRadius * 2.0, height: diamondRadius * 2.0)
+                                            .overlay(alignment: placeLeading ? .leading : .trailing) {
+                                                Text("◆ \(tBar.task.title)")
+                                                    .font(.system(size: 9.5, weight: .bold))
+                                                    .foregroundStyle(ProjectRoadmapExporter.milestoneRoyalVioletColor)
+                                                    .lineLimit(1)
+                                                    .fixedSize(horizontal: true, vertical: false)
+                                                    .alignmentGuide(placeLeading ? .leading : .trailing) { d in
+                                                        placeLeading ? (d[.trailing] + 5) : (d[.leading] - 5)
+                                                    }
+                                            }
+                                            .offset(x: centerX - diamondRadius)
+                                        } else {
+                                            let cSpan = max(1, cEnd - cStart + 1)
+                                            let barX = CGFloat(cStart - layout.startEpochDay) * dayW + 1.5
+                                            let barW = max(min(dayW - 2, 10), CGFloat(cSpan) * dayW - 3.0)
+                                            let showInlineTitle = barW >= 46.0
+
+                                            HStack(spacing: 4) {
+                                                if showInlineTitle {
+                                                    Text(tBar.task.title)
+                                                        .font(.system(size: 9.5, weight: .semibold))
+                                                        .foregroundStyle(.black.opacity(0.88))
+                                                        .lineLimit(1)
+                                                }
+                                                Spacer(minLength: 0)
+                                            }
+                                            .padding(.horizontal, showInlineTitle ? 6 : 0)
+                                            .frame(width: barW, height: 20)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                    .fill(Color.white)
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                                            .strokeBorder(skyAccent.opacity(0.52), lineWidth: 0.9)
+                                                    )
+                                            )
+                                            .offset(x: barX)
+                                        }
                                     }
                                 }
                             }
@@ -954,8 +1078,12 @@ private struct CoreRoadmapPagedPDFPageView: View {
                             }
                             let cFromEnd = min(layout.endEpochDay, max(layout.startEpochDay, fromBar.endEpochDay))
                             let cToStart = max(layout.startEpochDay, min(layout.endEpochDay, toBar.startEpochDay))
-                            let x0 = CGFloat(cFromEnd - layout.startEpochDay + 1) * dayW - 1.5
-                            let x1 = CGFloat(cToStart - layout.startEpochDay) * dayW + 1.5
+                            let x0 = fromBar.isMilestone
+                                ? ((CGFloat(cFromEnd - layout.startEpochDay) + 0.5) * dayW + 7.0)
+                                : (CGFloat(cFromEnd - layout.startEpochDay + 1) * dayW - 1.5)
+                            let x1 = toBar.isMilestone
+                                ? ((CGFloat(cToStart - layout.startEpochDay) + 0.5) * dayW - 7.0)
+                                : (CGFloat(cToStart - layout.startEpochDay) * dayW + 1.5)
                             let p0 = CGPoint(x: x0, y: y0)
                             let p3 = CGPoint(x: x1, y: y1)
                             let dx = max(14.0, abs(p3.x - p0.x) * 0.5)
@@ -1141,9 +1269,13 @@ private struct CoreRoadmapSnapshotExportView: View {
                             .padding(.horizontal, 10)
                             .frame(width: labelColumnWidth, height: rHeight, alignment: .leading)
                         case .task(let bar):
-                            Text(bar.task.title)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.black.opacity(0.86))
+                            Text(bar.isMilestone ? "◆ \(bar.task.title)" : bar.task.title)
+                                .font(.system(size: 12, weight: bar.isMilestone ? .bold : .medium))
+                                .foregroundStyle(
+                                    bar.isMilestone
+                                        ? ProjectRoadmapExporter.milestoneRoyalVioletColor
+                                        : .black.opacity(0.86)
+                                )
                                 .lineLimit(1)
                                 .padding(.leading, 20)
                                 .padding(.trailing, 8)
@@ -1252,30 +1384,62 @@ private struct CoreRoadmapSnapshotExportView: View {
                                     if tBar.endEpochDay >= layout.startEpochDay && tBar.startEpochDay <= layout.endEpochDay {
                                         let cStart = max(layout.startEpochDay, tBar.startEpochDay)
                                         let cEnd = min(layout.endEpochDay, tBar.endEpochDay)
-                                        let cSpan = max(1, cEnd - cStart + 1)
-                                        let xOff = CGFloat(cStart - layout.startEpochDay) * dayColumnWidth + 3
-                                        let barW = max(dayColumnWidth - 6, CGFloat(cSpan) * dayColumnWidth - 6)
-                                        HStack(spacing: 5) {
-                                            Circle()
-                                                .strokeBorder(skyAccent, lineWidth: 1.4)
-                                                .frame(width: 10, height: 10)
-                                            Text(tBar.task.title)
-                                                .font(.system(size: 11, weight: .semibold))
-                                                .foregroundStyle(.black.opacity(0.88))
-                                                .lineLimit(1)
-                                            Spacer(minLength: 0)
-                                        }
-                                        .padding(.horizontal, 7)
-                                        .frame(width: barW, height: 24)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                                .fill(Color.white)
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                                        .strokeBorder(skyAccent.opacity(0.48), lineWidth: 1.0)
+                                        if tBar.isMilestone {
+                                            let diamondRadius: CGFloat = 8.5
+                                            let centerX = (CGFloat(cStart - layout.startEpochDay) + 0.5) * dayColumnWidth
+                                            let diamondPath = Path(
+                                                ProjectRoadmapExporter.makeDiamondCGPath(
+                                                    center: CGPoint(x: diamondRadius, y: diamondRadius),
+                                                    radius: diamondRadius
                                                 )
-                                        )
-                                        .offset(x: xOff)
+                                            )
+                                            let estLabelW = CGFloat(tBar.task.title.count) * 7.2 + 30.0
+                                            let placeLeading = (gridWidth - (centerX + diamondRadius) < estLabelW) && (centerX - diamondRadius >= estLabelW)
+
+                                            ZStack {
+                                                diamondPath
+                                                    .fill(ProjectRoadmapExporter.milestoneRoyalVioletColor)
+                                                diamondPath
+                                                    .stroke(Color.white.opacity(0.92), lineWidth: 1.2)
+                                            }
+                                            .frame(width: diamondRadius * 2.0, height: diamondRadius * 2.0)
+                                            .overlay(alignment: placeLeading ? .leading : .trailing) {
+                                                Text("◆ \(tBar.task.title)")
+                                                    .font(.system(size: 11, weight: .bold))
+                                                    .foregroundStyle(ProjectRoadmapExporter.milestoneRoyalVioletColor)
+                                                    .lineLimit(1)
+                                                    .fixedSize(horizontal: true, vertical: false)
+                                                    .alignmentGuide(placeLeading ? .leading : .trailing) { d in
+                                                        placeLeading ? (d[.trailing] + 6) : (d[.leading] - 6)
+                                                    }
+                                            }
+                                            .offset(x: centerX - diamondRadius)
+                                        } else {
+                                            let cSpan = max(1, cEnd - cStart + 1)
+                                            let xOff = CGFloat(cStart - layout.startEpochDay) * dayColumnWidth + 3
+                                            let barW = max(dayColumnWidth - 6, CGFloat(cSpan) * dayColumnWidth - 6)
+                                            HStack(spacing: 5) {
+                                                Circle()
+                                                    .strokeBorder(skyAccent, lineWidth: 1.4)
+                                                    .frame(width: 10, height: 10)
+                                                Text(tBar.task.title)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundStyle(.black.opacity(0.88))
+                                                    .lineLimit(1)
+                                                Spacer(minLength: 0)
+                                            }
+                                            .padding(.horizontal, 7)
+                                            .frame(width: barW, height: 24)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                    .fill(Color.white)
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                            .strokeBorder(skyAccent.opacity(0.48), lineWidth: 1.0)
+                                                    )
+                                            )
+                                            .offset(x: xOff)
+                                        }
                                     }
                                 }
                             }
@@ -1303,8 +1467,12 @@ private struct CoreRoadmapSnapshotExportView: View {
                             }
                             let cFromEnd = min(layout.endEpochDay, max(layout.startEpochDay, fromBar.endEpochDay))
                             let cToStart = max(layout.startEpochDay, min(layout.endEpochDay, toBar.startEpochDay))
-                            let x0 = CGFloat(cFromEnd - layout.startEpochDay + 1) * dayColumnWidth - 3
-                            let x1 = CGFloat(cToStart - layout.startEpochDay) * dayColumnWidth + 3
+                            let x0 = fromBar.isMilestone
+                                ? ((CGFloat(cFromEnd - layout.startEpochDay) + 0.5) * dayColumnWidth + 8.5)
+                                : (CGFloat(cFromEnd - layout.startEpochDay + 1) * dayColumnWidth - 3)
+                            let x1 = toBar.isMilestone
+                                ? ((CGFloat(cToStart - layout.startEpochDay) + 0.5) * dayColumnWidth - 8.5)
+                                : (CGFloat(cToStart - layout.startEpochDay) * dayColumnWidth + 3)
                             let p0 = CGPoint(x: x0, y: y0)
                             let p3 = CGPoint(x: x1, y: y1)
                             let dx = max(22.0, abs(p3.x - p0.x) * 0.5)

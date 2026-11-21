@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
+  ArrowLeftRight,
   ArrowUp,
   ArrowUpDown,
   CalendarDays,
@@ -233,6 +234,7 @@ export const App: React.FC = () => {
   });
   const [selectedFilterTagId, setSelectedFilterTagId] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [isExplicitMultiSelect, setIsExplicitMultiSelect] = useState(false);
   const lastSelectedAnchorIdRef = useRef<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
 
@@ -1386,13 +1388,16 @@ export const App: React.FC = () => {
 
   // Auto-prune completed/canceled/deleted/moved task IDs out of multi-selection (ThingsbookViewModel.kt v1.6.17+)
   useEffect(() => {
-    if (selectedTaskIds.length === 0) return;
+    if (selectedTaskIds.length === 0) {
+      if (isExplicitMultiSelect) setIsExplicitMultiSelect(false);
+      return;
+    }
     const visibleIds = new Set(currentViewBaseTasks.map((tk) => tk.id));
     setSelectedTaskIds((prev) => {
       const next = prev.filter((id) => visibleIds.has(id));
       return next.length === prev.length ? prev : next;
     });
-  }, [currentViewBaseTasks, selectedTaskIds.length]);
+  }, [currentViewBaseTasks, selectedTaskIds.length, isExplicitMultiSelect]);
 
   // ViewTagFilterUtils: compute usedTags strictly from currentViewBaseTasks
   const usedTagsInCurrentView = useMemo((): TagRecord[] => {
@@ -2193,6 +2198,7 @@ export const App: React.FC = () => {
         ) {
           if (orderedVisibleTaskIds.length > 0) {
             e.preventDefault();
+            setIsExplicitMultiSelect(true);
             setSelectedTaskIds(orderedVisibleTaskIds);
           }
           return;
@@ -2306,16 +2312,25 @@ export const App: React.FC = () => {
             Math.min(i1, i2),
             Math.max(i1, i2) + 1
           );
-          setSelectedTaskIds((prev) => Array.from(new Set([...prev, ...slice])));
+          const next = Array.from(new Set([...selectedTaskIds, ...slice]));
+          if (next.length > 1) {
+            setIsExplicitMultiSelect(true);
+          }
+          setSelectedTaskIds(next);
           return;
         }
       }
       lastSelectedAnchorIdRef.current = taskId;
       if (multiToggle) {
-        setSelectedTaskIds((prev) =>
-          prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
-        );
+        setSelectedTaskIds((prev) => {
+          const next = prev.includes(taskId)
+            ? prev.filter((id) => id !== taskId)
+            : [...prev, taskId];
+          setIsExplicitMultiSelect(next.length > 0);
+          return next;
+        });
       } else {
+        setIsExplicitMultiSelect(false);
         setSelectedTaskIds([taskId]);
       }
     },
@@ -2545,7 +2560,7 @@ export const App: React.FC = () => {
       isExpanded={false}
       isTodayView={activeNav.kind === 'smart' && activeNav.view === 'TODAY'}
       isSelected={selectedTaskIds.includes(tk.id)}
-      isMultiSelectMode={selectedTaskIds.length > 0}
+      isMultiSelectMode={isExplicitMultiSelect}
       showContextSubtitle={showContextSubtitle}
       showScheduleBadgeInCollapsed={
         activeNav.kind === 'project' ||
@@ -2843,6 +2858,9 @@ export const App: React.FC = () => {
         }
         onOpenTemplates={(areaId) =>
           setTemplatesModal({ open: true, tab: 'gallery', areaId })
+        }
+        onOpenExternalImport={(areaId) =>
+          setTemplatesModal({ open: true, tab: 'external', areaId })
         }
         onOpenWeeklyReview={() => setWeeklyReviewModal({ open: true, step: 1 })}
         onOpenManageAreas={() => setAreaManagerOpen(true)}
@@ -3883,6 +3901,41 @@ export const App: React.FC = () => {
                         </button>
                       </div>
                     </div>
+
+                    <div className="project-action-pills">
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        data-testid="area-new-project-btn"
+                        onClick={() =>
+                          setProjectModalState({
+                            open: true,
+                            project: null,
+                            defaultAreaId: area.id
+                          })
+                        }
+                      >
+                        <Plus size={12.5} />
+                        <span>{t.entityNewProject}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        data-testid="area-external-import-btn"
+                        style={{ whiteSpace: 'normal', height: 'auto' }}
+                        title={t.importAsanaPlannerLabel}
+                        onClick={() =>
+                          setTemplatesModal({
+                            open: true,
+                            tab: 'external',
+                            areaId: area.id
+                          })
+                        }
+                      >
+                        <ArrowLeftRight size={12.5} style={{ flexShrink: 0 }} />
+                        <span>{t.externalImportExportTab}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* View Tag Strip */}
@@ -4556,6 +4609,7 @@ export const App: React.FC = () => {
                       openTaskIdSet={openTaskIdSet}
                       tasksByIdMap={tasksByIdMap}
                       selectedTaskIds={selectedTaskIds}
+                      isMultiSelectMode={isExplicitMultiSelect}
                       orderedVisibleTaskIds={orderedVisibleTaskIds}
                       viewSortMode={viewSortMode}
                       lang={lang}
@@ -4604,6 +4658,7 @@ export const App: React.FC = () => {
                       }}
                       layout={activeProjectRoadmapLayout}
                       selectedTaskIds={selectedTaskIds}
+                      isMultiSelectMode={isExplicitMultiSelect}
                       orderedVisibleTaskIds={orderedVisibleTaskIds}
                       lang={lang}
                       isDark={isEffectiveDarkTheme}
@@ -5175,7 +5230,7 @@ export const App: React.FC = () => {
         </div>
 
         {/* Floating Multi-Selection Bar (ThingsMultiSelectionBar; hidden in Timeline/Roadmap Full Screen) */}
-        {!isAnyTimelineFullScreen && selectedTaskIds.length > 0 && !expandedTaskId && (() => {
+        {!isAnyTimelineFullScreen && selectedTaskIds.length > 0 && !expandedTaskId && (selectedTaskIds.length > 1 || isExplicitMultiSelect) && (() => {
           const allVisibleIds = orderedVisibleTaskIds;
           const allSelectedPinned =
             selectedTaskIds.length > 0 &&
@@ -5191,7 +5246,10 @@ export const App: React.FC = () => {
                   type="button"
                   className="chip-btn"
                   title={t.multiSelectSelectAllTooltip}
-                  onClick={() => setSelectedTaskIds(allVisibleIds)}
+                  onClick={() => {
+                    setIsExplicitMultiSelect(true);
+                    setSelectedTaskIds(allVisibleIds);
+                  }}
                 >
                   {t.multiSelectAll}
                 </button>

@@ -437,6 +437,7 @@ class ThingsRepository @Inject constructor(
         recurrenceRule: RecurrenceRule? = null,
         sortOrder: Double = 1000.0,
         isPinned: Boolean? = null,
+        isMilestone: Boolean? = null,
         effortLevel: String? = null,
         blockedByTaskIds: List<String>? = null,
         workspaceId: String? = null,
@@ -464,6 +465,7 @@ class ThingsRepository @Inject constructor(
         val resolvedStartMins = scheduledStartMinutes ?: if (preserveExistingTimeblock) existing?.scheduledStartMinutes else null
         val resolvedDurationMins = durationMinutes ?: if (preserveExistingTimeblock) existing?.durationMinutes else null
         val resolvedIsPinned = isPinned ?: existing?.isPinned ?: false
+        val resolvedIsMilestone = isMilestone ?: existing?.isMilestone ?: false
         val resolvedEffortLevel = if (effortLevel != null) {
             EffortLevel.normalize(effortLevel)
         } else {
@@ -496,6 +498,7 @@ class ThingsRepository @Inject constructor(
             recurrenceRuleJson = recurrenceRule?.let { json.encodeToString(it) },
             sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
             isPinned = resolvedIsPinned,
+            isMilestone = resolvedIsMilestone,
             effortLevel = resolvedEffortLevel,
             blockedByJson = resolvedBlockedByJson,
             workspaceId = resolvedWorkspaceId,
@@ -525,6 +528,28 @@ class ThingsRepository @Inject constructor(
 
         syncRepository.triggerBackgroundSync()
         return id
+    }
+
+    suspend fun setTaskMilestone(taskId: String, isMilestone: Boolean) {
+        val cleanId = taskId.trim()
+        if (cleanId.isEmpty()) return
+        val existing = database.taskDao().getById(cleanId) ?: return
+        if (existing.isDeleted || existing.isMilestone == isMilestone) return
+        val updatedAt = maxOf(System.currentTimeMillis(), existing.updatedAt + 1L)
+        database.taskDao().updateTaskMilestone(cleanId, isMilestone, updatedAt)
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun toggleTaskMilestone(taskId: String): Boolean {
+        val cleanId = taskId.trim()
+        if (cleanId.isEmpty()) return false
+        val existing = database.taskDao().getById(cleanId) ?: return false
+        if (existing.isDeleted) return false
+        val next = !existing.isMilestone
+        val updatedAt = maxOf(System.currentTimeMillis(), existing.updatedAt + 1L)
+        database.taskDao().updateTaskMilestone(cleanId, next, updatedAt)
+        syncRepository.triggerBackgroundSync()
+        return next
     }
 
     suspend fun setTasksPinned(taskIds: Collection<String>, isPinned: Boolean) {
@@ -654,6 +679,7 @@ class ThingsRepository @Inject constructor(
                         scheduledStartMinutes = null,
                         durationMinutes = null,
                         isPinned = false,
+                        isMilestone = false,
                         effortLevel = null,
                         blockedByJson = "[]",
                         workspaceId = null,
@@ -2797,6 +2823,7 @@ class ThingsRepository @Inject constructor(
                     scheduledStartMinutes = null,
                     durationMinutes = null,
                     isPinned = false,
+                    isMilestone = false,
                     effortLevel = null,
                     blockedByJson = "[]",
                     workspaceId = null,
@@ -2923,6 +2950,7 @@ class ThingsRepository @Inject constructor(
             completedAt = null,
             reminderTime = existing.reminderTime?.takeIf { it > now },
             isPinned = false,
+            isMilestone = existing.isMilestone,
             blockedByJson = "[]",
             sortOrder = existing.sortOrder + 10.0,
             createdAt = now,
@@ -3555,6 +3583,7 @@ class ThingsRepository @Inject constructor(
                 scheduledStartMinutes = scheduledStartMinutes,
                 durationMinutes = durationMinutes,
                 isEvening = scheduleState == ScheduleState.THIS_EVENING,
+                isMilestone = isMilestone,
                 tagIds = decodeStringList(tagIdsJson)
             )
         }
@@ -3706,6 +3735,7 @@ class ThingsRepository @Inject constructor(
                     areaId = resolvedAreaId,
                     recurrenceRuleJson = null,
                     sortOrder = sortOrder,
+                    isMilestone = taskBp.isMilestone,
                     tagIdsJson = json.encodeToString(validTaskTags),
                     createdAt = now,
                     updatedAt = now,
@@ -3911,6 +3941,7 @@ class ThingsRepository @Inject constructor(
                     recurrenceRuleJson = null,
                     sortOrder = sortOrder,
                     isPinned = extTask.isPinned,
+                    isMilestone = extTask.isMilestone,
                     effortLevel = EffortLevel.normalize(extTask.effortLevel),
                     assigneeId = extTask.assigneeId?.trim()?.takeIf { it.isNotEmpty() },
                     tagIdsJson = json.encodeToString(taskTagIds),
@@ -4693,6 +4724,7 @@ class ThingsRepository @Inject constructor(
                         scheduledStartMinutes = t.scheduledStartMinutes,
                         durationMinutes = t.durationMinutes,
                         isPinned = t.isPinned,
+                        isMilestone = t.isMilestone,
                         effortLevel = t.effortLevel,
                         blockedByJson = t.blockedByJson,
                         workspaceId = t.workspaceId,
@@ -4943,6 +4975,7 @@ class ThingsRepository @Inject constructor(
                     scheduledStartMinutes = t.scheduledStartMinutes?.takeIf { it in 0..1439 },
                     durationMinutes = t.durationMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
                     isPinned = t.isPinned,
+                    isMilestone = t.isMilestone,
                     effortLevel = EffortLevel.normalize(t.effortLevel),
                     blockedByJson = json.encodeToString(cleanBlockedByIds),
                     workspaceId = t.workspaceId?.trim()?.takeIf { it.isNotEmpty() },
@@ -5106,6 +5139,7 @@ class ThingsRepository @Inject constructor(
         scheduledStartMinutes = task.scheduledStartMinutes,
         durationMinutes = task.durationMinutes,
         isPinned = task.isPinned,
+        isMilestone = task.isMilestone,
         effortLevel = task.effortLevel,
         blockedByTaskIds = decodeStringList(task.blockedByJson),
         workspaceId = task.workspaceId,

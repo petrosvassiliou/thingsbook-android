@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.0.0-beta.14';
-export const APP_BUILD_CODE = 105;
+export const APP_VERSION = '3.0.0-beta.15';
+export const APP_BUILD_CODE = 106;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -129,6 +129,7 @@ export interface TaskRecord {
   scheduledStartMinutes?: number | null;
   durationMinutes?: number | null;
   isPinned?: boolean;
+  isMilestone?: boolean;
   effortLevel?: EffortLevel | null;
   blockedByTaskIds?: string[];
   workspaceId?: string | null;
@@ -158,7 +159,10 @@ export interface ProjectTemplateTaskBlueprint {
   scheduleState?: ScheduleState;
   scheduledStartMinutes?: number | null;
   durationMinutes?: number | null;
+  isMilestone?: boolean;
 }
+
+export type BlueprintTask = ProjectTemplateTaskBlueprint;
 
 export interface ProjectTemplateHeadingBlueprint {
   title: string;

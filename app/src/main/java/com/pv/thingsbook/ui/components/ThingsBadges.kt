@@ -1,5 +1,6 @@
 package com.pv.thingsbook.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,10 +32,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pv.thingsbook.R
 import com.pv.thingsbook.domain.model.ScheduleState
@@ -77,6 +84,42 @@ fun SmartViewIcon(
 }
 
 @Composable
+fun ThingsMilestoneDiamondIcon(
+    filled: Boolean,
+    tint: Color,
+    size: Dp = 14.dp,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier
+            .size(size)
+            .graphicsLayer { rotationZ = 45f }
+    ) {
+        val side = this.size.minDimension * 0.72f
+        val insetX = (this.size.width - side) / 2f
+        val insetY = (this.size.height - side) / 2f
+        val cornerPx = 2.2.dp.toPx().coerceAtMost(side * 0.28f)
+        if (filled) {
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(insetX, insetY),
+                size = Size(side, side),
+                cornerRadius = CornerRadius(cornerPx, cornerPx)
+            )
+        } else {
+            val strokePx = 1.65.dp.toPx()
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(insetX + strokePx / 2f, insetY + strokePx / 2f),
+                size = Size((side - strokePx).coerceAtLeast(1f), (side - strokePx).coerceAtLeast(1f)),
+                cornerRadius = CornerRadius(cornerPx, cornerPx),
+                style = Stroke(width = strokePx)
+            )
+        }
+    }
+}
+
+@Composable
 fun ThisEveningHeaderBadge(
     modifier: Modifier = Modifier
 ) {
@@ -105,6 +148,9 @@ fun ThingsTagPill(
     title: String,
     modifier: Modifier = Modifier,
     tooltipText: String? = null,
+    containerColor: Color? = null,
+    contentColor: Color? = null,
+    borderColor: Color? = null,
     onClick: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
@@ -113,6 +159,10 @@ fun ThingsTagPill(
     val interactiveHover = isHovered && onClick != null
     val shape = RoundedCornerShape(50)
 
+    val resolvedBg = containerColor ?: if (interactiveHover) colors.thingsBlueSoft else colors.tagPillBg
+    val resolvedFg = contentColor ?: if (interactiveHover) colors.thingsBlue else colors.tagPillText
+    val resolvedBorder = borderColor ?: if (interactiveHover) colors.thingsBlue.copy(alpha = 0.42f) else Color.Transparent
+
     ThingsHoverTooltip(
         text = tooltipText ?: title,
         modifier = modifier
@@ -120,10 +170,10 @@ fun ThingsTagPill(
         Box(
             modifier = Modifier
                 .clip(shape)
-                .background(if (interactiveHover) colors.thingsBlueSoft else colors.tagPillBg)
+                .background(resolvedBg)
                 .border(
                     width = 0.75.dp,
-                    color = if (interactiveHover) colors.thingsBlue.copy(alpha = 0.42f) else Color.Transparent,
+                    color = resolvedBorder,
                     shape = shape
                 )
                 .hoverable(interactionSource = hoverSource, enabled = onClick != null)
@@ -133,8 +183,10 @@ fun ThingsTagPill(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (interactiveHover) colors.thingsBlue else colors.tagPillText
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = if (contentColor != null) FontWeight.Bold else FontWeight.SemiBold
+                ),
+                color = resolvedFg
             )
         }
     }

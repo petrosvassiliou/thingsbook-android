@@ -41,7 +41,10 @@ export interface PlottedRoadmapTask {
   isClippedStart: boolean;
   isClippedEnd: boolean;
   isActivelyBlocked: boolean;
+  isMilestone: boolean;
 }
+
+export type RoadmapPlottedTask = PlottedRoadmapTask;
 
 export interface RoadmapPhaseLane {
   heading: HeadingRecord | null;
@@ -143,6 +146,20 @@ function resolveRawTaskSpan(
   task: TaskRecord,
   normalizedHeadingId: string | null
 ): RawResolvedTaskSpan | null {
+  if (task.isMilestone) {
+    if (task.deadline != null || task.whenDate != null) {
+      const targetMs = task.deadline ?? task.whenDate!;
+      const targetDay = startOfDayEpoch(new Date(targetMs));
+      return {
+        task,
+        headingId: normalizedHeadingId,
+        startEpoch: targetDay,
+        endEpoch: targetDay
+      };
+    }
+    return null;
+  }
+
   const durationDays = Math.max(1, Math.ceil((task.durationMinutes ?? 30) / MINUTES_PER_WORKDAY));
 
   if (task.whenDate != null && task.deadline != null) {
@@ -462,7 +479,8 @@ export function buildProjectRoadmapLayout(
         spanDays: endDayIndex - startDayIndex + 1,
         isClippedStart: rawS < 0,
         isClippedEnd: rawE >= totalDays,
-        isActivelyBlocked: activelyBlocked
+        isActivelyBlocked: activelyBlocked,
+        isMilestone: Boolean(sp.task.isMilestone)
       };
       allPlottedTasks.push(item);
       plottedById.set(sp.task.id, item);
@@ -720,6 +738,7 @@ const UNICODE_PUNCTUATION_MAP: Record<string, string> = {
   '\u201D': '"',
   '\u2026': '...',
   '\u2022': '*',
+  '\u25C6': '<>',
   '\u00A0': ' ',
   '\u2192': '->'
 };
@@ -727,7 +746,7 @@ const UNICODE_PUNCTUATION_MAP: Record<string, string> = {
 export function sanitizePdfText(raw: string, maxLen: number = 96): string {
   const normalized = (raw || '')
     .replace(/[\r\n\t]+/g, ' ')
-    .replace(/[\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u2022\u00A0\u2192]/g, (ch) => {
+    .replace(/[\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u2022\u25C6\u00A0\u2192]/g, (ch) => {
       return UNICODE_PUNCTUATION_MAP[ch] ?? ' ';
     })
     .trim();
@@ -917,6 +936,7 @@ export function generateRoadmapPdfBytes(
     kind: 'task';
     task: TaskRecord;
     isActivelyBlocked: boolean;
+    isMilestone: boolean;
     rowH: number;
     barStartIdx: number;
     barEndIdx: number;
@@ -991,6 +1011,7 @@ export function generateRoadmapPdfBytes(
         kind: 'task',
         task: pt.task,
         isActivelyBlocked: pt.isActivelyBlocked,
+        isMilestone: Boolean(pt.isMilestone || pt.task.isMilestone),
         rowH: taskRowH,
         barStartIdx: sIdx,
         barEndIdx: eIdx,
@@ -1306,57 +1327,118 @@ export function generateRoadmapPdfBytes(
         cursorY += row.rowH;
       } else {
         const tk = row.task;
-        fillRgb(91, 98, 110);
-        const prefix = tk.status === 'COMPLETED' ? '[x] ' : '[ ] ';
-        drawText(
-          `${prefix}${tk.title || 'To-Do'}`,
-          marginX + 16,
-          cursorY + 15.5,
-          'F1',
-          8.1,
-          taskMaxChars
-        );
-
-        const rawBarX = timelineLeft + row.barStartIdx * dayColW + 2;
-        const maxAvailW = Math.max(4, timelineLeft + gridW - rawBarX - 2);
-        const barW = Math.min(maxAvailW, Math.max(6, row.barSpanDays * dayColW - 4));
-        const barY = cursorY + 4;
-        const barH = row.rowH - 8;
-
-        if (tk.status === 'COMPLETED') {
-          fillRgb(232, 248, 238);
-          strokeRgb(46, 173, 91);
-        } else if (row.isActivelyBlocked) {
-          fillRgb(255, 243, 232);
-          strokeRgb(234, 88, 12);
-        } else if (tk.scheduleState === 'TODAY' || tk.scheduleState === 'THIS_EVENING') {
-          fillRgb(229, 243, 255);
-          strokeRgb(56, 152, 236);
-        } else {
-          fillRgb(240, 247, 255);
-          strokeRgb(116, 196, 255);
-        }
-        ops.push('0.9 w');
-        rectFillStroke(rawBarX, barY, barW, barH);
-        ops.push('0.55 w');
-
-        fillRgb(23, 26, 30);
-        if (barW >= 44) {
-          drawText(
-            tk.title || 'To-Do',
-            rawBarX + 5,
-            cursorY + 15,
-            'F1',
-            7.4,
-            Math.max(6, Math.floor(barW / 4.4))
+        if (row.isMilestone) {
+          // Left column: royal-violet vector mini-diamond + bold milestone title
+          const lcx = marginX + 19.5;
+          const lcy = cursorY + row.rowH / 2;
+          const lr = 3.2;
+          fillRgb(124, 58, 237);
+          ops.push(
+            `${fmtNum(lcx)} ${fmtNum(pdfY(lcy - lr))} m ${fmtNum(lcx + lr)} ${fmtNum(pdfY(lcy))} l ${fmtNum(lcx)} ${fmtNum(pdfY(lcy + lr))} l ${fmtNum(lcx - lr)} ${fmtNum(pdfY(lcy))} l h f`
           );
-        }
+          fillRgb(124, 58, 237);
+          drawText(
+            tk.title || 'Milestone',
+            marginX + 26,
+            cursorY + 15.5,
+            'F2',
+            8.1,
+            taskMaxChars
+          );
 
-        taskBarCoords.set(tk.id, {
-          xLeft: rawBarX,
-          xRight: rawBarX + barW,
-          yMid: cursorY + row.rowH / 2
-        });
+          // Timeline: true 45° vector diamond polygon in royal violet (#7C3AED) centered on milestone day
+          const cx = timelineLeft + row.barStartIdx * dayColW + dayColW / 2;
+          const cy = cursorY + row.rowH / 2;
+          const r = 6.5;
+          fillRgb(124, 58, 237);
+          strokeRgb(91, 33, 182);
+          ops.push('1.0 w');
+          ops.push(
+            `${fmtNum(cx)} ${fmtNum(pdfY(cy - r))} m ${fmtNum(cx + r)} ${fmtNum(pdfY(cy))} l ${fmtNum(cx)} ${fmtNum(pdfY(cy + r))} l ${fmtNum(cx - r)} ${fmtNum(pdfY(cy))} l h B`
+          );
+          const ir = 2.4;
+          fillRgb(255, 255, 255);
+          ops.push(
+            `${fmtNum(cx)} ${fmtNum(pdfY(cy - ir))} m ${fmtNum(cx + ir)} ${fmtNum(pdfY(cy))} l ${fmtNum(cx)} ${fmtNum(pdfY(cy + ir))} l ${fmtNum(cx - ir)} ${fmtNum(pdfY(cy))} l h f`
+          );
+          ops.push('0.55 w');
+
+          const msLabel = `◆ ${tk.title || 'Milestone'}`;
+          const estMsW = msLabel.length * 4.5 + 10;
+          const spaceRightPt = timelineLeft + gridW - (cx + r + 5);
+          fillRgb(124, 58, 237);
+          if (spaceRightPt >= estMsW || spaceRightPt >= cx - r - timelineLeft) {
+            drawText(
+              msLabel,
+              cx + r + 5,
+              cursorY + 15,
+              'F2',
+              7.6,
+              Math.max(12, Math.floor(Math.max(48, spaceRightPt) / 4.3))
+            );
+          } else {
+            const leftLabelX = Math.max(timelineLeft + 3, cx - r - estMsW);
+            drawText(msLabel, leftLabelX, cursorY + 15, 'F2', 7.6, 64);
+          }
+
+          taskBarCoords.set(tk.id, {
+            xLeft: cx - r,
+            xRight: cx + r,
+            yMid: cy
+          });
+        } else {
+          fillRgb(91, 98, 110);
+          const prefix = tk.status === 'COMPLETED' ? '[x] ' : '[ ] ';
+          drawText(
+            `${prefix}${tk.title || 'To-Do'}`,
+            marginX + 16,
+            cursorY + 15.5,
+            'F1',
+            8.1,
+            taskMaxChars
+          );
+
+          const rawBarX = timelineLeft + row.barStartIdx * dayColW + 2;
+          const maxAvailW = Math.max(4, timelineLeft + gridW - rawBarX - 2);
+          const barW = Math.min(maxAvailW, Math.max(6, row.barSpanDays * dayColW - 4));
+          const barY = cursorY + 4;
+          const barH = row.rowH - 8;
+
+          if (tk.status === 'COMPLETED') {
+            fillRgb(232, 248, 238);
+            strokeRgb(46, 173, 91);
+          } else if (row.isActivelyBlocked) {
+            fillRgb(255, 243, 232);
+            strokeRgb(234, 88, 12);
+          } else if (tk.scheduleState === 'TODAY' || tk.scheduleState === 'THIS_EVENING') {
+            fillRgb(229, 243, 255);
+            strokeRgb(56, 152, 236);
+          } else {
+            fillRgb(240, 247, 255);
+            strokeRgb(116, 196, 255);
+          }
+          ops.push('0.9 w');
+          rectFillStroke(rawBarX, barY, barW, barH);
+          ops.push('0.55 w');
+
+          fillRgb(23, 26, 30);
+          if (barW >= 44) {
+            drawText(
+              tk.title || 'To-Do',
+              rawBarX + 5,
+              cursorY + 15,
+              'F1',
+              7.4,
+              Math.max(6, Math.floor(barW / 4.4))
+            );
+          }
+
+          taskBarCoords.set(tk.id, {
+            xLeft: rawBarX,
+            xRight: rawBarX + barW,
+            yMid: cursorY + row.rowH / 2
+          });
+        }
 
         strokeRgb(238, 241, 246);
         line(marginX, cursorY + row.rowH, marginX + tableW, cursorY + row.rowH);
@@ -1469,6 +1551,8 @@ export function generateRoadmapPdfBytes(
 
   return new TextEncoder().encode(pdf);
 }
+
+export const exportProjectRoadmapPdf = generateRoadmapPdfBytes;
 
 export function renderRoadmapToPngDataUrl(
   layout: ProjectRoadmapLayout,
@@ -1685,43 +1769,88 @@ export function renderRoadmapToPngDataUrl(
 
     for (const pt of lane.plottedTasks) {
       const tk = pt.task;
-      ctx.fillStyle = textSecondary;
-      ctx.font = '500 11px Inter, system-ui, sans-serif';
-      ctx.fillText((tk.title || 'To-Do').slice(0, 34), marginX + 20, cursorY + 18);
+      const isMs = Boolean(pt.isMilestone || tk.isMilestone);
+      if (isMs) {
+        const violetColor = isDark ? '#A78BFA' : '#7C3AED';
+        ctx.fillStyle = violetColor;
+        ctx.font = '700 11px Inter, system-ui, sans-serif';
+        ctx.fillText(`◆ ${(tk.title || 'Milestone').slice(0, 32)}`, marginX + 20, cursorY + 18);
 
-      const barX = timelineLeft + pt.startDayIndex * dayColW + 4;
-      const barW = Math.min(
-        Math.max(8, timelineLeft + gridW - barX - 4),
-        Math.max(14, pt.spanDays * dayColW - 8)
-      );
-      const barY = cursorY + 4;
-      const barH = taskRowH - 8;
+        const cx = timelineLeft + pt.startDayIndex * dayColW + dayColW / 2;
+        const cy = cursorY + taskRowH / 2;
+        const r = 8;
 
-      ctx.fillStyle = pt.isActivelyBlocked
-        ? isDark
-          ? 'rgba(251, 146, 60, 0.22)'
-          : '#FFF7ED'
-        : isDark
-          ? 'rgba(107, 192, 255, 0.20)'
-          : '#E5F3FF';
-      ctx.strokeStyle = pt.isActivelyBlocked ? '#EA580C' : '#3898EC';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.roundRect(barX, barY, barW, barH, 6);
-      ctx.fill();
-      ctx.stroke();
+        ctx.fillStyle = '#7C3AED';
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r);
+        ctx.lineTo(cx + r, cy);
+        ctx.lineTo(cx, cy + r);
+        ctx.lineTo(cx - r, cy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
 
-      if (barW >= 52) {
-        ctx.fillStyle = textPrimary;
-        ctx.font = '550 10px Inter, system-ui, sans-serif';
-        ctx.fillText((tk.title || 'To-Do').slice(0, Math.floor(barW / 6)), barX + 7, cursorY + 17.5);
+        const msCallout = `◆ ${tk.title || 'Milestone'}`;
+        ctx.font = '700 10.5px Inter, system-ui, sans-serif';
+        ctx.fillStyle = violetColor;
+        const measuredMsW = ctx.measureText(msCallout).width;
+        const spaceRight = timelineLeft + gridW - (cx + r + 7);
+        if (spaceRight >= measuredMsW + 4 || spaceRight >= cx - r - timelineLeft) {
+          ctx.fillText(msCallout, cx + r + 7, cursorY + 17.5);
+        } else {
+          ctx.fillText(
+            msCallout,
+            Math.max(timelineLeft + 4, cx - r - measuredMsW - 7),
+            cursorY + 17.5
+          );
+        }
+
+        barCoords.set(tk.id, {
+          xLeft: cx - r,
+          xRight: cx + r,
+          yMid: cy
+        });
+      } else {
+        ctx.fillStyle = textSecondary;
+        ctx.font = '500 11px Inter, system-ui, sans-serif';
+        ctx.fillText((tk.title || 'To-Do').slice(0, 34), marginX + 20, cursorY + 18);
+
+        const barX = timelineLeft + pt.startDayIndex * dayColW + 4;
+        const barW = Math.min(
+          Math.max(8, timelineLeft + gridW - barX - 4),
+          Math.max(14, pt.spanDays * dayColW - 8)
+        );
+        const barY = cursorY + 4;
+        const barH = taskRowH - 8;
+
+        ctx.fillStyle = pt.isActivelyBlocked
+          ? isDark
+            ? 'rgba(251, 146, 60, 0.22)'
+            : '#FFF7ED'
+          : isDark
+            ? 'rgba(107, 192, 255, 0.20)'
+            : '#E5F3FF';
+        ctx.strokeStyle = pt.isActivelyBlocked ? '#EA580C' : '#3898EC';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barW, barH, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        if (barW >= 52) {
+          ctx.fillStyle = textPrimary;
+          ctx.font = '550 10px Inter, system-ui, sans-serif';
+          ctx.fillText((tk.title || 'To-Do').slice(0, Math.floor(barW / 6)), barX + 7, cursorY + 17.5);
+        }
+
+        barCoords.set(tk.id, {
+          xLeft: barX,
+          xRight: barX + barW,
+          yMid: cursorY + taskRowH / 2
+        });
       }
-
-      barCoords.set(tk.id, {
-        xLeft: barX,
-        xRight: barX + barW,
-        yMid: cursorY + taskRowH / 2
-      });
 
       ctx.strokeStyle = borderSubtle;
       ctx.lineWidth = 1;
@@ -1794,6 +1923,8 @@ export function renderRoadmapToPngDataUrl(
 
   return canvas.toDataURL('image/png');
 }
+
+export const exportProjectRoadmapPng = renderRoadmapToPngDataUrl;
 
 export function slugifyFilename(title: string): string {
   const slug = (title || 'project')

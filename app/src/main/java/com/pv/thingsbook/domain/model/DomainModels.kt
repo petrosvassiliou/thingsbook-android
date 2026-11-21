@@ -154,6 +154,7 @@ data class TaskItem(
     val recurrenceRule: RecurrenceRule?,
     val sortOrder: Double,
     val isPinned: Boolean = false,
+    val isMilestone: Boolean = false,
     val effortLevel: String? = null,
     val blockedByTaskIds: List<String> = emptyList(),
     val workspaceId: String? = null,

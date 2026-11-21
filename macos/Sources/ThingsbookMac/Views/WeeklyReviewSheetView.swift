@@ -208,6 +208,7 @@ public struct WeeklyReviewSheetView: View {
                         ThingsCheckboxButton(
                             status: task.status,
                             isSomeday: false,
+                            isMilestone: task.isMilestone,
                             helpText: store.tr("macos_checkbox_help"),
                             onToggleComplete: {
                                 store.toggleTaskCompletion(task)
@@ -297,6 +298,7 @@ public struct WeeklyReviewSheetView: View {
                     ThingsCheckboxButton(
                         status: task.status,
                         isSomeday: task.scheduleState == .someday,
+                        isMilestone: task.isMilestone,
                         helpText: store.tr("macos_checkbox_help"),
                         onToggleComplete: {
                             store.toggleTaskCompletion(task)
@@ -493,6 +495,7 @@ public struct WeeklyReviewSheetView: View {
                     ThingsCheckboxButton(
                         status: task.status,
                         isSomeday: true,
+                        isMilestone: task.isMilestone,
                         helpText: store.tr("macos_checkbox_help"),
                         onToggleComplete: {
                             store.toggleTaskCompletion(task)

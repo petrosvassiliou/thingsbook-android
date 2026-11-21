@@ -1426,7 +1426,7 @@ fun ThingsTemplatesAndImportModal(
                             color = colors.secondaryText
                         )
                         QuickReviewChip(
-                            label = "—",
+                            label = stringResource(R.string.areas_none),
                             bg = if (selectedAreaId == null) colors.thingsBlueSoft else colors.tagPillBg,
                             fg = if (selectedAreaId == null) colors.thingsBlue else colors.secondaryText
                         ) {
@@ -1611,6 +1611,57 @@ fun ThingsTemplatesAndImportModal(
                                         color = colors.secondaryText,
                                         softWrap = true
                                     )
+
+                                    // Prominent Target Area for Import selector right inside the Import card
+                                    Surface(
+                                        shape = RoundedCornerShape(11.dp),
+                                        color = colors.cardSurface,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(
+                                                width = 0.85.dp,
+                                                color = colors.thingsBlue.copy(alpha = 0.30f),
+                                                shape = RoundedCornerShape(11.dp)
+                                            )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 11.dp, vertical = 9.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.v30_external_import_target_area),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = colors.thingsBlue
+                                            )
+                                            FlowRow(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                QuickReviewChip(
+                                                    label = stringResource(R.string.areas_none),
+                                                    bg = if (selectedAreaId == null) colors.thingsBlueSoft else colors.tagPillBg,
+                                                    fg = if (selectedAreaId == null) colors.thingsBlue else colors.secondaryText
+                                                ) {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    selectedAreaId = null
+                                                }
+                                                areas.forEach { area ->
+                                                    val isSel = selectedAreaId == area.id
+                                                    QuickReviewChip(
+                                                        label = "📦 ${area.title}",
+                                                        bg = if (isSel) colors.thingsBlueSoft else colors.tagPillBg,
+                                                        fg = if (isSel) colors.thingsBlue else colors.primaryText
+                                                    ) {
+                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        selectedAreaId = area.id
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
 
                                     Spacer(modifier = Modifier.height(2.dp))
 
@@ -2414,7 +2465,11 @@ fun ThingsTodayTimelineSection(
                         Text(
                             text = startLabel,
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
-                            color = if (entry.hasConflict) colors.deadlineUrgentRed else colors.thingsBlue,
+                            color = when {
+                                entry.hasConflict -> colors.deadlineUrgentRed
+                                task.isMilestone -> colors.milestoneViolet
+                                else -> colors.thingsBlue
+                            },
                             modifier = Modifier.width(46.dp)
                         )
                         Surface(
@@ -2424,11 +2479,11 @@ fun ThingsTodayTimelineSection(
                             modifier = Modifier
                                 .weight(1f)
                                 .border(
-                                    width = 1.dp,
-                                    color = if (entry.hasConflict) {
-                                        colors.deadlineUrgentRed.copy(alpha = 0.65f)
-                                    } else {
-                                        colors.thingsBlue.copy(alpha = 0.35f)
+                                    width = if (!entry.hasConflict && task.isMilestone) 1.35.dp else 1.dp,
+                                    color = when {
+                                        entry.hasConflict -> colors.deadlineUrgentRed.copy(alpha = 0.65f)
+                                        task.isMilestone -> colors.milestoneViolet.copy(alpha = 0.65f)
+                                        else -> colors.thingsBlue.copy(alpha = 0.35f)
                                     },
                                     shape = RoundedCornerShape(13.dp)
                                 )
@@ -2450,6 +2505,7 @@ fun ThingsTodayTimelineSection(
                                         status = task.status,
                                         onStatusChange = { if (!isFullScreen) onCompleteTask(task.id) },
                                         isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                                        isMilestone = task.isMilestone,
                                         showHoverTooltip = !isFullScreen,
                                         modifier = if (isFullScreen) {
                                             Modifier.pointerInput(Unit) {
@@ -2486,23 +2542,33 @@ fun ThingsTodayTimelineSection(
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis
                                         )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
+                                            if (task.isMilestone) {
+                                                ThingsTagPill(
+                                                    title = "◆ ${stringResource(R.string.v30_milestone_label)}",
+                                                    containerColor = colors.milestoneVioletSoft,
+                                                    contentColor = colors.milestoneViolet,
+                                                    borderColor = colors.milestoneViolet.copy(alpha = 0.45f)
+                                                )
+                                            }
                                             Text(
                                                 text = TimeblockScheduleUtils.formatTimeblockBadge(
                                                     entry.startMinutes,
                                                     entry.durationMinutes
                                                 ),
                                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                                color = colors.thingsBlue
+                                                color = if (task.isMilestone) colors.milestoneViolet else colors.thingsBlue,
+                                                modifier = Modifier.align(Alignment.CenterVertically)
                                             )
                                             if (entry.hasConflict) {
                                                 Text(
                                                     text = "⚠️ ${stringResource(R.string.v2_schedule_conflict)}",
                                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                    color = colors.deadlineUrgentRed
+                                                    color = colors.deadlineUrgentRed,
+                                                    modifier = Modifier.align(Alignment.CenterVertically)
                                                 )
                                             }
                                         }
@@ -2589,7 +2655,11 @@ fun ThingsTodayTimelineSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .border(1.dp, colors.hairlineDivider, RoundedCornerShape(12.dp))
+                        .border(
+                            width = if (task.isMilestone) 1.35.dp else 1.dp,
+                            color = if (task.isMilestone) colors.milestoneViolet.copy(alpha = 0.65f) else colors.hairlineDivider,
+                            shape = RoundedCornerShape(12.dp)
+                        )
                         .clickable { onOpenTask(task.id) }
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -2601,7 +2671,8 @@ fun ThingsTodayTimelineSection(
                             ThingsCheckbox(
                                 status = task.status,
                                 onStatusChange = { onCompleteTask(task.id) },
-                                isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY
+                                isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                                isMilestone = task.isMilestone
                             )
                             Text(
                                 text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
@@ -2613,6 +2684,14 @@ fun ThingsTodayTimelineSection(
                                     .weight(1f)
                                     .clickable { onOpenTask(task.id) }
                             )
+                            if (task.isMilestone) {
+                                ThingsTagPill(
+                                    title = "◆ ${stringResource(R.string.v30_milestone_label)}",
+                                    containerColor = colors.milestoneVioletSoft,
+                                    contentColor = colors.milestoneViolet,
+                                    borderColor = colors.milestoneViolet.copy(alpha = 0.45f)
+                                )
+                            }
                             ThingsHoverTooltip(text = stringResource(R.string.action_focus_timer)) {
                                 IconButton(
                                     onClick = { onStartFocusTimer(task) },

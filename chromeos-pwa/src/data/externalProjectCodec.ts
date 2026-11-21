@@ -29,6 +29,7 @@ export interface ExternalImportedTask {
   whenDate: number | null;
   deadline: number | null;
   isPinned: boolean;
+  isMilestone?: boolean;
   effortLevel: EffortLevel | null;
   tagNames: string[];
   checklistItems: ExternalImportedChecklistItem[];
@@ -776,6 +777,11 @@ function parseAsanaJsonTaskObject(raw: Record<string, unknown>): {
     raw.due_on ?? raw.due_at ?? raw.dueDate ?? raw.deadline
   );
 
+  const isMilestone =
+    raw.resource_subtype === 'milestone' ||
+    raw.is_milestone === true ||
+    raw.isMilestone === true;
+
   let isPinned = Boolean(raw.is_pinned ?? raw.isPinned ?? raw.liked);
   let effortLevel = normalizeEffort(raw.effort_level ?? raw.effortLevel);
   if (typeof raw.priority === 'string') {
@@ -868,6 +874,7 @@ function parseAsanaJsonTaskObject(raw: Record<string, unknown>): {
       whenDate,
       deadline,
       isPinned,
+      isMilestone,
       effortLevel,
       tagNames,
       checklistItems,
@@ -1122,6 +1129,7 @@ export function exportProjectToAsanaJson(input: ExternalExportProjectInput): str
 
       data.push({
         gid: tk.id,
+        resource_subtype: tk.isMilestone ? 'milestone' : 'default_task',
         name: tk.title,
         notes: tk.notes,
         completed: tk.status === 'COMPLETED',
@@ -1132,6 +1140,7 @@ export function exportProjectToAsanaJson(input: ExternalExportProjectInput): str
         start_on: tk.whenDate != null ? toIsoDateInputValue(tk.whenDate) : null,
         due_on: tk.deadline != null ? toIsoDateInputValue(tk.deadline) : null,
         is_pinned: Boolean(tk.isPinned),
+        is_milestone: Boolean(tk.isMilestone),
         effort_level: tk.effortLevel ?? null,
         assignee: tk.assigneeId ? { name: tk.assigneeId } : null,
         workspace: tk.workspaceId

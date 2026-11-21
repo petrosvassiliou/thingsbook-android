@@ -124,6 +124,7 @@ data class BackupTaskDto(
     val recurrenceRuleJson: String? = null,
     val sortOrder: Double = 0.0,
     val isPinned: Boolean = false,
+    val isMilestone: Boolean = false,
     val effortLevel: String? = null,
     val blockedByJson: String = "[]",
     val workspaceId: String? = null,

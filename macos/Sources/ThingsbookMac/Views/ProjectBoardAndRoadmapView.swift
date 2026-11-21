@@ -661,6 +661,7 @@ private struct KanbanTaskCardView: View {
                 ThingsCheckboxButton(
                     status: task.status,
                     isSomeday: task.scheduleState == .someday,
+                    isMilestone: task.isMilestone,
                     helpText: store.tr("macos_checkbox_help"),
                     onToggleComplete: { store.toggleTaskCompletion(latestTask) },
                     onCancelTask: { store.cancelTask(latestTask) }
@@ -707,6 +708,18 @@ private struct KanbanTaskCardView: View {
 
             if hasAnyMetadataBadges {
                 ThingsFlowLayout(horizontalSpacing: 5, verticalSpacing: 5) {
+                    if task.isMilestone {
+                        HStack(spacing: 3) {
+                            Text("◆ \(store.tr("v30_milestone_label"))")
+                                .font(.system(size: 10.5, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(ThingsMacPalette.milestoneViolet)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(ThingsMacPalette.milestoneViolet.opacity(0.14)))
+                    }
+
                     if let blockedText = store.blockedByBadgeText(for: task) {
                         Button {
                             isDependenciesPopoverOpen = true
@@ -855,7 +868,8 @@ private struct KanbanTaskCardView: View {
     }
 
     private var hasAnyMetadataBadges: Bool {
-        store.blockedByBadgeText(for: task) != nil
+        task.isMilestone
+            || store.blockedByBadgeText(for: task) != nil
             || task.resolvedEffort != nil
             || task.formattedTimeblockPill != nil
             || whenBadgeText != nil
@@ -938,6 +952,9 @@ private struct KanbanTaskCardView: View {
     private var kanbanContextMenu: some View {
         let isBatch = store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(task.id)
         if isBatch {
+            let allMilestones = store.selectedTaskIds.allSatisfy { id in
+                store.allOpenTasks.first(where: { $0.id == id })?.isMilestone == true
+            }
             Button(store.tr("action_complete")) {
                 store.completeSelectedTasks()
             }
@@ -949,6 +966,14 @@ private struct KanbanTaskCardView: View {
             }
             Button(store.tr("v25_batch_pin")) {
                 store.togglePinForSelectedTasks()
+            }
+            Button {
+                store.toggleMilestoneForSelectedTasks()
+            } label: {
+                Label(
+                    store.tr(allMilestones ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: allMilestones ? "diamond.fill" : "diamond"
+                )
             }
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
@@ -976,6 +1001,14 @@ private struct KanbanTaskCardView: View {
             }
             Button(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task")) {
                 store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+            }
+            Button {
+                store.setTasksMilestone([latestTask.id], isMilestone: !latestTask.isMilestone)
+            } label: {
+                Label(
+                    store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
+                )
             }
             Divider()
             Button(store.tr("view_today")) {
@@ -1586,10 +1619,12 @@ public struct ProjectRoadmapWorkspaceView: View {
     private func roadmapLeftTaskLabelRow(bar: RoadmapTaskBar, height: CGFloat) -> some View {
         let isFullScreen = store.isTimelineFullScreen
         let isSelected = !isFullScreen && store.selectedTaskIds.contains(bar.id)
+        let isMilestone = bar.isMilestone || bar.task.isMilestone
         let rowContent = HStack(spacing: 7) {
             ThingsCheckboxButton(
                 status: bar.task.status,
                 isSomeday: bar.task.scheduleState == .someday,
+                isMilestone: isMilestone,
                 helpText: isFullScreen ? "" : store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     guard !store.isTimelineFullScreen else { return }
@@ -1604,8 +1639,12 @@ public struct ProjectRoadmapWorkspaceView: View {
             .allowsHitTesting(!isFullScreen)
 
             Text(bar.task.title.isEmpty ? store.tr("macos_untitled_todo") : bar.task.title)
-                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(bar.task.status == .completed ? .secondary : .primary)
+                .font(.system(size: 12.5, weight: (isSelected || isMilestone) ? .semibold : .regular))
+                .foregroundStyle(
+                    bar.task.status == .completed
+                        ? .secondary
+                        : (isMilestone ? ThingsMacPalette.milestoneViolet : .primary)
+                )
                 .lineLimit(1)
             Spacer(minLength: 2)
         }
@@ -1614,7 +1653,11 @@ public struct ProjectRoadmapWorkspaceView: View {
         .frame(width: labelColumnWidth, height: height)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+                .fill(
+                    isSelected
+                        ? (isMilestone ? ThingsMacPalette.milestoneViolet.opacity(0.14) : ThingsMacPalette.accentBlue.opacity(0.12))
+                        : Color.clear
+                )
         )
         .contentShape(Rectangle())
 
@@ -1639,6 +1682,14 @@ public struct ProjectRoadmapWorkspaceView: View {
                     Divider()
                     Button(bar.task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
                         store.toggleTaskCompletion(bar.task)
+                    }
+                    Button {
+                        store.setTasksMilestone([bar.task.id], isMilestone: !bar.task.isMilestone)
+                    } label: {
+                        Label(
+                            store.tr(bar.task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                            systemImage: bar.task.isMilestone ? "diamond.fill" : "diamond"
+                        )
                     }
                     Divider()
                     Button(role: .destructive) {
@@ -1739,11 +1790,19 @@ public struct ProjectRoadmapWorkspaceView: View {
                         continue
                     }
 
-                    let fromShift = (activeTaskDrag?.id == fromBar.id) ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
-                    let toShift = (activeTaskDrag?.id == toBar.id) ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
+                    let isFromDragged = (activeTaskDrag?.id == fromBar.id)
+                        || (activeTaskDrag != nil && store.selectedTaskIds.contains(fromBar.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
+                    let isToDragged = (activeTaskDrag?.id == toBar.id)
+                        || (activeTaskDrag != nil && store.selectedTaskIds.contains(toBar.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
+                    let fromShift = isFromDragged ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
+                    let toShift = isToDragged ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
 
-                    let x0 = CGFloat(fromBar.endEpochDay - layout.startEpochDay + 1) * dayColumnWidth - 3 + fromShift
-                    let x1 = CGFloat(toBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3 + toShift
+                    let x0: CGFloat = (fromBar.isMilestone || fromBar.task.isMilestone)
+                        ? ((CGFloat(fromBar.endEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth + 11 + fromShift)
+                        : (CGFloat(fromBar.endEpochDay - layout.startEpochDay + 1) * dayColumnWidth - 3 + fromShift)
+                    let x1: CGFloat = (toBar.isMilestone || toBar.task.isMilestone)
+                        ? ((CGFloat(toBar.startEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth - 11 + toShift)
+                        : (CGFloat(toBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3 + toShift)
                     let p0 = CGPoint(x: x0, y: y0)
                     let p3 = CGPoint(x: x1, y: y1)
 
@@ -1966,6 +2025,191 @@ public struct ProjectRoadmapWorkspaceView: View {
     }
 
     @ViewBuilder
+    private func roadmapPlottedTaskVisual(
+        taskBar: RoadmapTaskBar,
+        layout: ProjectRoadmapLayout,
+        isFullScreen: Bool,
+        isSelected: Bool,
+        isBlocked: Bool,
+        isArmedThis: Bool,
+        isDraggingThis: Bool,
+        delta: Int
+    ) -> some View {
+        let task = taskBar.task
+        let dragX = CGFloat(delta) * dayColumnWidth
+        let displayTitle = task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title
+
+        if taskBar.isMilestone || task.isMilestone {
+            let isCompleted = task.status == .completed
+            let isOverdue = !isCompleted && (taskBar.endEpochDay + delta) < layout.todayEpochDay
+            let milestoneTint: Color = {
+                if isCompleted { return ThingsMacPalette.logbookGreen }
+                if isOverdue { return ThingsMacPalette.deadlineCrimson }
+                return ThingsMacPalette.milestoneViolet
+            }()
+            let colCenterX = (CGFloat(taskBar.startEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth
+
+            HStack(spacing: 6) {
+                // Prominent 16x16pt 45° rotated royal-violet Diamond centered on the target day column
+                ZStack {
+                    if isSelected || isArmedThis {
+                        RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                            .strokeBorder(milestoneTint.opacity(0.55), lineWidth: 1.6)
+                            .frame(width: 21, height: 21)
+                            .rotationEffect(.degrees(45))
+                    }
+
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(milestoneTint)
+                        .frame(width: 16, height: 16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.94), lineWidth: 1.5)
+                        )
+                        .rotationEffect(.degrees(45))
+                        .shadow(
+                            color: milestoneTint.opacity(isArmedThis || isDraggingThis ? 0.52 : 0.34),
+                            radius: isArmedThis || isDraggingThis ? 6.5 : 4.0,
+                            y: isArmedThis || isDraggingThis ? 2.5 : 1.5
+                        )
+
+                    if isCompleted {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8.5, weight: .black))
+                            .foregroundStyle(.white)
+                    } else if isBlocked {
+                        Image(systemName: "hourglass")
+                            .font(.system(size: 7.5, weight: .black))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 24, height: 26)
+
+                // Sleek floating Milestone Callout Pill immediately to the right of the Diamond
+                HStack(spacing: 5) {
+                    Text("◆ \(displayTitle)")
+                        .font(.system(size: 11.5, weight: .bold))
+                        .foregroundStyle(isCompleted ? .secondary : milestoneTint)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    if !isFullScreen && isSelected {
+                        HStack(spacing: 2.5) {
+                            Button {
+                                store.shiftTaskRoadmapDates(task, deltaDays: -1)
+                            } label: {
+                                Text("-1d")
+                                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                                    .foregroundStyle(milestoneTint)
+                                    .padding(.horizontal, 4.5)
+                                    .padding(.vertical, 1.5)
+                                    .background(Capsule().fill(milestoneTint.opacity(0.14)))
+                            }
+                            .buttonStyle(.plain)
+                            .thingsTooltip(store.tr("v30_roadmap_shift_earlier"))
+
+                            Button {
+                                store.shiftTaskRoadmapDates(task, deltaDays: 1)
+                            } label: {
+                                Text("+1d")
+                                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                                    .foregroundStyle(milestoneTint)
+                                    .padding(.horizontal, 4.5)
+                                    .padding(.vertical, 1.5)
+                                    .background(Capsule().fill(milestoneTint.opacity(0.14)))
+                            }
+                            .buttonStyle(.plain)
+                            .thingsTooltip(store.tr("v30_roadmap_shift_later"))
+                        }
+                    }
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(
+                            isSelected
+                                ? milestoneTint.opacity(0.16)
+                                : ThingsMacPalette.cardSurface.opacity(0.96)
+                        )
+                        .shadow(
+                            color: Color.black.opacity(isDraggingThis ? 0.16 : 0.06),
+                            radius: isDraggingThis ? 6.0 : 2.5,
+                            y: isDraggingThis ? 2.0 : 1.0
+                        )
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(
+                            (isArmedThis || isSelected) ? milestoneTint : milestoneTint.opacity(0.45),
+                            lineWidth: (isArmedThis || isSelected) ? 1.5 : 1.0
+                        )
+                )
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .contentShape(Rectangle())
+            .scaleEffect(isArmedThis ? 1.03 : 1.0)
+            .offset(x: colCenterX - 12 + dragX)
+        } else {
+            let baseX = CGFloat(taskBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3
+            let barW = max(dayColumnWidth - 6, CGFloat(taskBar.spanDays) * dayColumnWidth - 6)
+            let borderTint: Color = {
+                if isArmedThis || isSelected { return ThingsMacPalette.accentBlue }
+                if isBlocked { return ThingsMacPalette.somedayAmber }
+                if task.status == .completed { return ThingsMacPalette.logbookGreen.opacity(0.6) }
+                return ThingsMacPalette.accentBlue.opacity(0.45)
+            }()
+
+            HStack(spacing: 6) {
+                if isBlocked {
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(ThingsMacPalette.somedayAmber)
+                } else if task.status == .completed {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(ThingsMacPalette.logbookGreen)
+                } else if task.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.todayYellow)
+                }
+
+                Text(displayTitle)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if task.deadline != nil {
+                    Image(systemName: "flag.fill")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(width: barW, height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? ThingsMacPalette.accentBlue.opacity(0.16)
+                            : ThingsMacPalette.cardSurface
+                    )
+                    .shadow(color: Color.black.opacity(isDraggingThis ? 0.16 : 0.05), radius: isDraggingThis ? 6.5 : 2, y: isDraggingThis ? 2 : 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(borderTint, lineWidth: (isArmedThis || isSelected) ? 1.55 : 1.05)
+            )
+            .scaleEffect(isArmedThis ? 1.02 : 1.0)
+            .offset(x: baseX + dragX)
+        }
+    }
+
+    @ViewBuilder
     private func roadmapTaskBarView(
         taskBar: RoadmapTaskBar,
         layout: ProjectRoadmapLayout
@@ -1981,62 +2225,16 @@ public struct ProjectRoadmapWorkspaceView: View {
             || (activeTaskDrag != nil && store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
         )
         let delta = isDraggingThis ? (activeTaskDrag?.deltaDays ?? 0) : 0
-        let baseX = CGFloat(taskBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3
-        let dragX = CGFloat(delta) * dayColumnWidth
-        let barW = max(dayColumnWidth - 6, CGFloat(taskBar.spanDays) * dayColumnWidth - 6)
-
-        let borderTint: Color = {
-            if isArmedThis || isSelected { return ThingsMacPalette.accentBlue }
-            if isBlocked { return ThingsMacPalette.somedayAmber }
-            if task.status == .completed { return ThingsMacPalette.logbookGreen.opacity(0.6) }
-            return ThingsMacPalette.accentBlue.opacity(0.45)
-        }()
-
-        let taskBarContent = HStack(spacing: 6) {
-            if isBlocked {
-                Image(systemName: "hourglass")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(ThingsMacPalette.somedayAmber)
-            } else if task.status == .completed {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 10.5, weight: .bold))
-                    .foregroundStyle(ThingsMacPalette.logbookGreen)
-            } else if task.isPinned {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.todayYellow)
-            }
-
-            Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-
-            if task.deadline != nil {
-                Image(systemName: "flag.fill")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.deadlineCrimson)
-            }
-        }
-        .padding(.horizontal, 8)
-        .frame(width: barW, height: 26)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    isSelected
-                        ? ThingsMacPalette.accentBlue.opacity(0.16)
-                        : ThingsMacPalette.cardSurface
-                )
-                .shadow(color: Color.black.opacity(isDraggingThis ? 0.16 : 0.05), radius: isDraggingThis ? 6.5 : 2, y: isDraggingThis ? 2 : 1)
+        let taskBarContent = roadmapPlottedTaskVisual(
+            taskBar: taskBar,
+            layout: layout,
+            isFullScreen: isFullScreen,
+            isSelected: isSelected,
+            isBlocked: isBlocked,
+            isArmedThis: isArmedThis,
+            isDraggingThis: isDraggingThis,
+            delta: delta
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(borderTint, lineWidth: (isArmedThis || isSelected) ? 1.55 : 1.05)
-        )
-        .scaleEffect(isArmedThis ? 1.02 : 1.0)
-        .offset(x: baseX + dragX)
 
         if isFullScreen {
             taskBarContent
@@ -2101,6 +2299,14 @@ public struct ProjectRoadmapWorkspaceView: View {
                     Divider()
                     Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
                         store.toggleTaskCompletion(task)
+                    }
+                    Button {
+                        store.setTasksMilestone([task.id], isMilestone: !task.isMilestone)
+                    } label: {
+                        Label(
+                            store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                            systemImage: task.isMilestone ? "diamond.fill" : "diamond"
+                        )
                     }
                     Button(store.tr("view_today")) {
                         var copy = task
@@ -2202,6 +2408,7 @@ public struct ProjectRoadmapWorkspaceView: View {
             ThingsCheckboxButton(
                 status: task.status,
                 isSomeday: task.scheduleState == .someday,
+                isMilestone: task.isMilestone,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: { store.toggleTaskCompletion(task) },
                 onCancelTask: { store.cancelTask(task) }
@@ -2211,6 +2418,16 @@ public struct ProjectRoadmapWorkspaceView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+
+            if task.isMilestone {
+                Text("◆ \(store.tr("v30_milestone_label"))")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.milestoneViolet)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(ThingsMacPalette.milestoneViolet.opacity(0.14)))
+                    .fixedSize(horizontal: true, vertical: false)
+            }
 
             if let hid = task.headingId,
                let heading = activeHeadings.first(where: { $0.id == hid }) {
@@ -2293,6 +2510,14 @@ public struct ProjectRoadmapWorkspaceView: View {
             Divider()
             Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
                 store.toggleTaskCompletion(task)
+            }
+            Button {
+                store.setTasksMilestone([task.id], isMilestone: !task.isMilestone)
+            } label: {
+                Label(
+                    store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: task.isMilestone ? "diamond.fill" : "diamond"
+                )
             }
             Divider()
             Button(role: .destructive) {
@@ -3001,9 +3226,11 @@ struct RoadmapExportSnapshotView: View {
                             .padding(.horizontal, 12)
                             .frame(width: labelColumnWidth, height: rHeight, alignment: .leading)
                         case .task(let bar):
-                            Text(bar.task.title.isEmpty ? store.tr("macos_untitled_todo") : bar.task.title)
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(.black.opacity(0.85))
+                            let isMs = bar.isMilestone || bar.task.isMilestone
+                            let titleStr = bar.task.title.isEmpty ? store.tr("macos_untitled_todo") : bar.task.title
+                            Text(isMs ? "◆ \(titleStr)" : titleStr)
+                                .font(.system(size: 11.5, weight: isMs ? .bold : .medium))
+                                .foregroundStyle(isMs ? Color(red: 0.49, green: 0.23, blue: 0.93) : .black.opacity(0.85))
                                 .lineLimit(1)
                                 .padding(.leading, 22)
                                 .padding(.trailing, 8)
@@ -3076,8 +3303,14 @@ struct RoadmapExportSnapshotView: View {
                             }
                             let cFromEnd = min(layout.endEpochDay, max(layout.startEpochDay, fromBar.endEpochDay))
                             let cToStart = max(layout.startEpochDay, min(layout.endEpochDay, toBar.startEpochDay))
-                            let p0 = CGPoint(x: CGFloat(cFromEnd - layout.startEpochDay + 1) * dayColumnWidth - 3, y: y0)
-                            let p3 = CGPoint(x: CGFloat(cToStart - layout.startEpochDay) * dayColumnWidth + 3, y: y1)
+                            let x0: CGFloat = (fromBar.isMilestone || fromBar.task.isMilestone)
+                                ? ((CGFloat(cFromEnd - layout.startEpochDay) + 0.5) * dayColumnWidth + 10)
+                                : (CGFloat(cFromEnd - layout.startEpochDay + 1) * dayColumnWidth - 3)
+                            let x1: CGFloat = (toBar.isMilestone || toBar.task.isMilestone)
+                                ? ((CGFloat(cToStart - layout.startEpochDay) + 0.5) * dayColumnWidth - 10)
+                                : (CGFloat(cToStart - layout.startEpochDay) * dayColumnWidth + 3)
+                            let p0 = CGPoint(x: x0, y: y0)
+                            let p3 = CGPoint(x: x1, y: y1)
                             let dx = max(22.0, abs(p3.x - p0.x) * 0.5)
 
                             var path = Path()
@@ -3161,29 +3394,65 @@ struct RoadmapExportSnapshotView: View {
                                     }
                                 case .task(let tBar):
                                     if tBar.endEpochDay >= layout.startEpochDay && tBar.startEpochDay <= layout.endEpochDay {
-                                        let cStart = max(layout.startEpochDay, tBar.startEpochDay)
-                                        let cEnd = min(layout.endEpochDay, tBar.endEpochDay)
-                                        let cSpan = max(1, cEnd - cStart + 1)
-                                        let x = CGFloat(cStart - layout.startEpochDay) * dayColumnWidth + 3
-                                        let w = max(dayColumnWidth - 6, CGFloat(cSpan) * dayColumnWidth - 6)
-                                        HStack(spacing: 5) {
-                                            Text(tBar.task.title.isEmpty ? store.tr("macos_untitled_todo") : tBar.task.title)
-                                                .font(.system(size: 11, weight: .semibold))
-                                                .foregroundStyle(.black.opacity(0.88))
-                                                .lineLimit(1)
-                                            Spacer(minLength: 0)
+                                        let titleStr = tBar.task.title.isEmpty ? store.tr("macos_untitled_todo") : tBar.task.title
+                                        if tBar.isMilestone || tBar.task.isMilestone {
+                                            let royalViolet = Color(red: 0.49, green: 0.23, blue: 0.93)
+                                            let cDay = min(layout.endEpochDay, max(layout.startEpochDay, tBar.startEpochDay))
+                                            let colCenterX = (CGFloat(cDay - layout.startEpochDay) + 0.5) * dayColumnWidth
+                                            HStack(spacing: 5) {
+                                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                                    .fill(royalViolet)
+                                                    .frame(width: 14, height: 14)
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                                            .strokeBorder(Color.white, lineWidth: 1.2)
+                                                    )
+                                                    .rotationEffect(.degrees(45))
+                                                    .frame(width: 20, height: 24)
+
+                                                Text("◆ \(titleStr)")
+                                                    .font(.system(size: 11, weight: .bold))
+                                                    .foregroundStyle(royalViolet)
+                                                    .lineLimit(1)
+                                                    .fixedSize(horizontal: true, vertical: false)
+                                                    .padding(.horizontal, 7)
+                                                    .padding(.vertical, 3)
+                                                    .background(
+                                                        Capsule(style: .continuous)
+                                                            .fill(Color.white)
+                                                            .overlay(
+                                                                Capsule(style: .continuous)
+                                                                    .strokeBorder(royalViolet.opacity(0.55), lineWidth: 0.95)
+                                                            )
+                                                    )
+                                            }
+                                            .fixedSize(horizontal: true, vertical: false)
+                                            .offset(x: colCenterX - 10)
+                                        } else {
+                                            let cStart = max(layout.startEpochDay, tBar.startEpochDay)
+                                            let cEnd = min(layout.endEpochDay, tBar.endEpochDay)
+                                            let cSpan = max(1, cEnd - cStart + 1)
+                                            let x = CGFloat(cStart - layout.startEpochDay) * dayColumnWidth + 3
+                                            let w = max(dayColumnWidth - 6, CGFloat(cSpan) * dayColumnWidth - 6)
+                                            HStack(spacing: 5) {
+                                                Text(titleStr)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundStyle(.black.opacity(0.88))
+                                                    .lineLimit(1)
+                                                Spacer(minLength: 0)
+                                            }
+                                            .padding(.horizontal, 8)
+                                            .frame(width: w, height: 24)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                    .fill(Color.white)
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                            .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.5), lineWidth: 1.0)
+                                                    )
+                                            )
+                                            .offset(x: x)
                                         }
-                                        .padding(.horizontal, 8)
-                                        .frame(width: w, height: 24)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                                .fill(Color.white)
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                                        .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.5), lineWidth: 1.0)
-                                                )
-                                        )
-                                        .offset(x: x)
                                     }
                                 }
                             }

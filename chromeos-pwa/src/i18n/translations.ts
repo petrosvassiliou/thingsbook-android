@@ -510,6 +510,11 @@ export interface TranslationStrings {
   authResetEmailSentToast: string;
   geminiErrorFallback: string;
   geminiAreaOptionalLabel: string;
+  areasNone: string;
+  externalImportTargetArea: string;
+  milestoneLabel: string;
+  markAsMilestone: string;
+  removeMilestone: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -1025,7 +1030,12 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     sampleTasksRemovedToast: '✓ Sample tasks removed',
     authResetEmailSentToast: '✓ Password reset email sent',
     geminiErrorFallback: 'Gemini error',
-    geminiAreaOptionalLabel: 'Area (optional)'
+    geminiAreaOptionalLabel: 'Area (optional)',
+    areasNone: 'No Area',
+    externalImportTargetArea: 'Target Area for Import',
+    milestoneLabel: 'Milestone',
+    markAsMilestone: 'Mark as Milestone',
+    removeMilestone: 'Remove Milestone'
   },
   de: {
     appName: 'Thingsbook',
@@ -1542,7 +1552,12 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     sampleTasksRemovedToast: '✓ Beispielaufgaben entfernt',
     authResetEmailSentToast: '✓ E-Mail zum Zurücksetzen gesendet',
     geminiErrorFallback: 'Gemini-Fehler',
-    geminiAreaOptionalLabel: 'Bereich (optional)'
+    geminiAreaOptionalLabel: 'Bereich (optional)',
+    areasNone: 'Ohne Bereich',
+    externalImportTargetArea: 'Ziel-Bereich für Import',
+    milestoneLabel: 'Meilenstein',
+    markAsMilestone: 'Als Meilenstein markieren',
+    removeMilestone: 'Meilenstein entfernen'
   },
   fr: {
     appName: 'Thingsbook',
@@ -2058,7 +2073,12 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     sampleTasksRemovedToast: '✓ Tâches d’exemple supprimées',
     authResetEmailSentToast: '✓ E-mail de réinitialisation envoyé',
     geminiErrorFallback: 'Erreur Gemini',
-    geminiAreaOptionalLabel: 'Domaine (facultatif)'
+    geminiAreaOptionalLabel: 'Domaine (facultatif)',
+    areasNone: 'Aucun domaine',
+    externalImportTargetArea: 'Domaine cible pour l’import',
+    milestoneLabel: 'Jalon',
+    markAsMilestone: 'Marquer comme jalon',
+    removeMilestone: 'Retirer le jalon'
   },
   it: {
     appName: 'Thingsbook',
@@ -2573,7 +2593,12 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     sampleTasksRemovedToast: '✓ Attività di esempio rimosse',
     authResetEmailSentToast: '✓ Email di reimpostazione inviata',
     geminiErrorFallback: 'Errore Gemini',
-    geminiAreaOptionalLabel: 'Area (opzionale)'
+    geminiAreaOptionalLabel: 'Area (opzionale)',
+    areasNone: 'Nessuna area',
+    externalImportTargetArea: 'Area di destinazione per l’importazione',
+    milestoneLabel: 'Traguardo',
+    markAsMilestone: 'Segna come traguardo',
+    removeMilestone: 'Rimuovi traguardo'
   },
   es: {
     appName: 'Thingsbook',
@@ -3089,7 +3114,12 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     sampleTasksRemovedToast: '✓ Tareas de ejemplo eliminadas',
     authResetEmailSentToast: '✓ Correo de restablecimiento enviado',
     geminiErrorFallback: 'Error de Gemini',
-    geminiAreaOptionalLabel: 'Área (opcional)'
+    geminiAreaOptionalLabel: 'Área (opcional)',
+    areasNone: 'Sin área',
+    externalImportTargetArea: 'Área de destino para la importación',
+    milestoneLabel: 'Hito',
+    markAsMilestone: 'Marcar como hito',
+    removeMilestone: 'Quitar hito'
   }
 };
 

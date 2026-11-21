@@ -40,7 +40,9 @@ data class ThingsColorPalette(
     val tagPillBg: Color,
     val tagPillText: Color,
     val checkboxBorder: Color,
-    val checkboxCheckedFill: Color
+    val checkboxCheckedFill: Color,
+    val milestoneViolet: Color = Color(0xFF7C3AED),
+    val milestoneVioletSoft: Color = Color(0xFFF3E8FF)
 )
 
 val LightThingsPalette = ThingsColorPalette(
@@ -67,7 +69,9 @@ val LightThingsPalette = ThingsColorPalette(
     tagPillBg = Color(0xFFF1F3F7),
     tagPillText = Color(0xFF535B68),
     checkboxBorder = Color(0xFFBCC4D2),
-    checkboxCheckedFill = Color(0xFF3898EC)
+    checkboxCheckedFill = Color(0xFF3898EC),
+    milestoneViolet = Color(0xFF7C3AED),
+    milestoneVioletSoft = Color(0xFFF3E8FF)
 )
 
 val DarkThingsPalette = ThingsColorPalette(
@@ -94,7 +98,9 @@ val DarkThingsPalette = ThingsColorPalette(
     tagPillBg = Color(0xFF242932),
     tagPillText = Color(0xFFB5BECC),
     checkboxBorder = Color(0xFF545D6D),
-    checkboxCheckedFill = Color(0xFF6BC0FF)
+    checkboxCheckedFill = Color(0xFF6BC0FF),
+    milestoneViolet = Color(0xFFA78BFA),
+    milestoneVioletSoft = Color(0xFF2E1F47)
 )
 
 val LocalThingsColors = staticCompositionLocalOf { LightThingsPalette }

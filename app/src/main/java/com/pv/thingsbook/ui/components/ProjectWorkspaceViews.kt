@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -69,6 +70,7 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Remove
@@ -129,6 +131,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -145,6 +148,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
@@ -515,6 +519,7 @@ fun ProjectBoardWorkspace(
     allOpenTasks: List<TaskItem>,
     openTaskIds: Set<String>,
     selectedTaskIds: Set<String>,
+    isSelectionModeActive: Boolean = selectedTaskIds.size > 1,
     allVisibleTaskIds: List<String>,
     controller: ProjectDragDropController,
     locale: Locale,
@@ -526,6 +531,7 @@ fun ProjectBoardWorkspace(
     onDeleteHeading: (headingId: String) -> Unit,
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
     onToggleTaskPin: (taskId: String) -> Unit,
+    onToggleTaskMilestone: (taskId: String) -> Unit = {},
     onOpenTaskEditor: (taskId: String) -> Unit,
     onSelectSingleTask: ((taskId: String) -> Unit)? = null,
     onToggleTaskSelection: (taskId: String) -> Unit,
@@ -615,6 +621,7 @@ fun ProjectBoardWorkspace(
                     allOpenTasks = allOpenTasks,
                     openTaskIds = openTaskIds,
                     selectedTaskIds = selectedTaskIds,
+                    isSelectionModeActive = isSelectionModeActive,
                     allVisibleTaskIds = allVisibleTaskIds,
                     controller = controller,
                     locale = locale,
@@ -626,6 +633,7 @@ fun ProjectBoardWorkspace(
                     onDeleteHeading = null,
                     onUpdateTaskStatus = onUpdateTaskStatus,
                     onToggleTaskPin = onToggleTaskPin,
+                    onToggleTaskMilestone = onToggleTaskMilestone,
                     onOpenTaskEditor = onOpenTaskEditor,
                     onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
@@ -647,6 +655,7 @@ fun ProjectBoardWorkspace(
                     allOpenTasks = allOpenTasks,
                     openTaskIds = openTaskIds,
                     selectedTaskIds = selectedTaskIds,
+                    isSelectionModeActive = isSelectionModeActive,
                     allVisibleTaskIds = allVisibleTaskIds,
                     controller = controller,
                     locale = locale,
@@ -658,6 +667,7 @@ fun ProjectBoardWorkspace(
                     onDeleteHeading = { onDeleteHeading(heading.id) },
                     onUpdateTaskStatus = onUpdateTaskStatus,
                     onToggleTaskPin = onToggleTaskPin,
+                    onToggleTaskMilestone = onToggleTaskMilestone,
                     onOpenTaskEditor = onOpenTaskEditor,
                     onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
@@ -798,6 +808,7 @@ private fun ProjectBoardPhaseColumn(
     allOpenTasks: List<TaskItem>,
     openTaskIds: Set<String>,
     selectedTaskIds: Set<String>,
+    isSelectionModeActive: Boolean,
     allVisibleTaskIds: List<String>,
     controller: ProjectDragDropController,
     locale: Locale,
@@ -809,6 +820,7 @@ private fun ProjectBoardPhaseColumn(
     onDeleteHeading: (() -> Unit)?,
     onUpdateTaskStatus: (String, TaskStatus) -> Unit,
     onToggleTaskPin: (String) -> Unit,
+    onToggleTaskMilestone: (String) -> Unit,
     onOpenTaskEditor: (String) -> Unit,
     onSelectSingleTask: ((String) -> Unit)? = null,
     onToggleTaskSelection: (String) -> Unit,
@@ -1156,7 +1168,7 @@ private fun ProjectBoardPhaseColumn(
                         KanbanTaskCard(
                             task = task,
                             isSelected = task.id in selectedTaskIds,
-                            isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+                            isSelectionModeActive = isSelectionModeActive,
                             isBeingDragged = task.id in draggedIdsSet,
                             allOpenTasks = allOpenTasks,
                             openTaskIds = openTaskIds,
@@ -1166,6 +1178,7 @@ private fun ProjectBoardPhaseColumn(
                             locale = locale,
                             onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
                             onTogglePin = { onToggleTaskPin(task.id) },
+                            onToggleMilestone = { onToggleTaskMilestone(task.id) },
                             onOpenEditor = { onOpenTaskEditor(task.id) },
                             onSelectSingle = onSelectSingleTask?.let { fn -> { fn(task.id) } },
                             onToggleSelection = { onToggleTaskSelection(task.id) },
@@ -1269,12 +1282,14 @@ private fun KanbanTaskCard(
     locale: Locale,
     onStatusChange: (TaskStatus) -> Unit,
     onTogglePin: () -> Unit,
+    onToggleMilestone: (() -> Unit)? = null,
     onOpenEditor: () -> Unit,
     onSelectSingle: (() -> Unit)? = null,
     onToggleSelection: () -> Unit,
     onRangeSelect: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val isBlocked = remember(task.blockedByTaskIds, openTaskIds) {
         isTaskActivelyBlocked(task, openTaskIds)
@@ -1292,245 +1307,420 @@ private fun KanbanTaskCard(
     var modifierHeldShift by remember { mutableStateOf(false) }
     var modifierHeldCtrlOrMeta by remember { mutableStateOf(false) }
     var lastPlainTapUptimeMs by remember(task.id) { mutableLongStateOf(0L) }
+    var showKanbanContextMenu by remember(task.id) { mutableStateOf(false) }
+    var kanbanContextMenuOffsetDp by remember(task.id) { mutableStateOf(DpOffset(12.dp, 0.dp)) }
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (isBeingDragged) 0.35f else 1f)
-            .onGloballyPositioned { coords ->
-                if (coords.isAttached) {
-                    val win = coords.localToWindowSafe(Offset.Zero)
-                    controller.registerBoardCardBounds(
-                        taskId = task.id,
-                        windowTop = win.y,
-                        windowBottom = win.y + coords.size.height
-                    )
-                }
-            }
-            .pointerInput(task.id) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val ev = awaitPointerEvent(PointerEventPass.Initial)
-                        if (ev.type == PointerEventType.Press) {
-                            modifierHeldShift = ev.keyboardModifiers.isShiftPressed
-                            modifierHeldCtrlOrMeta = ev.keyboardModifiers.isCtrlPressed || ev.keyboardModifiers.isMetaPressed
-                        }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (isBeingDragged) 0.35f else 1f)
+                .onGloballyPositioned { coords ->
+                    if (coords.isAttached) {
+                        val win = coords.localToWindowSafe(Offset.Zero)
+                        controller.registerBoardCardBounds(
+                            taskId = task.id,
+                            windowTop = win.y,
+                            windowBottom = win.y + coords.size.height
+                        )
                     }
                 }
-            }
-            .clip(RoundedCornerShape(14.dp))
-            .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {
-                    when {
-                        modifierHeldShift -> {
-                            lastPlainTapUptimeMs = 0L
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onRangeSelect()
-                        }
-                        modifierHeldCtrlOrMeta -> {
-                            lastPlainTapUptimeMs = 0L
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onToggleSelection()
-                        }
-                        else -> {
-                            val now = SystemClock.uptimeMillis()
-                            if (lastPlainTapUptimeMs > 0L && (now - lastPlainTapUptimeMs) <= 380L) {
-                                lastPlainTapUptimeMs = 0L
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onOpenEditor()
-                            } else {
-                                lastPlainTapUptimeMs = now
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                if (isSelectionModeActive) {
-                                    onToggleSelection()
-                                } else if (onSelectSingle != null) {
-                                    onSelectSingle()
-                                } else {
-                                    onToggleSelection()
+                .pointerInput(task.id) {
+                    awaitPointerEventScope {
+                        var wasSecondaryPressed = false
+                        while (true) {
+                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                            val isRightClick = (ev.type == PointerEventType.Press && ev.buttons.isSecondaryPressed) ||
+                                (wasSecondaryPressed && !ev.buttons.isSecondaryPressed)
+                            if (isRightClick) {
+                                wasSecondaryPressed = false
+                                val pos = ev.changes.firstOrNull()?.position
+                                if (pos != null && pos.x.isFinite()) {
+                                    kanbanContextMenuOffsetDp = with(density) {
+                                        DpOffset(pos.x.toDp().coerceAtLeast(8.dp), 0.dp)
+                                    }
                                 }
+                                ev.changes.forEach { it.consume() }
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                showKanbanContextMenu = true
+                                continue
+                            }
+                            wasSecondaryPressed = ev.buttons.isSecondaryPressed
+                            if (ev.type == PointerEventType.Press) {
+                                modifierHeldShift = ev.keyboardModifiers.isShiftPressed
+                                modifierHeldCtrlOrMeta = ev.keyboardModifiers.isCtrlPressed || ev.keyboardModifiers.isMetaPressed
                             }
                         }
                     }
+                }
+                .clip(RoundedCornerShape(14.dp))
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {
+                        when {
+                            modifierHeldShift -> {
+                                lastPlainTapUptimeMs = 0L
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onRangeSelect()
+                            }
+                            modifierHeldCtrlOrMeta -> {
+                                lastPlainTapUptimeMs = 0L
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onToggleSelection()
+                            }
+                            else -> {
+                                val now = SystemClock.uptimeMillis()
+                                if (lastPlainTapUptimeMs > 0L && (now - lastPlainTapUptimeMs) <= 380L) {
+                                    lastPlainTapUptimeMs = 0L
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onOpenEditor()
+                                } else {
+                                    lastPlainTapUptimeMs = now
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    if (isSelectionModeActive) {
+                                        onToggleSelection()
+                                    } else if (onSelectSingle != null) {
+                                        onSelectSingle()
+                                    } else {
+                                        onToggleSelection()
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleSelection()
+                    }
+                ),
+            shape = RoundedCornerShape(14.dp),
+            color = if (isSelected) colors.thingsBlueSoft else colors.cardSurface,
+            shadowElevation = if (colors.isDark) 2.dp else 1.5.dp,
+            border = BorderStroke(
+                width = when {
+                    isSelected -> 1.5.dp
+                    task.isMilestone -> 1.25.dp
+                    else -> 0.75.dp
                 },
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                color = when {
+                    isSelected -> colors.thingsBlue
+                    task.isMilestone -> colors.milestoneViolet.copy(alpha = 0.58f)
+                    isBlocked -> colors.somedayWarmAmber.copy(alpha = 0.45f)
+                    else -> colors.hairlineDivider
+                }
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (isBlocked) 0.72f else 1f)
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    ThingsCheckbox(
+                        status = task.status,
+                        onStatusChange = onStatusChange,
+                        isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                        isMilestone = task.isMilestone,
+                        size = 18.dp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = if (task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
+                        ),
+                        color = if (task.title.isBlank()) colors.tertiaryText else colors.primaryText,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 3.dp)
+                    )
+                    if (task.isPinned) {
+                        Icon(
+                            imageVector = Icons.Outlined.PushPin,
+                            contentDescription = stringResource(R.string.v25_pinned_badge),
+                            tint = colors.thingsBlue,
+                            modifier = Modifier
+                                .padding(top = 5.dp, start = 4.dp)
+                                .size(13.5.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable(onClick = onTogglePin)
+                        )
+                    }
+                    val openDetailsLabel = stringResource(R.string.v30_open_details_action)
+                    ThingsHoverTooltip(
+                        text = openDetailsLabel,
+                        enableTouchLongPress = false
+                    ) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onOpenEditor()
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.OpenInFull,
+                                contentDescription = openDetailsLabel,
+                                tint = colors.secondaryText.copy(alpha = 0.72f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                    ThingsHoverTooltip(
+                        text = stringResource(R.string.action_more_options),
+                        enableTouchLongPress = false
+                    ) {
+                        IconButton(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                kanbanContextMenuOffsetDp = DpOffset(12.dp, 0.dp)
+                                showKanbanContextMenu = true
+                            },
+                            modifier = Modifier.size(22.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.MoreHoriz,
+                                contentDescription = stringResource(R.string.action_more_options),
+                                tint = colors.secondaryText.copy(alpha = 0.72f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                    if (task.status == TaskStatus.OPEN) {
+                        ProjectTaskDragHandle(
+                            task = task,
+                            controller = controller,
+                            selectedTaskIds = selectedTaskIds,
+                            orderedVisibleTaskIds = allVisibleTaskIds
+                        )
+                    }
+                }
+
+                if (task.notes.isNotBlank()) {
+                    Text(
+                        text = task.notes,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.secondaryText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 30.dp)
+                    )
+                }
+
+                val hasBadges = task.isMilestone ||
+                    activeOpenBlockerIds.isNotEmpty() ||
+                    EffortLevel.normalize(task.effortLevel) != null ||
+                    task.scheduledStartMinutes != null ||
+                    task.durationMinutes != null ||
+                    task.whenDate != null ||
+                    task.scheduleState == ScheduleState.TODAY ||
+                    task.scheduleState == ScheduleState.THIS_EVENING ||
+                    task.scheduleState == ScheduleState.SOMEDAY ||
+                    task.deadline != null ||
+                    task.checklistItems.isNotEmpty() ||
+                    task.tags.isNotEmpty()
+
+                if (hasBadges) {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 30.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (task.isMilestone) {
+                            ThingsTagPill(
+                                title = "◆ ${stringResource(R.string.v30_milestone_label)}",
+                                containerColor = colors.milestoneVioletSoft,
+                                contentColor = colors.milestoneViolet,
+                                borderColor = colors.milestoneViolet.copy(alpha = 0.45f),
+                                onClick = onToggleMilestone
+                            )
+                        }
+
+                        if (activeOpenBlockerIds.isNotEmpty()) {
+                            val firstBlockerTitle = if (activeOpenBlockerIds.size == 1) {
+                                allOpenTasks.firstOrNull { it.id == activeOpenBlockerIds.first() }?.title?.trim()?.takeIf { it.isNotEmpty() }
+                            } else null
+                            val blockedLabel = if (firstBlockerTitle != null) {
+                                stringResource(R.string.v30_blocked_by_badge, firstBlockerTitle)
+                            } else {
+                                stringResource(R.string.v30_blocked_by_count_badge, activeOpenBlockerIds.size)
+                            }
+                            ThingsTagPill(title = "⏳ $blockedLabel")
+                        }
+
+                        when (EffortLevel.normalize(task.effortLevel)) {
+                            EffortLevel.QUICK_WIN -> ThingsTagPill(title = "⚡ ${stringResource(R.string.v30_effort_quick_win)}")
+                            EffortLevel.MEDIUM -> ThingsTagPill(title = "◐ ${stringResource(R.string.v30_effort_medium)}")
+                            EffortLevel.DEEP_FOCUS -> ThingsTagPill(title = "🧠 ${stringResource(R.string.v30_effort_deep_focus)}")
+                        }
+
+                        if (task.scheduledStartMinutes != null) {
+                            ThingsTagPill(
+                                title = TimeblockScheduleUtils.formatTimeblockBadge(
+                                    task.scheduledStartMinutes,
+                                    task.durationMinutes
+                                )
+                            )
+                        } else if (task.durationMinutes != null) {
+                            val durFmt = formatDurationCompact(task.durationMinutes) ?: "${task.durationMinutes}m"
+                            ThingsTagPill(title = "⏱ $durFmt")
+                        }
+
+                        if (task.whenDate != null ||
+                            task.scheduleState == ScheduleState.TODAY ||
+                            task.scheduleState == ScheduleState.THIS_EVENING ||
+                            task.scheduleState == ScheduleState.SOMEDAY
+                        ) {
+                            ThingsWhenBadge(
+                                scheduleState = task.scheduleState,
+                                whenDateEpochMillis = task.whenDate,
+                                locale = locale
+                            )
+                        }
+
+                        task.deadline?.let { dl ->
+                            ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
+                        }
+
+                        if (task.checklistItems.isNotEmpty()) {
+                            val done = task.checklistItems.count { it.isCompleted }
+                            ThingsTagPill(title = "☑ $done/${task.checklistItems.size}")
+                        }
+
+                        task.tags.forEach { tag ->
+                            ThingsTagPill(title = tag.title)
+                        }
+                    }
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = showKanbanContextMenu,
+            onDismissRequest = { showKanbanContextMenu = false },
+            offset = kanbanContextMenuOffsetDp,
+            modifier = Modifier.background(colors.cardElevatedSurface)
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(R.string.v30_open_details_action),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.OpenInFull,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showKanbanContextMenu = false
+                    onOpenEditor()
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = if (isSelected) stringResource(R.string.context_deselect_task) else stringResource(R.string.context_select_task),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.thingsBlue
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircleOutline,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showKanbanContextMenu = false
                     onToggleSelection()
                 }
-            ),
-        shape = RoundedCornerShape(14.dp),
-        color = if (isSelected) colors.thingsBlueSoft else colors.cardSurface,
-        shadowElevation = if (colors.isDark) 2.dp else 1.5.dp,
-        border = BorderStroke(
-            width = if (isSelected) 1.5.dp else 0.75.dp,
-            color = when {
-                isSelected -> colors.thingsBlue
-                isBlocked -> colors.somedayWarmAmber.copy(alpha = 0.45f)
-                else -> colors.hairlineDivider
-            }
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .alpha(if (isBlocked) 0.72f else 1f)
-                .padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                ThingsCheckbox(
-                    status = task.status,
-                    onStatusChange = onStatusChange,
-                    isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
-                    size = 18.dp
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Medium,
-                        textDecoration = if (task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
-                    ),
-                    color = if (task.title.isBlank()) colors.tertiaryText else colors.primaryText,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(top = 3.dp)
-                )
-                if (task.isPinned) {
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
                     Icon(
                         imageVector = Icons.Outlined.PushPin,
-                        contentDescription = stringResource(R.string.v25_pinned_badge),
+                        contentDescription = null,
                         tint = colors.thingsBlue,
-                        modifier = Modifier
-                            .padding(top = 5.dp, start = 4.dp)
-                            .size(13.5.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable(onClick = onTogglePin)
+                        modifier = Modifier.size(18.dp)
                     )
+                },
+                onClick = {
+                    showKanbanContextMenu = false
+                    onTogglePin()
                 }
-                val openDetailsLabel = stringResource(R.string.v30_open_details_action)
-                ThingsHoverTooltip(
-                    text = openDetailsLabel,
-                    enableTouchLongPress = false
-                ) {
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onOpenEditor()
-                        },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.OpenInFull,
-                            contentDescription = openDetailsLabel,
-                            tint = colors.secondaryText.copy(alpha = 0.72f),
-                            modifier = Modifier.size(14.dp)
+            )
+            if (onToggleMilestone != null) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = stringResource(
+                                if (task.isMilestone) R.string.v30_remove_milestone else R.string.v30_mark_as_milestone
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (task.isMilestone) colors.milestoneViolet else colors.primaryText
                         )
+                    },
+                    leadingIcon = {
+                        ThingsMilestoneDiamondIcon(
+                            filled = task.isMilestone,
+                            tint = colors.milestoneViolet,
+                            size = 16.dp
+                        )
+                    },
+                    onClick = {
+                        showKanbanContextMenu = false
+                        onToggleMilestone()
                     }
-                }
-                if (task.status == TaskStatus.OPEN) {
-                    ProjectTaskDragHandle(
-                        task = task,
-                        controller = controller,
-                        selectedTaskIds = selectedTaskIds,
-                        orderedVisibleTaskIds = allVisibleTaskIds
-                    )
-                }
-            }
-
-            if (task.notes.isNotBlank()) {
-                Text(
-                    text = task.notes,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.secondaryText,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 30.dp)
                 )
             }
-
-            val hasBadges = activeOpenBlockerIds.isNotEmpty() ||
-                EffortLevel.normalize(task.effortLevel) != null ||
-                task.scheduledStartMinutes != null ||
-                task.durationMinutes != null ||
-                task.whenDate != null ||
-                task.scheduleState == ScheduleState.TODAY ||
-                task.scheduleState == ScheduleState.THIS_EVENING ||
-                task.scheduleState == ScheduleState.SOMEDAY ||
-                task.deadline != null ||
-                task.checklistItems.isNotEmpty() ||
-                task.tags.isNotEmpty()
-
-            if (hasBadges) {
-                FlowRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 30.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (activeOpenBlockerIds.isNotEmpty()) {
-                        val firstBlockerTitle = if (activeOpenBlockerIds.size == 1) {
-                            allOpenTasks.firstOrNull { it.id == activeOpenBlockerIds.first() }?.title?.trim()?.takeIf { it.isNotEmpty() }
-                        } else null
-                        val blockedLabel = if (firstBlockerTitle != null) {
-                            stringResource(R.string.v30_blocked_by_badge, firstBlockerTitle)
-                        } else {
-                            stringResource(R.string.v30_blocked_by_count_badge, activeOpenBlockerIds.size)
-                        }
-                        ThingsTagPill(title = "⏳ $blockedLabel")
-                    }
-
-                    when (EffortLevel.normalize(task.effortLevel)) {
-                        EffortLevel.QUICK_WIN -> ThingsTagPill(title = "⚡ ${stringResource(R.string.v30_effort_quick_win)}")
-                        EffortLevel.MEDIUM -> ThingsTagPill(title = "◐ ${stringResource(R.string.v30_effort_medium)}")
-                        EffortLevel.DEEP_FOCUS -> ThingsTagPill(title = "🧠 ${stringResource(R.string.v30_effort_deep_focus)}")
-                    }
-
-                    if (task.scheduledStartMinutes != null) {
-                        ThingsTagPill(
-                            title = TimeblockScheduleUtils.formatTimeblockBadge(
-                                task.scheduledStartMinutes,
-                                task.durationMinutes
-                            )
-                        )
-                    } else if (task.durationMinutes != null) {
-                        val durFmt = formatDurationCompact(task.durationMinutes) ?: "${task.durationMinutes}m"
-                        ThingsTagPill(title = "⏱ $durFmt")
-                    }
-
-                    if (task.whenDate != null ||
-                        task.scheduleState == ScheduleState.TODAY ||
-                        task.scheduleState == ScheduleState.THIS_EVENING ||
-                        task.scheduleState == ScheduleState.SOMEDAY
-                    ) {
-                        ThingsWhenBadge(
-                            scheduleState = task.scheduleState,
-                            whenDateEpochMillis = task.whenDate,
-                            locale = locale
-                        )
-                    }
-
-                    task.deadline?.let { dl ->
-                        ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
-                    }
-
-                    if (task.checklistItems.isNotEmpty()) {
-                        val done = task.checklistItems.count { it.isCompleted }
-                        ThingsTagPill(title = "☑ $done/${task.checklistItems.size}")
-                    }
-
-                    task.tags.forEach { tag ->
-                        ThingsTagPill(title = tag.title)
-                    }
+            val isClosed = task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = if (isClosed) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showKanbanContextMenu = false
+                    onStatusChange(if (isClosed) TaskStatus.OPEN else TaskStatus.COMPLETED)
                 }
-            }
+            )
         }
     }
 }
@@ -1570,6 +1760,10 @@ fun ProjectRoadmapWorkspace(
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
     onOpenTaskEditor: (taskId: String) -> Unit,
     onShowError: (String) -> Unit,
+    selectedTaskIds: Set<String> = emptySet(),
+    isSelectionModeActive: Boolean = selectedTaskIds.size > 1,
+    onSelectSingleTask: ((taskId: String) -> Unit)? = null,
+    onToggleTaskSelection: ((taskId: String) -> Unit)? = null,
     isFullScreen: Boolean = false,
     onToggleFullScreen: (() -> Unit)? = null,
     projectTitle: String? = null,
@@ -1959,6 +2153,10 @@ fun ProjectRoadmapWorkspace(
                             locale = locale,
                             horizontalScrollState = horizontalScrollState,
                             livePreviewDeltaDays = livePreviewDeltaDays,
+                            selectedTaskIds = selectedTaskIds,
+                            isSelectionModeActive = isSelectionModeActive,
+                            onSelectSingleTask = onSelectSingleTask,
+                            onToggleTaskSelection = onToggleTaskSelection,
                             onShiftHeadingDates = onShiftHeadingDates,
                             onShiftTaskDates = onShiftTaskDates,
                             onUpdateTaskStatus = onUpdateTaskStatus,
@@ -2070,7 +2268,10 @@ fun ProjectRoadmapWorkspace(
                                     .clickable { onOpenTaskEditor(task.id) },
                                 shape = RoundedCornerShape(11.dp),
                                 color = colors.cardSurface,
-                                border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                                border = BorderStroke(
+                                    width = if (task.isMilestone) 1.15.dp else 0.75.dp,
+                                    color = if (task.isMilestone) colors.milestoneViolet.copy(alpha = 0.55f) else colors.hairlineDivider
+                                )
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -2087,6 +2288,7 @@ fun ProjectRoadmapWorkspace(
                                         ThingsCheckbox(
                                             status = task.status,
                                             onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
+                                            isMilestone = task.isMilestone,
                                             size = 18.dp
                                         )
                                         Text(
@@ -2094,8 +2296,17 @@ fun ProjectRoadmapWorkspace(
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = colors.primaryText,
                                             maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
+                                        if (task.isMilestone) {
+                                            ThingsTagPill(
+                                                title = "◆ ${stringResource(R.string.v30_milestone_label)}",
+                                                containerColor = colors.milestoneVioletSoft,
+                                                contentColor = colors.milestoneViolet,
+                                                borderColor = colors.milestoneViolet.copy(alpha = 0.45f)
+                                            )
+                                        }
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         ThingsTagPill(
@@ -2323,6 +2534,10 @@ private fun RoadmapSynchronizedLanesBody(
     locale: Locale,
     horizontalScrollState: ScrollState,
     livePreviewDeltaDays: MutableMap<String, Long>,
+    selectedTaskIds: Set<String> = emptySet(),
+    isSelectionModeActive: Boolean = false,
+    onSelectSingleTask: ((taskId: String) -> Unit)? = null,
+    onToggleTaskSelection: ((taskId: String) -> Unit)? = null,
     onShiftHeadingDates: (heading: Heading, deltaDays: Long, fallbackRange: Pair<Long, Long>?) -> Unit,
     onShiftTaskDates: (task: TaskItem, deltaDays: Long) -> Unit,
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
@@ -2331,6 +2546,7 @@ private fun RoadmapSynchronizedLanesBody(
 ) {
     val colors = ThingsTheme.colors
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
     val shortDateFmt = remember(locale) {
         DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM" else "MMM d", locale)
     }
@@ -2521,13 +2737,55 @@ private fun RoadmapSynchronizedLanesBody(
 
                     is RoadmapDisplayRow.TaskRow -> {
                         val task = row.taskBar.task
+                        val isRowSelected = task.id in selectedTaskIds
+                        var lastLabelTapMs by remember(task.id) { mutableLongStateOf(0L) }
+                        var labelCtrlHeld by remember(task.id) { mutableStateOf(false) }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(TASK_ROW_HEIGHT)
+                                .background(
+                                    when {
+                                        isRowSelected -> colors.thingsBlueSoft.copy(alpha = 0.55f)
+                                        task.isMilestone -> colors.milestoneVioletSoft.copy(alpha = 0.30f)
+                                        else -> Color.Transparent
+                                    }
+                                )
                                 .then(
                                     if (!readOnly) {
-                                        Modifier.clickable { onOpenTaskEditor(task.id) }
+                                        Modifier
+                                            .pointerInput(task.id, "label_mod") {
+                                                awaitPointerEventScope {
+                                                    while (true) {
+                                                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                                        if (ev.type == PointerEventType.Press) {
+                                                            labelCtrlHeld = ev.keyboardModifiers.isCtrlPressed || ev.keyboardModifiers.isMetaPressed
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            .clickable {
+                                                val now = SystemClock.uptimeMillis()
+                                                if (labelCtrlHeld && onToggleTaskSelection != null) {
+                                                    lastLabelTapMs = 0L
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onToggleTaskSelection(task.id)
+                                                } else if (lastLabelTapMs > 0L && (now - lastLabelTapMs) <= 380L) {
+                                                    lastLabelTapMs = 0L
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onOpenTaskEditor(task.id)
+                                                } else {
+                                                    lastLabelTapMs = now
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    if (isSelectionModeActive && onToggleTaskSelection != null) {
+                                                        onToggleTaskSelection(task.id)
+                                                    } else if (onSelectSingleTask != null) {
+                                                        onSelectSingleTask(task.id)
+                                                    } else {
+                                                        onOpenTaskEditor(task.id)
+                                                    }
+                                                }
+                                            }
                                     } else {
                                         Modifier
                                     }
@@ -2544,6 +2802,7 @@ private fun RoadmapSynchronizedLanesBody(
                                 ThingsCheckbox(
                                     status = task.status,
                                     onStatusChange = { next -> if (!readOnly) onUpdateTaskStatus(task.id, next) },
+                                    isMilestone = task.isMilestone,
                                     size = 16.dp,
                                     showHoverTooltip = !readOnly,
                                     modifier = if (readOnly) {
@@ -2563,13 +2822,18 @@ private fun RoadmapSynchronizedLanesBody(
                                         Modifier
                                     }
                                 )
+                                val baseTitle = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) }
                                 Text(
-                                    text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
+                                    text = if (task.isMilestone) "◆ $baseTitle" else baseTitle,
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = if (task.isMilestone) FontWeight.SemiBold else FontWeight.Medium,
                                         textDecoration = if (task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
                                     ),
-                                    color = if (row.taskBar.isActivelyBlocked) colors.secondaryText else colors.primaryText,
+                                    color = when {
+                                        row.taskBar.isActivelyBlocked -> colors.secondaryText
+                                        task.isMilestone && task.status == TaskStatus.OPEN -> colors.milestoneViolet
+                                        else -> colors.primaryText
+                                    },
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -2584,7 +2848,7 @@ private fun RoadmapSynchronizedLanesBody(
                                             Icon(
                                                 imageVector = Icons.Outlined.ChevronLeft,
                                                 contentDescription = shiftEarlierLabel,
-                                                tint = colors.secondaryText,
+                                                tint = if (task.isMilestone) colors.milestoneViolet else colors.secondaryText,
                                                 modifier = Modifier.size(13.dp)
                                             )
                                         }
@@ -2597,7 +2861,7 @@ private fun RoadmapSynchronizedLanesBody(
                                             Icon(
                                                 imageVector = Icons.Outlined.ChevronRight,
                                                 contentDescription = shiftLaterLabel,
-                                                tint = colors.secondaryText,
+                                                tint = if (task.isMilestone) colors.milestoneViolet else colors.secondaryText,
                                                 modifier = Modifier.size(13.dp)
                                             )
                                         }
@@ -2709,9 +2973,12 @@ private fun RoadmapSynchronizedLanesBody(
                                 endEpochDayWindow = layout.endEpochDay,
                                 todayEpochDay = layout.todayEpochDay,
                                 topDp = topDp,
+                                totalTimelineWidthDp = totalTimelineWidthDp,
                                 dayWidthDp = dayWidthDp,
                                 dayWidthPx = dayWidthPx,
                                 previewDelta = livePreviewDeltaDays["task_${tb.taskId}"] ?: 0L,
+                                isSelected = tb.taskId in selectedTaskIds,
+                                isSelectionModeActive = isSelectionModeActive,
                                 onPreviewDeltaChanged = { delta ->
                                     if (delta == 0L) livePreviewDeltaDays.remove("task_${tb.taskId}")
                                     else livePreviewDeltaDays["task_${tb.taskId}"] = delta
@@ -2719,6 +2986,8 @@ private fun RoadmapSynchronizedLanesBody(
                                 onCommitShift = { delta ->
                                     onShiftTaskDates(tb.task, delta)
                                 },
+                                onSelectSingleTask = onSelectSingleTask?.let { fn -> { fn(tb.taskId) } },
+                                onToggleTaskSelection = onToggleTaskSelection?.let { fn -> { fn(tb.taskId) } },
                                 onClickTask = { onOpenTaskEditor(tb.taskId) },
                                 readOnly = readOnly
                             )
@@ -2732,6 +3001,7 @@ private fun RoadmapSynchronizedLanesBody(
                     val resolvedEdgeColor = colors.thingsBlue.copy(alpha = 0.55f)
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val hPad = 3.dp.toPx()
+                        val diamondVertexOffset = 12.5.dp.toPx()
                         val strokeW = 1.85.dp.toPx()
                         val arrowSize = 6.dp.toPx()
 
@@ -2747,12 +3017,17 @@ private fun RoadmapSynchronizedLanesBody(
                             val clampedToStart = (toInfo.third.startEpochDay + toDelta)
                                 .coerceIn(layout.startEpochDay, layout.endEpochDay)
 
-                            val fromEndIdx = clampedFromEnd - layout.startEpochDay + 1L
-                            val toStartIdx = clampedToStart - layout.startEpochDay
-
-                            val startX = fromEndIdx * dayWidthPx - hPad
+                            val startX = if (fromInfo.third.isMilestone) {
+                                (clampedFromEnd - layout.startEpochDay + 0.5f) * dayWidthPx + diamondVertexOffset
+                            } else {
+                                (clampedFromEnd - layout.startEpochDay + 1L) * dayWidthPx - hPad
+                            }
                             val startY = fromInfo.first + fromInfo.second * 0.5f
-                            val endX = toStartIdx * dayWidthPx + hPad
+                            val endX = if (toInfo.third.isMilestone) {
+                                (clampedToStart - layout.startEpochDay + 0.5f) * dayWidthPx - diamondVertexOffset
+                            } else {
+                                (clampedToStart - layout.startEpochDay) * dayWidthPx + hPad
+                            }
                             val endY = toInfo.first + toInfo.second * 0.5f
 
                             val dx = kotlin.math.abs(endX - startX)
@@ -3000,11 +3275,16 @@ private fun RoadmapDraggableTaskBar(
     endEpochDayWindow: Long,
     todayEpochDay: Long,
     topDp: Dp,
+    totalTimelineWidthDp: Dp,
     dayWidthDp: Dp,
     dayWidthPx: Float,
     previewDelta: Long,
+    isSelected: Boolean = false,
+    isSelectionModeActive: Boolean = false,
     onPreviewDeltaChanged: (Long) -> Unit,
     onCommitShift: (Long) -> Unit,
+    onSelectSingleTask: (() -> Unit)? = null,
+    onToggleTaskSelection: (() -> Unit)? = null,
     onClickTask: () -> Unit,
     readOnly: Boolean = false
 ) {
@@ -3015,6 +3295,8 @@ private fun RoadmapDraggableTaskBar(
     val currentOnPreview by rememberUpdatedState(onPreviewDeltaChanged)
     val currentOnCommit by rememberUpdatedState(onCommitShift)
     var isArmedForDrag by remember(taskBar.taskId) { mutableStateOf(false) }
+    var lastTapUptimeMs by remember(taskBar.taskId) { mutableLongStateOf(0L) }
+    var modifierHeldCtrlOrMeta by remember(taskBar.taskId) { mutableStateOf(false) }
 
     val baseStartDay = taskBar.startEpochDay
     val baseEndDay = taskBar.endEpochDay
@@ -3036,14 +3318,298 @@ private fun RoadmapDraggableTaskBar(
         taskBar.task.deadline != null &&
         effectiveEndDay < todayEpochDay
 
+    val handleBarTap: () -> Unit = {
+        val now = SystemClock.uptimeMillis()
+        if (modifierHeldCtrlOrMeta && onToggleTaskSelection != null) {
+            lastTapUptimeMs = 0L
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onToggleTaskSelection()
+        } else if (lastTapUptimeMs > 0L && (now - lastTapUptimeMs) <= 380L) {
+            lastTapUptimeMs = 0L
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClickTask()
+        } else {
+            lastTapUptimeMs = now
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            if (isSelectionModeActive && onToggleTaskSelection != null) {
+                onToggleTaskSelection()
+            } else if (onSelectSingleTask != null) {
+                onSelectSingleTask()
+            } else {
+                onClickTask()
+            }
+        }
+    }
+
+    val interactiveGestureModifier: Modifier = if (!readOnly) {
+        Modifier
+            .pointerHoverIcon(PointerIcon.Hand)
+            .pointerInput(taskBar.taskId, "mod_track") {
+                awaitPointerEventScope {
+                    while (true) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        if (ev.type == PointerEventType.Press) {
+                            modifierHeldCtrlOrMeta = ev.keyboardModifiers.isCtrlPressed || ev.keyboardModifiers.isMetaPressed
+                        }
+                    }
+                }
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = handleBarTap
+            )
+            .pointerInput(taskBar.taskId) {
+                var rawDragPx = 0f
+                var lastDelta = 0L
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        rawDragPx = 0f
+                        lastDelta = 0L
+                        isArmedForDrag = true
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        rawDragPx += dragAmount.x
+                        val snapped = if (currentDayWidthPx > 1f) {
+                            (rawDragPx / currentDayWidthPx).roundToInt().toLong()
+                        } else 0L
+                        if (snapped != lastDelta) {
+                            lastDelta = snapped
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            currentOnPreview(snapped)
+                        }
+                    },
+                    onDragEnd = {
+                        val finalDelta = lastDelta
+                        isArmedForDrag = false
+                        currentOnPreview(0L)
+                        if (finalDelta != 0L) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            currentOnCommit(finalDelta)
+                        }
+                    },
+                    onDragCancel = {
+                        isArmedForDrag = false
+                        currentOnPreview(0L)
+                    }
+                )
+            }
+    } else {
+        Modifier
+    }
+
+    val defaultTodoLabel = stringResource(R.string.entity_todo)
+
+    if (taskBar.isMilestone) {
+        val diamondFill = when {
+            taskBar.task.status == TaskStatus.COMPLETED -> Color(0xFF10B981)
+            taskBar.task.status == TaskStatus.CANCELED -> colors.secondaryText
+            isOverdue -> colors.deadlineUrgentRed
+            else -> colors.milestoneViolet
+        }
+        val calloutText = remember(taskBar.title, taskBar.isActivelyBlocked, previewDelta, defaultTodoLabel) {
+            buildString {
+                append("◆ ")
+                if (taskBar.isActivelyBlocked) append("⏳ ")
+                append(taskBar.title.ifBlank { defaultTodoLabel })
+                if (previewDelta != 0L) {
+                    append(if (previewDelta > 0) " (+${previewDelta}d)" else " (${previewDelta}d)")
+                }
+            }
+        }
+        val measuredCalloutPx = remember(calloutText, density) {
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = with(density) { 10.5.sp.toPx() }
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }.measureText(calloutText)
+        }
+        val totalTimelineWidthPx = with(density) { totalTimelineWidthDp.toPx() }
+        val centerColPx = xOffsetPx + currentDayWidthPx * 0.5f
+        val spaceRightPx = totalTimelineWidthPx - (centerColPx + with(density) { 16.dp.toPx() })
+        val spaceLeftPx = centerColPx - with(density) { 16.dp.toPx() }
+        val placeLabelRight = spaceRightPx >= measuredCalloutPx + with(density) { 16.dp.toPx() } ||
+            spaceRightPx >= spaceLeftPx
+
+        // 1. Centered 45°-rotated 18.dp Milestone Violet Diamond with white inner rim & soft violet glow
+        Box(
+            modifier = Modifier
+                .offset(x = baseXOffsetDp, y = topDp)
+                .graphicsLayer {
+                    translationX = xOffsetPx - baseXOffsetPx
+                    val scale = if (isArmedForDrag) 1.12f else 1f
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .width(dayWidthDp)
+                .height(TASK_ROW_HEIGHT)
+                .then(interactiveGestureModifier),
+            contentAlignment = Alignment.Center
+        ) {
+            // Soft Violet Glow Halo (+ Sky-Blue selection ring when selected)
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(
+                        colors.milestoneViolet.copy(
+                            alpha = if (isArmedForDrag || isSelected) 0.28f else 0.17f
+                        )
+                    )
+                    .then(
+                        if (isSelected) {
+                            Modifier.border(1.4.dp, colors.thingsBlue, CircleShape)
+                        } else {
+                            Modifier
+                        }
+                    )
+            )
+            // Bold 18.dp 45°-Rotated Milestone Violet Diamond with Crisp White Inner Rim
+            Box(
+                modifier = Modifier
+                    .size(18.dp)
+                    .graphicsLayer { rotationZ = 45f }
+                    .shadow(
+                        elevation = if (isArmedForDrag || previewDelta != 0L || isSelected) 5.dp else 2.5.dp,
+                        shape = RoundedCornerShape(4.dp)
+                    )
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(diamondFill)
+                    .border(
+                        width = if (isSelected) 1.5.dp else 0.9.dp,
+                        color = if (isSelected) colors.thingsBlue else diamondFill,
+                        shape = RoundedCornerShape(4.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                // White Inner Rim inside the 45° Diamond
+                Box(
+                    modifier = Modifier
+                        .size(13.dp)
+                        .border(
+                            width = 1.35.dp,
+                            color = Color.White.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(2.5.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (taskBar.task.status == TaskStatus.COMPLETED) {
+                        Canvas(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .graphicsLayer { rotationZ = -45f }
+                        ) {
+                            val w = size.width
+                            val h = size.height
+                            val checkPath = Path().apply {
+                                moveTo(w * 0.16f, h * 0.54f)
+                                lineTo(w * 0.42f, h * 0.80f)
+                                lineTo(w * 0.86f, h * 0.22f)
+                            }
+                            drawPath(
+                                path = checkPath,
+                                color = Color.White,
+                                style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Floating Non-Clipped Milestone Callout Label ("◆ ${task.title}") immediately beside the diamond
+        if (placeLabelRight) {
+            Box(
+                modifier = Modifier
+                    .offset(x = baseXOffsetDp + dayWidthDp / 2 + 14.dp, y = topDp + 6.dp)
+                    .graphicsLayer {
+                        translationX = xOffsetPx - baseXOffsetPx
+                    }
+                    .height(TASK_ROW_HEIGHT - 12.dp)
+                    .then(interactiveGestureModifier),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    text = calloutText,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        textDecoration = if (taskBar.task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
+                    ),
+                    color = when {
+                        taskBar.task.status != TaskStatus.OPEN -> colors.secondaryText
+                        isOverdue -> colors.deadlineUrgentRed
+                        else -> colors.milestoneViolet
+                    },
+                    softWrap = false,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(
+                            if (isSelected) colors.thingsBlueSoft else colors.milestoneVioletSoft.copy(alpha = 0.94f)
+                        )
+                        .border(
+                            width = if (isSelected) 1.3.dp else 0.85.dp,
+                            color = if (isSelected) colors.thingsBlue else colors.milestoneViolet.copy(alpha = 0.48f),
+                            shape = RoundedCornerShape(7.dp)
+                        )
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                )
+            }
+        } else {
+            val leftAvailWidth = (xOffsetDp + dayWidthDp / 2 - 14.dp).coerceAtLeast(0.dp)
+            if (leftAvailWidth > 20.dp) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = 0.dp, y = topDp + 6.dp)
+                        .width(leftAvailWidth)
+                        .height(TASK_ROW_HEIGHT - 12.dp)
+                        .then(interactiveGestureModifier),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(
+                        text = calloutText,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            textDecoration = if (taskBar.task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
+                        ),
+                        color = when {
+                            taskBar.task.status != TaskStatus.OPEN -> colors.secondaryText
+                            isOverdue -> colors.deadlineUrgentRed
+                            else -> colors.milestoneViolet
+                        },
+                        softWrap = false,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(
+                                if (isSelected) colors.thingsBlueSoft else colors.milestoneVioletSoft.copy(alpha = 0.94f)
+                            )
+                            .border(
+                                width = if (isSelected) 1.3.dp else 0.85.dp,
+                                color = if (isSelected) colors.thingsBlue else colors.milestoneViolet.copy(alpha = 0.48f),
+                                shape = RoundedCornerShape(7.dp)
+                            )
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+        return
+    }
+
     val barFill = when {
+        isSelected -> colors.thingsBlueSoft
         taskBar.task.status != TaskStatus.OPEN -> colors.tagPillBg
         isOverdue -> colors.deadlineSoftBg
         taskBar.isActivelyBlocked -> colors.somedayWarmAmber.copy(alpha = 0.16f)
         else -> colors.thingsBlueSoft
     }
     val barBorder = when {
-        isArmedForDrag -> colors.thingsBlue
+        isArmedForDrag || isSelected -> colors.thingsBlue
         taskBar.task.status != TaskStatus.OPEN -> colors.hairlineDivider
         isOverdue -> colors.deadlineUrgentRed.copy(alpha = 0.65f)
         taskBar.isActivelyBlocked -> colors.somedayWarmAmber.copy(alpha = 0.72f)
@@ -3068,60 +3634,14 @@ private fun RoadmapDraggableTaskBar(
             .width(barWidthDp)
             .height(TASK_ROW_HEIGHT - 12.dp)
             .padding(horizontal = 3.dp)
-            .shadow(if (isArmedForDrag || previewDelta != 0L) 5.dp else 1.dp, RoundedCornerShape(8.dp))
+            .shadow(if (isArmedForDrag || previewDelta != 0L || isSelected) 5.dp else 1.dp, RoundedCornerShape(8.dp))
             .clip(RoundedCornerShape(8.dp))
             .background(barFill)
-            .border(if (isArmedForDrag) 1.6.dp else 1.1.dp, barBorder, RoundedCornerShape(8.dp))
-            .then(
-                if (!readOnly) {
-                    Modifier
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable(onClick = onClickTask)
-                        .pointerInput(taskBar.taskId) {
-                            var rawDragPx = 0f
-                            var lastDelta = 0L
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = {
-                                    rawDragPx = 0f
-                                    lastDelta = 0L
-                                    isArmedForDrag = true
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    rawDragPx += dragAmount.x
-                                    val snapped = if (currentDayWidthPx > 1f) {
-                                        (rawDragPx / currentDayWidthPx).roundToInt().toLong()
-                                    } else 0L
-                                    if (snapped != lastDelta) {
-                                        lastDelta = snapped
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        currentOnPreview(snapped)
-                                    }
-                                },
-                                onDragEnd = {
-                                    val finalDelta = lastDelta
-                                    isArmedForDrag = false
-                                    currentOnPreview(0L)
-                                    if (finalDelta != 0L) {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        currentOnCommit(finalDelta)
-                                    }
-                                },
-                                onDragCancel = {
-                                    isArmedForDrag = false
-                                    currentOnPreview(0L)
-                                }
-                            )
-                        }
-                } else {
-                    Modifier
-                }
-            )
+            .border(if (isArmedForDrag || isSelected) 1.6.dp else 1.1.dp, barBorder, RoundedCornerShape(8.dp))
+            .then(interactiveGestureModifier)
             .padding(horizontal = 8.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        val defaultTodoLabel = stringResource(R.string.entity_todo)
         Text(
             text = buildString {
                 if (taskBar.isActivelyBlocked) append("⏳ ")
@@ -4293,42 +4813,68 @@ object RoadmapExporter {
                 is RoadmapDisplayRow.TaskRow -> {
                     val tb = r.taskBar
                     taskGeometry[tb.taskId] = Triple(curY, rowH, tb)
+                    val milestoneVioletArgb = if (isDark) 0xFFA78BFA.toInt() else 0xFF7C3AED.toInt()
+                    val leftRowPaint = if (tb.isMilestone) {
+                        Paint(taskLabelPaint).apply {
+                            color = milestoneVioletArgb
+                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        }
+                    } else {
+                        taskLabelPaint
+                    }
+                    val prefix = if (tb.isMilestone) "◆ " else "• "
                     canvas.drawText(
-                        ellipsizeText("• ${tb.title.ifBlank { todoFallbackLabel }}", taskLabelPaint, labelColW - 22f),
+                        ellipsizeText("$prefix${tb.title.ifBlank { todoFallbackLabel }}", leftRowPaint, labelColW - 22f),
                         tableLeft + 12f,
                         curY + rowH * 0.5f + 3.5f,
-                        taskLabelPaint
+                        leftRowPaint
                     )
 
                     if (tb.endEpochDay >= layout.startEpochDay && tb.startEpochDay <= layout.endEpochDay) {
                         val visStart = tb.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
                         val visEnd = tb.endEpochDay.coerceIn(visStart, layout.endEpochDay)
-                        val barLeft = timelineLeft + (visStart - layout.startEpochDay) * dayW + 1.5f
-                        val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * dayW - 1.5f
-                        val barRight = maxOf(barLeft + minOf(8f, dayW * 0.8f), minOf(rawRight, tableRight - 1.5f))
-                        val barH = 16f
-                        val barTop = curY + (rowH - barH) * 0.5f
-                        val barRect = RectF(barLeft, barTop, barRight, barTop + barH)
-
-                        fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
-                        canvas.drawRoundRect(barRect, 5f, 5f, fillPaint)
-
-                        strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
-                        strokePaint.strokeWidth = 1f
-                        canvas.drawRoundRect(barRect, 5f, 5f, strokePaint)
-
-                        val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
-                            textSize = 8.5f
-                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-                        }
-                        if (barRect.width() >= 22f) {
-                            canvas.drawText(
-                                ellipsizeText(tb.title.ifBlank { todoFallbackLabel }, taskBarTextPaint, barRect.width() - 8f),
-                                barRect.left + 4f,
-                                barRect.centerY() + 3f,
-                                taskBarTextPaint
+                        if (tb.isMilestone) {
+                            val centerX = timelineLeft + (visStart - layout.startEpochDay + 0.5f) * dayW
+                            val centerY = curY + rowH * 0.5f
+                            drawMilestoneTimelineDiamondAndLabel(
+                                canvas = canvas,
+                                title = tb.title.ifBlank { todoFallbackLabel },
+                                centerX = centerX,
+                                centerY = centerY,
+                                diamondRadius = 6.8f,
+                                timelineLeft = timelineLeft,
+                                tableRight = tableRight,
+                                isDark = isDark,
+                                textSize = 8.8f
                             )
+                        } else {
+                            val barLeft = timelineLeft + (visStart - layout.startEpochDay) * dayW + 1.5f
+                            val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * dayW - 1.5f
+                            val barRight = maxOf(barLeft + minOf(8f, dayW * 0.8f), minOf(rawRight, tableRight - 1.5f))
+                            val barH = 16f
+                            val barTop = curY + (rowH - barH) * 0.5f
+                            val barRect = RectF(barLeft, barTop, barRight, barTop + barH)
+
+                            fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
+                            canvas.drawRoundRect(barRect, 5f, 5f, fillPaint)
+
+                            strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
+                            strokePaint.strokeWidth = 1f
+                            canvas.drawRoundRect(barRect, 5f, 5f, strokePaint)
+
+                            val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
+                                textSize = 8.5f
+                                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                            }
+                            if (barRect.width() >= 22f) {
+                                canvas.drawText(
+                                    ellipsizeText(tb.title.ifBlank { todoFallbackLabel }, taskBarTextPaint, barRect.width() - 8f),
+                                    barRect.left + 4f,
+                                    barRect.centerY() + 3f,
+                                    taskBarTextPaint
+                                )
+                            }
                         }
                     }
                 }
@@ -4357,9 +4903,17 @@ object RoadmapExporter {
             val toGeom = taskGeometry[edge.toTaskId] ?: continue
             val visFromEnd = fromGeom.third.endEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
             val visToStart = toGeom.third.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
-            val sx = timelineLeft + (visFromEnd - layout.startEpochDay + 1L) * dayW - 1.5f
+            val sx = if (fromGeom.third.isMilestone) {
+                timelineLeft + (visFromEnd - layout.startEpochDay + 0.5f) * dayW + 7.2f
+            } else {
+                timelineLeft + (visFromEnd - layout.startEpochDay + 1L) * dayW - 1.5f
+            }
             val sy = fromGeom.first + fromGeom.second * 0.5f
-            val ex = timelineLeft + (visToStart - layout.startEpochDay) * dayW + 1.5f
+            val ex = if (toGeom.third.isMilestone) {
+                timelineLeft + (visToStart - layout.startEpochDay + 0.5f) * dayW - 7.2f
+            } else {
+                timelineLeft + (visToStart - layout.startEpochDay) * dayW + 1.5f
+            }
             val ey = toGeom.first + toGeom.second * 0.5f
             val ctrl = maxOf(kotlin.math.abs(ex - sx) * 0.48f, 12f)
             val c1x = sx + ctrl
@@ -4613,38 +5167,64 @@ object RoadmapExporter {
                 is RoadmapDisplayRow.TaskRow -> {
                     val tb = row.taskBar
                     taskGeometry[tb.taskId] = Triple(curY, EXPORT_TASK_H, tb)
+                    val milestoneVioletArgb = if (isDark) 0xFFA78BFA.toInt() else 0xFF7C3AED.toInt()
+                    val leftPaint = if (tb.isMilestone) {
+                        Paint(rowRegularPaint).apply {
+                            color = milestoneVioletArgb
+                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                        }
+                    } else {
+                        rowRegularPaint
+                    }
+                    val prefix = if (tb.isMilestone) "◆ " else "• "
                     canvas.drawText(
-                        ellipsizeText("• ${tb.title.ifBlank { todoFallbackLabel }}", rowRegularPaint, EXPORT_LABEL_W - 28f),
+                        ellipsizeText("$prefix${tb.title.ifBlank { todoFallbackLabel }}", leftPaint, EXPORT_LABEL_W - 28f),
                         tableLeft + 16f,
                         curY + 21f,
-                        rowRegularPaint
+                        leftPaint
                     )
                     if (tb.endEpochDay >= layout.startEpochDay && tb.startEpochDay <= layout.endEpochDay) {
                         val visStart = tb.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
                         val visEnd = tb.endEpochDay.coerceIn(visStart, layout.endEpochDay)
-                        val barLeft = timelineLeft + (visStart - layout.startEpochDay) * EXPORT_DAY_W + 3f
-                        val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
-                        val barRight = maxOf(barLeft + 14f, minOf(rawRight, tableRight - 3f))
-                        val barRect = RectF(barLeft, curY + 5f, barRight, curY + EXPORT_TASK_H - 5f)
+                        if (tb.isMilestone) {
+                            val centerX = timelineLeft + (visStart - layout.startEpochDay + 0.5f) * EXPORT_DAY_W
+                            val centerY = curY + EXPORT_TASK_H * 0.5f
+                            drawMilestoneTimelineDiamondAndLabel(
+                                canvas = canvas,
+                                title = tb.title.ifBlank { todoFallbackLabel },
+                                centerX = centerX,
+                                centerY = centerY,
+                                diamondRadius = 9.5f,
+                                timelineLeft = timelineLeft,
+                                tableRight = tableRight,
+                                isDark = isDark,
+                                textSize = 11f
+                            )
+                        } else {
+                            val barLeft = timelineLeft + (visStart - layout.startEpochDay) * EXPORT_DAY_W + 3f
+                            val rawRight = timelineLeft + (visEnd - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+                            val barRight = maxOf(barLeft + 14f, minOf(rawRight, tableRight - 3f))
+                            val barRect = RectF(barLeft, curY + 5f, barRight, curY + EXPORT_TASK_H - 5f)
 
-                        fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
-                        canvas.drawRoundRect(barRect, 7f, 7f, fillPaint)
+                            fillPaint.color = if (tb.isActivelyBlocked) (if (isDark) 0x33FBBF24 else 0x26D69F3A) else blueSoftArgb
+                            canvas.drawRoundRect(barRect, 7f, 7f, fillPaint)
 
-                        strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
-                        strokePaint.strokeWidth = 1.3f
-                        canvas.drawRoundRect(barRect, 7f, 7f, strokePaint)
+                            strokePaint.color = if (tb.isActivelyBlocked) amberArgb else blueArgb
+                            strokePaint.strokeWidth = 1.3f
+                            canvas.drawRoundRect(barRect, 7f, 7f, strokePaint)
 
-                        val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
-                            textSize = 10.5f
-                            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                            val taskBarTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                color = if (tb.isActivelyBlocked) amberArgb else primaryTextArgb
+                                textSize = 10.5f
+                                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                            }
+                            canvas.drawText(
+                                ellipsizeText(tb.title.ifBlank { todoFallbackLabel }, taskBarTextPaint, (barRect.width() - 12f).coerceAtLeast(0f)),
+                                barRect.left + 6f,
+                                barRect.centerY() + 3.8f,
+                                taskBarTextPaint
+                            )
                         }
-                        canvas.drawText(
-                            ellipsizeText(tb.title.ifBlank { todoFallbackLabel }, taskBarTextPaint, (barRect.width() - 12f).coerceAtLeast(0f)),
-                            barRect.left + 6f,
-                            barRect.centerY() + 3.8f,
-                            taskBarTextPaint
-                        )
                     }
                     curY += EXPORT_TASK_H
                 }
@@ -4672,9 +5252,17 @@ object RoadmapExporter {
             val toGeom = taskGeometry[edge.toTaskId] ?: continue
             val visFromEnd = fromGeom.third.endEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
             val visToStart = toGeom.third.startEpochDay.coerceIn(layout.startEpochDay, layout.endEpochDay)
-            val sx = timelineLeft + (visFromEnd - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+            val sx = if (fromGeom.third.isMilestone) {
+                timelineLeft + (visFromEnd - layout.startEpochDay + 0.5f) * EXPORT_DAY_W + 10f
+            } else {
+                timelineLeft + (visFromEnd - layout.startEpochDay + 1L) * EXPORT_DAY_W - 3f
+            }
             val sy = fromGeom.first + fromGeom.second * 0.5f
-            val ex = timelineLeft + (visToStart - layout.startEpochDay) * EXPORT_DAY_W + 3f
+            val ex = if (toGeom.third.isMilestone) {
+                timelineLeft + (visToStart - layout.startEpochDay + 0.5f) * EXPORT_DAY_W - 10f
+            } else {
+                timelineLeft + (visToStart - layout.startEpochDay) * EXPORT_DAY_W + 3f
+            }
             val ey = toGeom.first + toGeom.second * 0.5f
             val ctrl = maxOf(kotlin.math.abs(ex - sx) * 0.48f, 18f)
             val c1x = sx + ctrl
@@ -4711,6 +5299,101 @@ object RoadmapExporter {
         canvas.drawLine(timelineLeft, tableTop, timelineLeft, tableBottom, strokePaint)
         canvas.drawLine(tableLeft, bodyTop, tableRight, bodyTop, strokePaint)
         canvas.drawRoundRect(RectF(tableLeft, tableTop, tableRight, tableBottom), 16f, 16f, strokePaint)
+    }
+
+    private fun drawMilestoneTimelineDiamondAndLabel(
+        canvas: android.graphics.Canvas,
+        title: String,
+        centerX: Float,
+        centerY: Float,
+        diamondRadius: Float,
+        timelineLeft: Float,
+        tableRight: Float,
+        isDark: Boolean,
+        textSize: Float
+    ) {
+        val milestoneHexArgb = 0xFF7C3AED.toInt()
+        val labelFgArgb = if (isDark) 0xFFA78BFA.toInt() else milestoneHexArgb
+        val pillBgArgb = if (isDark) 0xEB2E1F47.toInt() else 0xF0F3E8FF.toInt()
+        val glowArgb = if (isDark) 0x3DA78BFA else 0x2E7C3AED
+
+        // Soft Milestone Violet Glow Halo
+        val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = glowArgb
+        }
+        canvas.drawCircle(centerX, centerY, diamondRadius * 1.45f, glowPaint)
+
+        // True 45° Vector Diamond Path in #7C3AED
+        val diamondPath = android.graphics.Path().apply {
+            moveTo(centerX, centerY - diamondRadius)
+            lineTo(centerX + diamondRadius, centerY)
+            lineTo(centerX, centerY + diamondRadius)
+            lineTo(centerX - diamondRadius, centerY)
+            close()
+        }
+        val diamondFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = milestoneHexArgb
+        }
+        canvas.drawPath(diamondPath, diamondFillPaint)
+
+        // Crisp White Inner Rim inside the 45° Diamond
+        val innerR = (diamondRadius * 0.68f).coerceAtLeast(2.2f)
+        val innerRimPath = android.graphics.Path().apply {
+            moveTo(centerX, centerY - innerR)
+            lineTo(centerX + innerR, centerY)
+            lineTo(centerX, centerY + innerR)
+            lineTo(centerX - innerR, centerY)
+            close()
+        }
+        val innerRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = (diamondRadius * 0.14f).coerceAtLeast(1f)
+            color = 0xEBFFFFFF.toInt()
+            strokeJoin = Paint.Join.ROUND
+        }
+        canvas.drawPath(innerRimPath, innerRimPaint)
+
+        // Bold Floating Callout Label ("◆ ${task.title}") immediately beside the diamond
+        val calloutLabel = "◆ ${title.trim()}"
+        val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = labelFgArgb
+            this.textSize = textSize
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val rawWidth = labelPaint.measureText(calloutLabel)
+        val gap = diamondRadius + 5.5f
+        val spaceRight = (tableRight - 5f) - (centerX + gap)
+        val spaceLeft = (centerX - gap) - (timelineLeft + 5f)
+        val placeOnRight = spaceRight >= rawWidth + 8f || spaceRight >= spaceLeft
+        val maxAvail = (if (placeOnRight) spaceRight else spaceLeft).coerceAtLeast(24f)
+        val finalText = ellipsizeText(calloutLabel, labelPaint, maxAvail)
+        if (finalText.isEmpty()) return
+        val finalWidth = labelPaint.measureText(finalText)
+        val textX = if (placeOnRight) {
+            (centerX + gap + 4f).coerceAtMost((tableRight - 4f - finalWidth).coerceAtLeast(timelineLeft + 4f))
+        } else {
+            (centerX - gap - 4f - finalWidth).coerceAtLeast(timelineLeft + 4f)
+        }
+        val pillRect = RectF(
+            textX - 4.5f,
+            centerY - textSize * 0.72f,
+            (textX + finalWidth + 4.5f).coerceAtMost(tableRight - 2f),
+            centerY + textSize * 0.62f
+        )
+        val pillFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = pillBgArgb
+        }
+        val pillStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 0.85f
+            color = if (isDark) 0x7AA78BFA else 0x667C3AED
+        }
+        canvas.drawRoundRect(pillRect, 5f, 5f, pillFill)
+        canvas.drawRoundRect(pillRect, 5f, 5f, pillStroke)
+        canvas.drawText(finalText, textX, centerY + textSize * 0.34f, labelPaint)
     }
 
     private fun drawPhaseTimelineTitle(

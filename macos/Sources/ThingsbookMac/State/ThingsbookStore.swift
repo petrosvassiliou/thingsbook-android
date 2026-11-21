@@ -320,7 +320,7 @@ public final class ThingsbookStore: ObservableObject {
     private func sortUpcomingTasksByDayBucket(_ list: [TaskItem], mode: String) -> [TaskItem] {
         let todayEpochDay = DateEpochConverter.epochDay(for: Date())
         let grouped = Dictionary(grouping: list) { task -> Int in
-            guard let w = task.whenDate else { return Int.max }
+            guard let w = task.whenDate ?? (task.isMilestone ? task.deadline : nil) else { return Int.max }
             return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
         }
         return grouped.keys.sorted().flatMap { day in
@@ -1664,6 +1664,36 @@ public final class ThingsbookStore: ObservableObject {
         let candidates = (allOpenTasks + logbookTasks).filter { ids.contains($0.id) }
         let shouldPin = candidates.isEmpty ? true : !candidates.allSatisfy(\.isPinned)
         setTasksPinned(ids, isPinned: shouldPin)
+    }
+
+    public func setTasksMilestone(_ ids: [String], isMilestone: Bool) {
+        flushModalDraftsIfNeeded()
+        guard !ids.isEmpty else { return }
+        try? database.setTasksMilestone(ids, isMilestone: isMilestone)
+    }
+
+    public func toggleMilestoneForSelectedTasks() {
+        flushModalDraftsIfNeeded()
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        let candidates = (allOpenTasks + logbookTasks).filter { selectedTaskIds.contains($0.id) }
+        let shouldMark = candidates.isEmpty ? true : !candidates.allSatisfy(\.isMilestone)
+        setTasksMilestone(ids, isMilestone: shouldMark)
+    }
+
+    public func toggleMilestoneForSelectedOrExpandedTasks() {
+        flushModalDraftsIfNeeded()
+        let ids: [String]
+        if !selectedTaskIds.isEmpty {
+            ids = Array(selectedTaskIds)
+        } else if let exp = expandedTaskId {
+            ids = [exp]
+        } else {
+            return
+        }
+        let candidates = (allOpenTasks + logbookTasks).filter { ids.contains($0.id) }
+        let shouldMark = candidates.isEmpty ? true : !candidates.allSatisfy(\.isMilestone)
+        setTasksMilestone(ids, isMilestone: shouldMark)
     }
 
     public func completeSelectedTasks() {

@@ -24,8 +24,11 @@ data class TemplateTaskBlueprint(
     val scheduledStartMinutes: Int? = null,
     val durationMinutes: Int? = null,
     val isEvening: Boolean = false,
+    val isMilestone: Boolean = false,
     val tagIds: List<String> = emptyList()
 )
+
+typealias BlueprintTask = TemplateTaskBlueprint
 
 @Serializable
 data class TemplateHeadingBlueprint(
@@ -182,6 +185,9 @@ object ProjectTemplateCodec {
                 val startMins = (element["scheduledStartMinutes"] as? JsonPrimitive)?.intOrNull
                 val durationMins = (element["durationMinutes"] as? JsonPrimitive)?.intOrNull
                 val isEvening = (element["isEvening"] as? JsonPrimitive)?.booleanOrNull ?: false
+                val isMilestone = (element["isMilestone"] as? JsonPrimitive)?.booleanOrNull
+                    ?: (element["is_milestone"] as? JsonPrimitive)?.booleanOrNull
+                    ?: ((element["resource_subtype"] as? JsonPrimitive)?.contentOrNull?.equals("milestone", ignoreCase = true) == true)
                 val tagIds = (element["tagIds"] as? JsonArray)
                     ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
                     .orEmpty()
@@ -195,6 +201,7 @@ object ProjectTemplateCodec {
                     scheduledStartMinutes = startMins,
                     durationMinutes = durationMins,
                     isEvening = isEvening,
+                    isMilestone = isMilestone,
                     tagIds = tagIds
                 )
             }
@@ -1345,6 +1352,7 @@ object StarterProjectTemplates {
 
 object ProjectOutlineImporter {
     private val bulletRegex = Regex("""^([-*+]|\d+\.)\s+(?:\[[ xX]?]\s+)?(.+)$""")
+    private val milestoneTokenRegex = Regex("""(?:^|\s)@milestone(?=\s|$)""", RegexOption.IGNORE_CASE)
     private val parenDurationSuffixRegex = Regex("""\(([^()]+)\)\s*$""")
     private val atDurationSuffixRegex = Regex("""(?:^|\s)@([^\s@]+(?:\s+\d+(?:[.,]\d+)?[a-zA-Zäöüßáéíóúàèìòù]+)*)\s*$""")
     private val plainMinSuffixRegex = Regex("""\s+(\d{1,4})\s*m(?:in)?$""", RegexOption.IGNORE_CASE)
@@ -1412,7 +1420,8 @@ object ProjectOutlineImporter {
                             val taskBuilder = MutableTaskBuilder(
                                 title = parsedMeta.cleanTitle,
                                 scheduledStartMinutes = parsedMeta.scheduledStartMinutes,
-                                durationMinutes = parsedMeta.durationMinutes
+                                durationMinutes = parsedMeta.durationMinutes,
+                                isMilestone = parsedMeta.isMilestone
                             )
                             if (currentHeading != null) {
                                 currentHeading.tasks.add(taskBuilder)
@@ -1430,7 +1439,8 @@ object ProjectOutlineImporter {
                         val taskBuilder = MutableTaskBuilder(
                             title = parsedMeta.cleanTitle,
                             scheduledStartMinutes = parsedMeta.scheduledStartMinutes,
-                            durationMinutes = parsedMeta.durationMinutes
+                            durationMinutes = parsedMeta.durationMinutes,
+                            isMilestone = parsedMeta.isMilestone
                         )
                         if (currentHeading != null) {
                             currentHeading.tasks.add(taskBuilder)
@@ -1454,13 +1464,20 @@ object ProjectOutlineImporter {
     private data class InlineTaskMeta(
         val cleanTitle: String,
         val scheduledStartMinutes: Int?,
-        val durationMinutes: Int?
+        val durationMinutes: Int?,
+        val isMilestone: Boolean = false
     )
 
     private fun extractTaskInlineMetadata(rawTitle: String): InlineTaskMeta {
         var working = rawTitle.trim()
         var startMinutes: Int? = null
         var durationMinutes: Int? = null
+        var isMilestone = false
+
+        if (milestoneTokenRegex.containsMatchIn(working)) {
+            isMilestone = true
+            working = working.replace(milestoneTokenRegex, " ").replace(Regex("""\s+"""), " ").trim()
+        }
 
         val timeMatch = startTimeTokenRegex.find(working)
         if (timeMatch != null) {
@@ -1508,7 +1525,8 @@ object ProjectOutlineImporter {
         return InlineTaskMeta(
             cleanTitle = working.ifBlank { rawTitle.trim() },
             scheduledStartMinutes = startMinutes,
-            durationMinutes = durationMinutes
+            durationMinutes = durationMinutes,
+            isMilestone = isMilestone
         )
     }
 
@@ -1516,13 +1534,15 @@ object ProjectOutlineImporter {
         val title: String,
         val scheduledStartMinutes: Int? = null,
         val durationMinutes: Int? = null,
+        val isMilestone: Boolean = false,
         val checklistItems: MutableList<String> = mutableListOf()
     ) {
         fun build(): TemplateTaskBlueprint = TemplateTaskBlueprint(
             title = title,
             checklistItems = checklistItems.toList(),
             scheduledStartMinutes = scheduledStartMinutes,
-            durationMinutes = durationMinutes
+            durationMinutes = durationMinutes,
+            isMilestone = isMilestone
         )
     }
 

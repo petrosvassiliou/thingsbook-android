@@ -46,6 +46,14 @@ public struct ThingsCommandMenus: Commands {
         return !matches.isEmpty && matches.allSatisfy(\.isPinned)
     }
 
+    @MainActor
+    private var allTargetsMilestone: Bool {
+        let ids = pinTargetIds
+        guard !ids.isEmpty else { return false }
+        let matches = (store.allOpenTasks + store.logbookTasks).filter { ids.contains($0.id) }
+        return !matches.isEmpty && matches.allSatisfy(\.isMilestone)
+    }
+
     public var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button(store.tr("settings_updates_search_btn") + "…") {
@@ -222,6 +230,12 @@ public struct ThingsCommandMenus: Commands {
                 store.togglePinForSelectedOrExpandedTasks()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
+            .disabled(isCommandBlocked || pinTargetIds.isEmpty)
+
+            Button(store.tr(allTargetsMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone")) {
+                guard !isShortcutBlocked() else { return }
+                store.toggleMilestoneForSelectedOrExpandedTasks()
+            }
             .disabled(isCommandBlocked || pinTargetIds.isEmpty)
 
             Button(store.tr("action_duplicate_todo")) {

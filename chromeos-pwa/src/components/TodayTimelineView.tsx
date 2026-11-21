@@ -165,10 +165,14 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                   <span className="v2-timeline-line" />
                 </div>
 
-                <div className="v2-timeline-card task">
+                <div
+                  className={`v2-timeline-card task ${tk.isMilestone ? 'milestone-item' : ''}`}
+                >
                   <button
                     type="button"
-                    className="things-checkbox"
+                    className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''} ${
+                      tk.status === 'COMPLETED' ? 'completed checked' : ''
+                    }`}
                     disabled={isFullScreen}
                     aria-disabled={isFullScreen || undefined}
                     style={
@@ -195,6 +199,14 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                       <span style={{ fontWeight: 620, fontSize: 14 }}>
                         {tk.title || t.placeholderTodoTitle}
                       </span>
+                      {tk.isMilestone && (
+                        <span
+                          className="meta-badge milestone-badge"
+                          data-testid="task-row-milestone-pill"
+                        >
+                          ◆ {t.milestoneLabel}
+                        </span>
+                      )}
                       <span className="meta-badge active">🕐 {item.rangeLabel}</span>
                       {tk.scheduleState === 'THIS_EVENING' && (
                         <span className="meta-badge evening">
@@ -312,10 +324,13 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
             {timeline.unscheduledTasks.map((tk) => {
               const containerLabel = getContainerSubtitle(tk);
               return (
-                <div key={tk.id} className="v2-unscheduled-row">
+                <div
+                  key={tk.id}
+                  className={`v2-unscheduled-row ${tk.isMilestone ? 'milestone-item' : ''}`}
+                >
                   <button
                     type="button"
-                    className="things-checkbox"
+                    className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''}`}
                     aria-label={t.actionComplete}
                     title={t.actionComplete}
                     onClick={() => void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })}
@@ -324,8 +339,18 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                     style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
                     onClick={() => onExpandTask(tk.id)}
                   >
-                    <div style={{ fontWeight: 560, fontSize: 13.6 }}>
-                      {tk.title || t.placeholderTodoTitle}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 560, fontSize: 13.6 }}>
+                        {tk.title || t.placeholderTodoTitle}
+                      </span>
+                      {tk.isMilestone && (
+                        <span
+                          className="meta-badge milestone-badge"
+                          data-testid="task-row-milestone-pill"
+                        >
+                          ◆ {t.milestoneLabel}
+                        </span>
+                      )}
                     </div>
                     {containerLabel && (
                       <div style={{ fontSize: 11.4, color: 'var(--text-muted)' }}>

@@ -803,7 +803,7 @@ class SyncRepository @Inject constructor(
 
         val localWasPurged = local != null && local.isDeleted && local.title.isEmpty() && local.notes.isEmpty()
         val effectiveDto = if (dto.isDeleted && localWasPurged) dto.copy(purgedFromTrash = true) else dto
-        val baseEntity = effectiveDto.toEntity()
+        val baseEntity = effectiveDto.toEntity(local)
         val keepLocalTimeblock = effectiveDto.omittedTimeblockFields &&
             !effectiveDto.isDeleted &&
             local != null &&

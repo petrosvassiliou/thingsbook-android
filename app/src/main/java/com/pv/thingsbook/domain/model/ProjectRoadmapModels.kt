@@ -35,7 +35,8 @@ data class RoadmapTaskBar(
     val headingId: String?,
     val startEpochDay: Long,
     val endEpochDay: Long,
-    val isActivelyBlocked: Boolean = false
+    val isActivelyBlocked: Boolean = false,
+    val isMilestone: Boolean = task.isMilestone
 ) {
     val taskId: String get() = task.id
     val title: String get() = task.title
@@ -143,6 +144,19 @@ object ProjectRoadmapEngine {
             task.headingId?.takeIf { it in validHeadingIds }
 
         fun buildTaskBarOrNull(task: TaskItem, effectiveHeadingId: String?): RoadmapTaskBar? {
+            if (task.isMilestone) {
+                val targetMillis = task.deadline ?: task.whenDate ?: return null
+                val targetDay = epochMillisToEpochDay(targetMillis, zoneId)
+                val blocked = task.blockedByTaskIds.any { it in openTaskIdsInProject }
+                return RoadmapTaskBar(
+                    task = task,
+                    headingId = effectiveHeadingId,
+                    startEpochDay = targetDay,
+                    endEpochDay = targetDay,
+                    isActivelyBlocked = blocked,
+                    isMilestone = true
+                )
+            }
             val whenDay = task.whenDate?.let { epochMillisToEpochDay(it, zoneId) }
             val deadlineDay = task.deadline?.let { epochMillisToEpochDay(it, zoneId) }
             val (startDay, endDay) = when {
@@ -165,7 +179,8 @@ object ProjectRoadmapEngine {
                 headingId = effectiveHeadingId,
                 startEpochDay = startDay,
                 endEpochDay = maxOf(startDay, endDay),
-                isActivelyBlocked = blocked
+                isActivelyBlocked = blocked,
+                isMilestone = false
             )
         }
 

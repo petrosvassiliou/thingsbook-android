@@ -160,7 +160,11 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
   onClose
 }) => {
   const [tab, setTab] = useState<TemplatesModalTab>(initialTab);
-  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(defaultAreaId);
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(() =>
+    defaultAreaId && areas.some((a) => !a.isDeleted && a.id === defaultAreaId)
+      ? defaultAreaId
+      : null
+  );
   const [outlineText, setOutlineText] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -352,8 +356,8 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
           </button>
         </div>
 
-        {/* Target Area Selector */}
-        {activeAreas.length > 0 && (
+        {/* Target Area Selector (Gallery & Outline Import tabs; External tab renders in-card selector) */}
+        {tab !== 'external' && activeAreas.length > 0 && (
           <div style={{ marginBottom: 12 }}>
             <div
               style={{
@@ -371,7 +375,7 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                 className={`chip-btn ${selectedAreaId === null ? 'active' : ''}`}
                 onClick={() => setSelectedAreaId(null)}
               >
-                —
+                <span>{t.areasNone}</span>
               </button>
               {activeAreas.map((area) => (
                 <button
@@ -679,6 +683,37 @@ export const TemplatesAndImportModal: React.FC<TemplatesAndImportModalProps> = (
                   void handleExternalFileSelected(file);
                 }}
               />
+
+              <div
+                className="v3-external-area-selector"
+                data-testid="external-import-area-selector"
+              >
+                <div className="v3-external-area-label">
+                  {t.externalImportTargetArea}
+                </div>
+                <div className="v3-external-area-chips">
+                  <button
+                    type="button"
+                    data-testid="external-import-area-chip-none"
+                    className={`chip-btn ${selectedAreaId === null ? 'active' : ''}`}
+                    onClick={() => setSelectedAreaId(null)}
+                  >
+                    <span>{t.areasNone}</span>
+                  </button>
+                  {activeAreas.map((area) => (
+                    <button
+                      key={area.id}
+                      type="button"
+                      data-testid={`external-import-area-chip-${area.id}`}
+                      className={`chip-btn ${selectedAreaId === area.id ? 'active' : ''}`}
+                      onClick={() => setSelectedAreaId(area.id)}
+                    >
+                      <Folder size={12} />
+                      <span>{area.title}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="v3-external-btn-grid">
                 <button

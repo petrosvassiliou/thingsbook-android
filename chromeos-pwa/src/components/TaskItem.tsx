@@ -14,6 +14,7 @@ import {
   Cloud,
   Compass,
   Copy,
+  Diamond,
   Edit3,
   FileText,
   Flag,
@@ -826,9 +827,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     <div className="checkbox-anchor" onDoubleClick={(e) => e.stopPropagation()}>
       <button
         type="button"
-        className={`things-checkbox ${isSomedayDashed ? 'someday-dashed' : ''} ${
-          animStage !== 'idle' ? 'pop' : ''
-        } ${isVisualCompleted ? 'completed' : ''} ${isCanceled ? 'canceled' : ''}`}
+        className={`things-checkbox ${task.isMilestone ? 'milestone' : ''} ${
+          isSomedayDashed ? 'someday-dashed' : ''
+        } ${animStage !== 'idle' ? 'pop' : ''} ${
+          isVisualCompleted ? 'completed checked' : ''
+        } ${isCanceled ? 'canceled' : ''}`}
         onClick={handlePrimaryCheckboxClick}
         onDoubleClick={(e) => e.stopPropagation()}
         onContextMenu={handleCheckboxContextMenu}
@@ -1015,6 +1018,20 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           />
 
           <div className="task-bento-header-actions">
+            <button
+              type="button"
+              className={`icon-btn ${task.isMilestone ? 'milestone-active' : ''}`}
+              data-testid="task-milestone-btn"
+              title={task.isMilestone ? t.removeMilestone : t.markAsMilestone}
+              aria-label={task.isMilestone ? t.removeMilestone : t.markAsMilestone}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                void localDb.upsertTask({ id: task.id, isMilestone: !task.isMilestone });
+              }}
+            >
+              <Diamond size={15} />
+            </button>
+
             <button
               type="button"
               className={`icon-btn ${task.isPinned ? 'active' : ''}`}
@@ -1353,6 +1370,27 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                           ? formatRecurrenceShort(task.recurrenceRule, lang)
                           : t.actionRepeat}
                       </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="task-milestone-chip"
+                      className={`chip-btn ${task.isMilestone ? 'milestone-active' : ''}`}
+                      title={task.isMilestone ? t.removeMilestone : t.markAsMilestone}
+                      onClick={() => {
+                        flushDraftsIfNeeded();
+                        void localDb.upsertTask({ id: task.id, isMilestone: !task.isMilestone });
+                      }}
+                    >
+                      <Diamond
+                        size={12}
+                        style={
+                          !task.isMilestone
+                            ? { color: 'var(--milestone-violet)', opacity: 0.85 }
+                            : undefined
+                        }
+                      />
+                      <span>{t.milestoneLabel}</span>
                     </button>
                   </span>
                 </div>
@@ -1790,6 +1828,21 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     <button
                       type="button"
                       className="dropdown-item"
+                      data-testid="task-more-milestone-btn"
+                      onClick={() => {
+                        setInlineMoreMenuOpen(false);
+                        flushDraftsIfNeeded();
+                        void localDb.upsertTask({ id: task.id, isMilestone: !task.isMilestone });
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Diamond size={14} style={{ color: 'var(--milestone-violet)' }} />
+                        <span>{task.isMilestone ? t.removeMilestone : t.markAsMilestone}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
                       data-testid="task-more-pin-btn"
                       onClick={() => {
                         setInlineMoreMenuOpen(false);
@@ -1888,6 +1941,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       (task.scheduleState !== 'THIS_EVENING' && task.whenDate != null));
 
   const hasSecondRowBadges =
+    Boolean(task.isMilestone) ||
     task.scheduleState === 'THIS_EVENING' ||
     showCollapsedSchedulePill ||
     Boolean(timeblockRangeLabel) ||
@@ -2172,7 +2226,18 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           {/* Ordered Second-Row Interactive Badges */}
           {hasSecondRowBadges && (
             <div className="task-row-badges-second">
-              {/* 0. Active Blocker ("Waiting on…") Badge */}
+              {/* 0. Milestone Badge */}
+              {task.isMilestone && (
+                <span
+                  className="meta-badge milestone-badge"
+                  data-testid="task-row-milestone-pill"
+                  title={t.milestoneLabel}
+                >
+                  <span>◆ {t.milestoneLabel}</span>
+                </span>
+              )}
+
+              {/* 0b. Active Blocker ("Waiting on…") Badge */}
               {isActivelyBlocked && (
                 <button
                   type="button"
@@ -2960,6 +3025,20 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
                 </button>
               )}
+
+              {/* 9a. Mark as Milestone / Remove Milestone */}
+              <button
+                type="button"
+                className="context-menu-item"
+                data-testid="task-ctx-milestone-btn"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void localDb.upsertTask({ id: task.id, isMilestone: !task.isMilestone });
+                }}
+              >
+                <Diamond size={14} style={{ color: 'var(--milestone-violet)' }} />
+                <span>{task.isMilestone ? t.removeMilestone : t.markAsMilestone}</span>
+              </button>
 
               {/* 9b. Pin to Top / Unpin */}
               <button

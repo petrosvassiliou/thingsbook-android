@@ -175,6 +175,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -355,6 +359,8 @@ fun ThingsSmartViewScreen(
     val isQuickFindOpen by viewModel.isQuickFindOpen.collectAsState()
     val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
     val selectedTaskIds by viewModel.selectedTaskIds.collectAsState()
+    val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
+    val showMultiSelectionBar = selectedTaskIds.size > 1 || (isMultiSelectMode && selectedTaskIds.isNotEmpty())
 
     val inboxTasks by viewModel.inboxTasks.collectAsState()
     val todayTasks by viewModel.todayDaytimeTasks.collectAsState()
@@ -1080,6 +1086,12 @@ fun ThingsSmartViewScreen(
                             initialTab = 0,
                             defaultAreaId = currentArea?.id ?: currentProject?.areaId
                         )
+                    },
+                    onOpenExternalImportExport = { areaId ->
+                        viewModel.openTemplatesModal(
+                            initialTab = 2,
+                            defaultAreaId = areaId ?: currentArea?.id ?: currentProject?.areaId
+                        )
                     }
                 )
                 VerticalDivider(
@@ -1338,7 +1350,10 @@ fun ThingsSmartViewScreen(
                                 viewModel.saveProjectAsTemplate(pId, toastMsg)
                             },
                             onOpenExternalImportExport = { areaId ->
-                                viewModel.openTemplatesModal(initialTab = 2, defaultAreaId = areaId)
+                                viewModel.openTemplatesModal(
+                                    initialTab = 2,
+                                    defaultAreaId = areaId ?: currentArea?.id ?: currentProject?.areaId
+                                )
                             },
                             onOpenStalledProjectReview = {
                                 viewModel.openWeeklyReviewModal(initialStep = 2)
@@ -1448,8 +1463,8 @@ fun ThingsSmartViewScreen(
             }
         }
 
-        // Floating Multi-Task Selection Action Bar (Mouse Ctrl/Shift-Click, Touch Long-Press & Things-for-iPhone Swipe)
-        if (!isEffectiveTimelineFullScreen && selectedTaskIds.isNotEmpty()) {
+        // Floating Multi-Task Selection Action Bar (shown ONLY in explicit multi-select mode or when >= 2 tasks selected)
+        if (!isEffectiveTimelineFullScreen && showMultiSelectionBar) {
             ThingsMultiSelectionBar(
                 selectedCount = selectedTaskIds.size,
                 totalVisibleCount = allVisibleTaskIds.size,
@@ -1492,7 +1507,7 @@ fun ThingsSmartViewScreen(
             onDismiss = { viewModel.dismissUndoSnackbar() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = if (selectedTaskIds.isNotEmpty()) 76.dp else 18.dp)
+                .padding(bottom = if (showMultiSelectionBar) 76.dp else 18.dp)
         )
 
         // v2 Celebration Toast / Snackbar (Weekly Review completed, Template saved, etc.)
@@ -1503,8 +1518,8 @@ fun ThingsSmartViewScreen(
                 .align(Alignment.BottomCenter)
                 .padding(
                     bottom = when {
-                        !undoSnackbarMessage.isNullOrBlank() && selectedTaskIds.isNotEmpty() -> 132.dp
-                        !undoSnackbarMessage.isNullOrBlank() || selectedTaskIds.isNotEmpty() -> 76.dp
+                        !undoSnackbarMessage.isNullOrBlank() && showMultiSelectionBar -> 132.dp
+                        !undoSnackbarMessage.isNullOrBlank() || showMultiSelectionBar -> 76.dp
                         else -> 22.dp
                     }
                 )
@@ -1621,6 +1636,13 @@ fun ThingsSmartViewScreen(
                             viewModel.openTemplatesModal(
                                 initialTab = 0,
                                 defaultAreaId = currentArea?.id ?: currentProject?.areaId
+                            )
+                        },
+                        onOpenExternalImportExport = { areaId ->
+                            isMobileDrawerOpen = false
+                            viewModel.openTemplatesModal(
+                                initialTab = 2,
+                                defaultAreaId = areaId ?: currentArea?.id ?: currentProject?.areaId
                             )
                         },
                         onCloseDrawer = { isMobileDrawerOpen = false }
@@ -2433,6 +2455,7 @@ private fun ThingsTaskRowItem(
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
     val navTarget by viewModel.navigationTarget.collectAsState()
     val activeModalTaskId by viewModel.expandedTaskId.collectAsState()
+    val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
     val tagSortMode by viewModel.tagSortMode.collectAsState()
     val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
     val allOpenTasks by viewModel.allOpenTasks.collectAsState()
@@ -2456,7 +2479,7 @@ private fun ThingsTaskRowItem(
             isExpanded = isModalExpanded,
             isTodayView = isTodayView,
             isSelected = task.id in selectedTaskIds,
-            isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+            isSelectionModeActive = isMultiSelectMode || selectedTaskIds.size > 1,
             suppressContextMenuExternal = activeModalTaskId != null || isQuickFindOpen,
             onSelectSingle = { viewModel.selectSingleTask(task.id) },
             onToggleSelection = { viewModel.toggleTaskSelection(task.id) },
@@ -2482,6 +2505,7 @@ private fun ThingsTaskRowItem(
             onRecurrenceChange = { rule -> viewModel.updateTaskRecurrence(task.id, rule) },
             onUpdateTimeblock = { s, d -> viewModel.updateTaskTimeblock(task.id, s, d) },
             onTogglePin = { viewModel.toggleTaskPinned(task.id) },
+            onToggleMilestone = { viewModel.toggleTaskMilestone(task.id) },
             onUpdateEffortLevel = { eff -> viewModel.setTaskEffortLevel(task.id, eff) },
             onUpdateStandaloneDuration = { mins -> viewModel.setStandaloneTaskDuration(task.id, mins) },
             onUpdateBlockedBy = { blockers -> viewModel.setTaskBlockedBy(task.id, blockers) },
@@ -2561,6 +2585,8 @@ private fun ThingsMainTaskLazyList(
     val imeBottomPx = imeInsets.getBottom(density)
     val isImeVisible = imeBottomPx > 0
     val currentEpochDay by viewModel.currentEpochDay.collectAsState()
+    val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
+    val isSelectionModeActive = isMultiSelectMode || selectedTaskIds.size > 1
     val collapsedHeadingIds by viewModel.collapsedHeadingIds.collectAsState()
     val allHeadings by viewModel.allHeadings.collectAsState()
     val headingTaskCounts by viewModel.headingTaskCounts.collectAsState()
@@ -2683,6 +2709,7 @@ private fun ThingsMainTaskLazyList(
                 allOpenTasks = allOpenTasks,
                 openTaskIds = openTaskIds,
                 selectedTaskIds = selectedTaskIds,
+                isSelectionModeActive = isSelectionModeActive,
                 allVisibleTaskIds = allVisibleTaskIds,
                 controller = projectDragController,
                 locale = activeLocale,
@@ -2709,6 +2736,9 @@ private fun ThingsMainTaskLazyList(
                 },
                 onToggleTaskPin = { taskId ->
                     viewModel.toggleTaskPinned(taskId)
+                },
+                onToggleTaskMilestone = { taskId ->
+                    viewModel.toggleTaskMilestone(taskId)
                 },
                 onOpenTaskEditor = { taskId ->
                     viewModel.expandTask(taskId)
@@ -2778,6 +2808,18 @@ private fun ThingsMainTaskLazyList(
                 },
                 onShowError = { msg ->
                     viewModel.showUiMessage(msg)
+                },
+                selectedTaskIds = selectedTaskIds,
+                isSelectionModeActive = isSelectionModeActive,
+                onSelectSingleTask = { taskId ->
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.selectSingleTask(taskId)
+                    }
+                },
+                onToggleTaskSelection = { taskId ->
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.toggleTaskSelection(taskId)
+                    }
                 },
                 isFullScreen = isEffectiveTimelineFullScreen,
                 onToggleFullScreen = { viewModel.toggleTimelineFullScreen() },
@@ -3890,12 +3932,19 @@ private fun ThingsModalsOverlay(
         )
     }
 
+    val modalNavTarget by viewModel.navigationTarget.collectAsState()
+    val contextualNavAreaId = when (val t = modalNavTarget) {
+        is ActiveNavigationTarget.AreaDetail -> t.areaId
+        is ActiveNavigationTarget.ProjectDetail -> activeProjects.firstOrNull { it.id == t.projectId }?.areaId
+        else -> null
+    }
+
     // Create or Edit Project Dialog (with Target Date / Deadline, Area Assignment & v2 Templates/Import trigger)
     if (showCreateProjectDialog) {
         CreateOrEditProjectDialog(
             existingProject = editingProject,
             areas = areas,
-            preselectedAreaId = projectDialogPreselectedAreaId,
+            preselectedAreaId = projectDialogPreselectedAreaId ?: contextualNavAreaId,
             locale = activeLocale,
             onSaveProject = { title, notes, areaId, deadline ->
                 viewModel.saveProject(
@@ -3908,7 +3957,10 @@ private fun ThingsModalsOverlay(
                 )
             },
             onOpenTemplatesAndImport = { preAreaId ->
-                viewModel.openTemplatesModal(initialTab = 0, defaultAreaId = preAreaId)
+                viewModel.openTemplatesModal(
+                    initialTab = 0,
+                    defaultAreaId = preAreaId ?: projectDialogPreselectedAreaId ?: contextualNavAreaId
+                )
             },
             onDismiss = onDismissCreateProjectDialog
         )
@@ -3969,12 +4021,11 @@ private fun ThingsModalsOverlay(
 
     // v2 Pillar 2 + v3 Milestone 4: Reusable Project Templates, Markdown Outline & Asana / Planner Import-Export Modal
     if (isTemplatesModalOpen) {
-        val modalNavTarget by viewModel.navigationTarget.collectAsState()
         val activeModalProjectId = (modalNavTarget as? ActiveNavigationTarget.ProjectDetail)?.projectId
         val fallbackProjectTitle = stringResource(R.string.entity_new_project)
         ThingsTemplatesAndImportModal(
             initialTab = templatesModalInitialTab,
-            defaultAreaId = templatesModalDefaultAreaId,
+            defaultAreaId = templatesModalDefaultAreaId ?: contextualNavAreaId,
             areas = areas,
             userTemplates = userProjectTemplates,
             projects = activeProjects,
@@ -6110,6 +6161,22 @@ private fun ViewTitleHeader(
                                     DropdownMenuItem(
                                         leadingIcon = {
                                             Icon(
+                                                imageVector = Icons.Outlined.SystemUpdateAlt,
+                                                contentDescription = null,
+                                                tint = colors.thingsBlue,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        },
+                                        text = { Text(stringResource(R.string.v30_external_import_export_tab)) },
+                                        onClick = {
+                                            showAreaMoreMenu = false
+                                            onOpenExternalImportExport(currentArea.id)
+                                        }
+                                    )
+                                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
                                                 imageVector = Icons.Outlined.DeleteOutline,
                                                 contentDescription = null,
                                                 tint = colors.deadlineUrgentRed,
@@ -6135,7 +6202,7 @@ private fun ViewTitleHeader(
             }
         }
 
-        // Row 2 Sort Control for Area & Perspective Detail views
+        // Row 2 Sort & Quick Import Controls for Area & Perspective Detail views
         if ((currentPerspective != null || (currentArea != null && !isRenamingAreaInline)) && supportsViewSorting) {
             Spacer(modifier = Modifier.height(8.dp))
             FlowRow(
@@ -6147,6 +6214,14 @@ private fun ViewTitleHeader(
                     viewSortMode = viewSortMode,
                     onSelectViewSortMode = onSelectViewSortMode
                 )
+                if (currentArea != null) {
+                    ThingsHoverTooltip(text = stringResource(R.string.v30_external_import_export_tab)) {
+                        ThingsTagPill(
+                            title = "📥 ${stringResource(R.string.v30_external_import_export_tab)}",
+                            onClick = { onOpenExternalImportExport(currentArea.id) }
+                        )
+                    }
+                }
             }
         }
 
@@ -6417,6 +6492,14 @@ private fun ViewTitleHeader(
                     ThingsTagPill(
                         title = "+ ${stringResource(R.string.entity_heading)}",
                         onClick = onAddHeadingInProject
+                    )
+                }
+
+                // Project Header "Asana & Planner" Quick Button
+                ThingsHoverTooltip(text = stringResource(R.string.v30_external_import_export_tab)) {
+                    ThingsTagPill(
+                        title = "📥 ${stringResource(R.string.v30_external_import_export_tab)}",
+                        onClick = { onOpenExternalImportExport(currentProject.areaId) }
                     )
                 }
 
@@ -7548,7 +7631,7 @@ private fun QuickFindFilterChip(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ThingsChromebookSidebar(
     viewModel: ThingsbookViewModel,
@@ -7572,6 +7655,7 @@ private fun ThingsChromebookSidebar(
     onCreateNewProject: (String?) -> Unit,
     onOpenWeeklyReview: () -> Unit = {},
     onOpenTemplatesAndImport: () -> Unit = {},
+    onOpenExternalImportExport: (String?) -> Unit = {},
     onCloseDrawer: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
@@ -8126,80 +8210,161 @@ private fun ThingsChromebookSidebar(
                 val isAreaSelected = navTarget == ActiveNavigationTarget.AreaDetail(area.id)
                 val areaProjects = projects.filter { it.areaId == area.id }
                 val isCollapsed = collapsedAreaIds[area.id] == true
+                var showSidebarAreaMenu by remember(area.id) { mutableStateOf(false) }
 
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (dragController != null) {
-                                    Modifier.workspaceDropTarget(
-                                        controller = dragController,
-                                        key = "${sidebarKeyPrefix}_area_${area.id}",
-                                        destination = WorkspaceDragDropDestination.AreaTarget(area.id, area.title),
-                                        cornerRadius = 50.dp,
-                                        priority = 24
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (dragController != null) {
+                                        Modifier.workspaceDropTarget(
+                                            controller = dragController,
+                                            key = "${sidebarKeyPrefix}_area_${area.id}",
+                                            destination = WorkspaceDragDropDestination.AreaTarget(area.id, area.title),
+                                            cornerRadius = 50.dp,
+                                            priority = 24
+                                        )
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .pointerInput(area.id) {
+                                    awaitPointerEventScope {
+                                        var wasSecondary = false
+                                        while (true) {
+                                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                            val rightClick = (ev.type == PointerEventType.Press && ev.buttons.isSecondaryPressed) ||
+                                                (wasSecondary && !ev.buttons.isSecondaryPressed)
+                                            if (rightClick) {
+                                                wasSecondary = false
+                                                ev.changes.forEach { it.consume() }
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                showSidebarAreaMenu = true
+                                                continue
+                                            }
+                                            wasSecondary = ev.buttons.isSecondaryPressed
+                                        }
+                                    }
+                                }
+                                .clip(RoundedCornerShape(50))
+                                .background(if (isAreaSelected) colors.thingsBlueSoft else Color.Transparent)
+                                .combinedClickable(
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSelectArea(area.id)
+                                    },
+                                    onLongClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showSidebarAreaMenu = true
+                                    }
+                                )
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { collapsedAreaIds[area.id] = !isCollapsed },
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isCollapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                                        contentDescription = area.title,
+                                        tint = colors.tertiaryText,
+                                        modifier = Modifier.size(15.dp)
                                     )
-                                } else {
-                                    Modifier
+                                }
+                                Icon(
+                                    imageVector = Icons.Outlined.Folder,
+                                    contentDescription = area.title,
+                                    tint = if (isAreaSelected) colors.thingsBlue else colors.secondaryText,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = area.title,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isAreaSelected) colors.thingsBlue else colors.primaryText
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(1.dp)
+                            ) {
+                                ThingsHoverTooltip(
+                                    text = stringResource(R.string.sidebar_new_project_in_area, area.title)
+                                ) {
+                                    IconButton(
+                                        onClick = { onCreateNewProject(area.id) },
+                                        modifier = Modifier.size(22.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Add,
+                                            contentDescription = stringResource(R.string.entity_new_project),
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                                ThingsHoverTooltip(text = stringResource(R.string.action_more_options)) {
+                                    IconButton(
+                                        onClick = { showSidebarAreaMenu = true },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.MoreHoriz,
+                                            contentDescription = stringResource(R.string.action_more_options),
+                                            tint = colors.tertiaryText,
+                                            modifier = Modifier.size(13.5.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showSidebarAreaMenu,
+                            onDismissRequest = { showSidebarAreaMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.sidebar_new_project_in_area, area.title)) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showSidebarAreaMenu = false
+                                    onCreateNewProject(area.id)
                                 }
                             )
-                            .clip(RoundedCornerShape(50))
-                            .background(if (isAreaSelected) colors.thingsBlueSoft else Color.Transparent)
-                            .clickable {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onSelectArea(area.id)
-                            }
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            IconButton(
-                                onClick = { collapsedAreaIds[area.id] = !isCollapsed },
-                                modifier = Modifier.size(20.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isCollapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
-                                    contentDescription = area.title,
-                                    tint = colors.tertiaryText,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
-                            Icon(
-                                imageVector = Icons.Outlined.Folder,
-                                contentDescription = area.title,
-                                tint = if (isAreaSelected) colors.thingsBlue else colors.secondaryText,
-                                modifier = Modifier.size(16.dp)
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.v30_external_import_export_tab)) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.SystemUpdateAlt,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showSidebarAreaMenu = false
+                                    onOpenExternalImportExport(area.id)
+                                }
                             )
-                            Text(
-                                text = area.title,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isAreaSelected) colors.thingsBlue else colors.primaryText
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        ThingsHoverTooltip(
-                            text = stringResource(R.string.sidebar_new_project_in_area, area.title)
-                        ) {
-                            IconButton(
-                                onClick = { onCreateNewProject(area.id) },
-                                modifier = Modifier.size(22.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Add,
-                                    contentDescription = stringResource(R.string.entity_new_project),
-                                    tint = colors.secondaryText,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
                         }
                     }
 
@@ -8493,6 +8658,21 @@ private fun ThingsChromebookSidebar(
                         onClick = {
                             showNewProjectFooterMenu = false
                             onOpenTemplatesAndImport()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.v30_external_import_export_tab)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.SystemUpdateAlt,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        },
+                        onClick = {
+                            showNewProjectFooterMenu = false
+                            onOpenExternalImportExport(defaultNewProjectAreaId)
                         }
                     )
                 }

@@ -586,6 +586,72 @@ class V3Milestone4ExternalImportExportTest {
         }
     }
 
+    @Test
+    fun `Asana JSON import and export round-trip resource_subtype milestone and ProjectOutlineImporter parses at_milestone`() {
+        val milestoneTask = sampleTasks.first().copy(
+            id = "task-ms-asana",
+            title = "Public Beta Gate",
+            isMilestone = true
+        )
+        val regularTask = sampleTasks[1].copy(
+            id = "task-std-asana",
+            title = "Write migration runbook",
+            isMilestone = false
+        )
+
+        val exportedJson = ExternalProjectCodec.exportAsanaJsonString(
+            project = sampleProject,
+            headings = listOf(phaseDiscovery),
+            tasks = listOf(milestoneTask, regularTask),
+            zoneId = berlinZone
+        )
+        assertTrue(exportedJson.contains("\"resource_subtype\": \"milestone\"") || exportedJson.contains("\"resource_subtype\":\"milestone\""))
+        assertTrue(exportedJson.contains("\"resource_subtype\": \"default_task\"") || exportedJson.contains("\"resource_subtype\":\"default_task\""))
+
+        val reimported = ExternalProjectCodec.importAsanaJson(
+            jsonText = exportedJson,
+            fallbackTitle = "Fallback",
+            zoneId = berlinZone
+        )
+        val allImportedTasks = reimported.ungroupedTasks + reimported.phases.flatMap { it.tasks }
+        assertTrue(allImportedTasks.first { it.title == "Public Beta Gate" }.isMilestone)
+        assertFalse(allImportedTasks.first { it.title == "Write migration runbook" }.isMilestone)
+
+        // Also detect legacy Asana boolean `"is_milestone": true`
+        val customAsanaJson = """
+            {
+              "data": [
+                {"gid": "1", "name": "Gate via Subtype", "resource_subtype": "milestone", "due_on": "2026-08-10"},
+                {"gid": "2", "name": "Gate via Flag", "is_milestone": true, "due_on": "2026-08-15"},
+                {"gid": "3", "name": "Normal Deliverable", "resource_subtype": "default_task", "due_on": "2026-08-20"}
+              ]
+            }
+        """.trimIndent()
+        val parsedCustom = ExternalProjectCodec.importAsanaJson(customAsanaJson, "Milestone Import", berlinZone)
+        assertEquals(listOf(true, true, false), parsedCustom.ungroupedTasks.map { it.isMilestone })
+
+        // Outline importer `@milestone` token parsing (standalone and combined with @HH:MM & @duration)
+        val outlineBlueprint = com.pv.thingsbook.domain.model.ProjectOutlineImporter.parseOutline(
+            """
+            # Q4 Launch Plan
+            ## Launch Gates
+            - Security Sign-Off @milestone
+            - GA Release Call @09:30 @milestone @1h
+            - Update changelog @15m
+            """.trimIndent()
+        )
+        val gateTasks = outlineBlueprint.headings.single().tasks
+        assertEquals(3, gateTasks.size)
+        assertEquals("Security Sign-Off", gateTasks[0].title)
+        assertTrue(gateTasks[0].isMilestone)
+        assertEquals("GA Release Call", gateTasks[1].title)
+        assertTrue(gateTasks[1].isMilestone)
+        assertEquals(9 * 60 + 30, gateTasks[1].scheduledStartMinutes)
+        assertEquals(60, gateTasks[1].durationMinutes)
+        assertEquals("Update changelog", gateTasks[2].title)
+        assertFalse(gateTasks[2].isMilestone)
+    }
+
     private fun buildCustomSparsePlannerXlsx(): ByteArray {
         val workbookXml = """
             <?xml version="1.0" encoding="UTF-8"?>

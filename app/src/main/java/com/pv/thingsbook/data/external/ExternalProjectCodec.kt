@@ -58,6 +58,7 @@ data class ExternalImportedTask(
     val whenDate: Long? = null,
     val deadline: Long? = null,
     val isPinned: Boolean = false,
+    val isMilestone: Boolean = false,
     val effortLevel: String? = null,
     val tagNames: List<String> = emptyList(),
     val checklistItems: List<ExternalImportedChecklistItem> = emptyList(),
@@ -755,6 +756,7 @@ object ExternalProjectCodec {
         fun buildAsanaTaskObject(task: TaskItem, heading: Heading?): JsonObject = buildJsonObject {
             put("gid", JsonPrimitive(task.id))
             put("resource_type", JsonPrimitive("task"))
+            put("resource_subtype", JsonPrimitive(if (task.isMilestone) "milestone" else "default_task"))
             put("name", JsonPrimitive(task.title))
             put("notes", JsonPrimitive(task.notes))
             val isCompleted = task.status == TaskStatus.COMPLETED
@@ -1251,6 +1253,12 @@ object ExternalProjectCodec {
             ?: (obj["hearted"] as? JsonPrimitive)?.booleanOrNull
             ?: false
 
+        val resourceSubtype = obj.stringProp("resource_subtype", "resourceSubtype")?.lowercase(Locale.ROOT)
+        val explicitMilestoneFlag = (obj["is_milestone"] as? JsonPrimitive)?.booleanOrNull
+            ?: (obj["isMilestone"] as? JsonPrimitive)?.booleanOrNull
+            ?: false
+        val isMilestone = resourceSubtype == "milestone" || explicitMilestoneFlag
+
         val effortLevel = EffortLevel.normalize(obj.stringProp("effort_level", "effortLevel"))
         val tagNames = extractJsonTagNames(obj["tags"])
 
@@ -1293,6 +1301,7 @@ object ExternalProjectCodec {
             whenDate = startMs,
             deadline = dueMs,
             isPinned = isPinned,
+            isMilestone = isMilestone,
             effortLevel = effortLevel,
             tagNames = tagNames,
             checklistItems = checklist,

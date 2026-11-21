@@ -31,6 +31,7 @@ public struct TaskBentoModalView: View {
     @State private var isGeneratingChecklist = false
     @State private var isEditingNotes = false
     @State private var isFileDropTargeted = false
+    @State private var isHoveringMilestone = false
     @State private var isHoveringPin = false
     @State private var isHoveringMic = false
     @State private var isHoveringMagic = false
@@ -190,6 +191,7 @@ public struct TaskBentoModalView: View {
             ThingsCheckboxButton(
                 status: current.status,
                 isSomeday: current.scheduleState == .someday,
+                isMilestone: current.isMilestone,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     commitDraftEditsIfNeeded(commitPendingChecklist: true)
@@ -215,6 +217,46 @@ public struct TaskBentoModalView: View {
                 }
 
             Spacer(minLength: 8)
+
+            // Milestone Diamond Button
+            Button {
+                commitDraftEditsIfNeeded()
+                let fresh = latestTask
+                store.setTasksMilestone([fresh.id], isMilestone: !fresh.isMilestone)
+            } label: {
+                Image(systemName: current.isMilestone ? "diamond.fill" : "diamond")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(
+                        current.isMilestone
+                            ? ThingsMacPalette.milestoneViolet
+                            : (isHoveringMilestone ? ThingsMacPalette.milestoneViolet : .secondary)
+                    )
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(
+                                current.isMilestone
+                                    ? ThingsMacPalette.milestoneViolet.opacity(isHoveringMilestone ? 0.22 : 0.14)
+                                    : (isHoveringMilestone ? ThingsMacPalette.milestoneViolet.opacity(0.09) : ThingsMacPalette.subtleContainer)
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(
+                                current.isMilestone
+                                    ? ThingsMacPalette.milestoneViolet.opacity(isHoveringMilestone ? 0.50 : 0.34)
+                                    : (isHoveringMilestone ? ThingsMacPalette.milestoneViolet.opacity(0.38) : Color.primary.opacity(0.08)),
+                                lineWidth: 0.8
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHoveringMilestone = hovering
+                }
+            }
+            .thingsTooltip(store.tr(current.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"))
 
             // Pin Button
             Button {
@@ -838,6 +880,18 @@ public struct TaskBentoModalView: View {
                         }
                         store.updateTask(copy)
                     }
+                }
+
+                ThingsActionChipButton(
+                    title: store.tr("v30_milestone_label"),
+                    systemImage: current.isMilestone ? "diamond.fill" : "diamond",
+                    isActive: current.isMilestone,
+                    activeTint: ThingsMacPalette.milestoneViolet,
+                    helpText: store.tr(current.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone")
+                ) {
+                    commitDraftEditsIfNeeded()
+                    let fresh = latestTask
+                    store.setTasksMilestone([fresh.id], isMilestone: !fresh.isMilestone)
                 }
             }
         }

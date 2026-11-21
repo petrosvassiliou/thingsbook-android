@@ -127,6 +127,7 @@ export type RecurringDedupCandidate = Pick<
   | 'durationMinutes'
 > & {
   isPinned?: boolean;
+  isMilestone?: boolean;
   effortLevel?: EffortLevel | null;
   deadline?: number | null;
   reminderTime?: number | null;
@@ -144,6 +145,7 @@ export interface RecurringWinnerEnrichment {
   deadline?: number | null;
   reminderTime?: number | null;
   isPinned?: boolean;
+  isMilestone?: boolean;
   effortLevel?: EffortLevel | null;
   minUpdatedAt: number;
 }
@@ -366,6 +368,10 @@ export function planRecurringDeduplication(
     }
     if (!winner.isPinned && losers.some((l) => Boolean(l.isPinned))) {
       patch.isPinned = true;
+      changed = true;
+    }
+    if (!winner.isMilestone && losers.some((l) => Boolean(l.isMilestone))) {
+      patch.isMilestone = true;
       changed = true;
     }
     if (winner.effortLevel == null) {
@@ -943,6 +949,7 @@ export function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
     durationMinutes:
       task.durationMinutes != null ? Math.trunc(task.durationMinutes) : null,
     isPinned: !task.isDeleted && Boolean(task.isPinned),
+    isMilestone: Boolean(task.isMilestone),
     effortLevel: task.isDeleted ? null : (task.effortLevel ?? null),
     blockedByTaskIds: task.isDeleted
       ? []
@@ -966,6 +973,7 @@ export function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
 export type RemoteTaskWithHints = TaskRecord & {
   omittedTimeblockFields?: boolean;
   omittedPinnedField?: boolean;
+  omittedMilestoneField?: boolean;
   omittedV30TaskFields?: boolean;
   omittedEffortField?: boolean;
   omittedBlockedByField?: boolean;
@@ -973,19 +981,27 @@ export type RemoteTaskWithHints = TaskRecord & {
   omittedAssigneeField?: boolean;
 };
 
-export function taskFromFirestoreMap(map: Record<string, unknown>): RemoteTaskWithHints | null;
+export function taskFromFirestoreMap(
+  map: Record<string, unknown>,
+  existingLocal?: Pick<TaskRecord, 'isMilestone'> | null
+): RemoteTaskWithHints | null;
 export function taskFromFirestoreMap(
   docId: string,
-  map: Record<string, unknown>
+  map: Record<string, unknown>,
+  existingLocal?: Pick<TaskRecord, 'isMilestone'> | null
 ): RemoteTaskWithHints;
 export function taskFromFirestoreMap(
   mapOrDocId: Record<string, unknown> | string,
-  maybeMap?: Record<string, unknown>
+  maybeMapOrLocal?: Record<string, unknown> | Pick<TaskRecord, 'isMilestone'> | null,
+  maybeExistingLocal?: Pick<TaskRecord, 'isMilestone'> | null
 ): RemoteTaskWithHints | null {
-  const map =
-    typeof mapOrDocId === 'string'
-      ? normalizeFirestoreDocWithId(mapOrDocId, maybeMap ?? {})
-      : mapOrDocId;
+  const isDocIdOverload = typeof mapOrDocId === 'string';
+  const map = isDocIdOverload
+    ? normalizeFirestoreDocWithId(mapOrDocId, (maybeMapOrLocal as Record<string, unknown>) ?? {})
+    : mapOrDocId;
+  const existingLocal = isDocIdOverload
+    ? maybeExistingLocal
+    : (maybeMapOrLocal as Pick<TaskRecord, 'isMilestone'> | null | undefined);
   const id = syncNullableString(map.id);
   if (!id) return null;
   const title = typeof map.title === 'string' ? map.title : '';
@@ -996,12 +1012,17 @@ export function taskFromFirestoreMap(
     'scheduledStartMinutes'
   );
   const omittedPinnedField = !Object.prototype.hasOwnProperty.call(map, 'isPinned');
+  const omittedMilestoneField = typeof map.isMilestone !== 'boolean';
   const omittedEffortField = !Object.prototype.hasOwnProperty.call(map, 'effortLevel');
   const omittedBlockedByField = !Object.prototype.hasOwnProperty.call(map, 'blockedByTaskIds');
   const omittedWorkspaceField = !Object.prototype.hasOwnProperty.call(map, 'workspaceId');
   const omittedAssigneeField = !Object.prototype.hasOwnProperty.call(map, 'assigneeId');
   const omittedV30TaskFields =
     omittedEffortField && omittedBlockedByField && omittedWorkspaceField && omittedAssigneeField;
+  const resolvedIsMilestone =
+    typeof map.isMilestone === 'boolean'
+      ? map.isMilestone
+      : (existingLocal?.isMilestone ?? false);
 
   return {
     id,
@@ -1018,6 +1039,7 @@ export function taskFromFirestoreMap(
     scheduledStartMinutes: syncNullableNumber(map.scheduledStartMinutes),
     durationMinutes: syncNullableNumber(map.durationMinutes),
     isPinned: Boolean(map.isPinned),
+    isMilestone: resolvedIsMilestone,
     effortLevel: normalizeEffortLevel(map.effortLevel),
     blockedByTaskIds: safeParseBlockedByTaskIds(map.blockedByTaskIds, id),
     workspaceId: syncNullableString(map.workspaceId),
@@ -1036,6 +1058,7 @@ export function taskFromFirestoreMap(
     purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
     ...(omittedTimeblockFields ? { omittedTimeblockFields: true } : {}),
     ...(omittedPinnedField ? { omittedPinnedField: true } : {}),
+    ...(omittedMilestoneField ? { omittedMilestoneField: true } : {}),
     ...(omittedV30TaskFields ? { omittedV30TaskFields: true } : {}),
     ...(omittedEffortField && !omittedV30TaskFields ? { omittedEffortField: true } : {}),
     ...(omittedBlockedByField && !omittedV30TaskFields ? { omittedBlockedByField: true } : {}),

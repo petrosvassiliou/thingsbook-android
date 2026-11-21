@@ -114,6 +114,7 @@ data class TaskEntity(
     val recurrenceRuleJson: String? = null,
     val sortOrder: Double,
     val isPinned: Boolean = false,
+    val isMilestone: Boolean = false,
     val effortLevel: String? = null,
     val blockedByJson: String = "[]",
     val workspaceId: String? = null,

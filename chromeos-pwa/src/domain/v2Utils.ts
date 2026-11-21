@@ -1714,6 +1714,9 @@ export function buildProjectTemplateBlueprint(
     if (t.durationMinutes != null) {
       bp.durationMinutes = t.durationMinutes;
     }
+    if (t.isMilestone) {
+      bp.isMilestone = true;
+    }
     return bp;
   };
 
@@ -1791,6 +1794,7 @@ function normalizeBlueprintTask(raw: unknown): ProjectTemplateTaskBlueprint | nu
     typeof r.durationMinutes === 'number' && Number.isFinite(r.durationMinutes) && r.durationMinutes > 0
       ? Math.max(1, Math.min(48_000, Math.trunc(r.durationMinutes)))
       : null;
+  const isMilestone = r.isMilestone === true ? true : undefined;
 
   const validStates = new Set<ScheduleState>([
     'INBOX',
@@ -1813,7 +1817,8 @@ function normalizeBlueprintTask(raw: unknown): ProjectTemplateTaskBlueprint | nu
     deadlineDaysOffset,
     scheduleState,
     scheduledStartMinutes,
-    durationMinutes
+    durationMinutes,
+    ...(isMilestone ? { isMilestone: true } : {})
   };
 }
 
@@ -2006,18 +2011,45 @@ export function parseProjectOutlineInput(
       } else {
         let taskTitle = itemText;
         let parsedDuration: number | undefined;
-        const durTokenMatch = /\s+@(\S+)$/.exec(itemText);
-        if (durTokenMatch) {
-          const candidateMins = parseCustomDurationMinutes(durTokenMatch[1]);
-          const strippedTitle = itemText.slice(0, durTokenMatch.index).trim();
-          if (candidateMins != null && strippedTitle.length > 0) {
-            taskTitle = strippedTitle;
-            parsedDuration = candidateMins;
+        let parsedMilestone = false;
+
+        if (/^◆\s+/.test(taskTitle)) {
+          const withoutLead = taskTitle.replace(/^◆\s+/, '').trim();
+          if (withoutLead.length > 0) {
+            taskTitle = withoutLead;
+            parsedMilestone = true;
           }
         }
+
+        let strippedAny = true;
+        while (strippedAny) {
+          strippedAny = false;
+          const msSuffix = /\s+(?:@milestone|\[milestone\]|◆)\s*$/i.exec(taskTitle);
+          if (msSuffix) {
+            const candidate = taskTitle.slice(0, msSuffix.index).trim();
+            if (candidate.length > 0) {
+              taskTitle = candidate;
+              parsedMilestone = true;
+              strippedAny = true;
+              continue;
+            }
+          }
+          const durTokenMatch = /\s+@(\S+)$/.exec(taskTitle);
+          if (durTokenMatch) {
+            const candidateMins = parseCustomDurationMinutes(durTokenMatch[1]);
+            const strippedTitle = taskTitle.slice(0, durTokenMatch.index).trim();
+            if (candidateMins != null && strippedTitle.length > 0) {
+              taskTitle = strippedTitle;
+              parsedDuration = candidateMins;
+              strippedAny = true;
+            }
+          }
+        }
+
         const newTask: ProjectTemplateTaskBlueprint = {
           title: taskTitle,
-          ...(parsedDuration != null ? { durationMinutes: parsedDuration } : {})
+          ...(parsedDuration != null ? { durationMinutes: parsedDuration } : {}),
+          ...(parsedMilestone ? { isMilestone: true } : {})
         };
         if (currentHeading) {
           currentHeading.tasks.push(newTask);

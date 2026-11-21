@@ -240,6 +240,7 @@ fun ExpandableTaskCard(
     onUpdateStandaloneDuration: ((durationMinutes: Int?) -> Unit)? = null,
     onUpdateBlockedBy: ((blockerIds: List<String>) -> Unit)? = null,
     onTogglePin: (() -> Unit)? = null,
+    onToggleMilestone: (() -> Unit)? = null,
     onMoveTaskToContainer: ((projectId: String?, headingId: String?, areaId: String?) -> Unit)? = null,
     onUpdateTaskTags: ((List<String>) -> Unit)? = null,
     onCreateAndAssignTag: ((String) -> Unit)? = null,
@@ -618,6 +619,11 @@ fun ExpandableTaskCard(
                             color = colors.thingsBlue.copy(alpha = if (isContextMenuTargeted) 0.72f else 0.42f),
                             shape = RoundedCornerShape(cornerRadius)
                         )
+                        !isExpanded && task.isMilestone -> Modifier.border(
+                            width = 1.2.dp,
+                            color = colors.milestoneViolet.copy(alpha = 0.52f),
+                            shape = RoundedCornerShape(cornerRadius)
+                        )
                         else -> Modifier
                     }
                 )
@@ -847,6 +853,7 @@ fun ExpandableTaskCard(
                     onOpenMoveDialog = { showMoveDialog = true },
                     onOpenTagPickerDialog = { showTagPickerDialog = true },
                     onTogglePin = onTogglePin,
+                    onToggleMilestone = onToggleMilestone,
                     onDuplicateTask = onDuplicateTask,
                     onStartFocusTimer = onStartFocusTimer,
                     onDeleteTask = onDeleteTask,
@@ -875,7 +882,8 @@ fun ExpandableTaskCard(
                             ThingsCheckbox(
                                 status = effectiveVisualStatus,
                                 onStatusChange = handleStatusRequest,
-                                isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY
+                                isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                                isMilestone = task.isMilestone
                             )
                         }
 
@@ -1190,6 +1198,7 @@ fun ExpandableTaskCard(
                             allOpenTasks = allOpenTasks,
                             openTaskIds = openTaskIds,
                             locale = locale,
+                            onToggleMilestone = onToggleMilestone,
                             onOpenWhenDialog = { showWhenDialog = true },
                             onOpenDeadlineDialog = { showDeadlineDialog = true },
                             onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
@@ -1226,6 +1235,7 @@ fun ExpandableTaskCard(
                 onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
                 onStartFocusTimer = onStartFocusTimer,
                 onTogglePin = onTogglePin,
+                onToggleMilestone = onToggleMilestone,
                 onDuplicateTask = onDuplicateTask,
                 onCopyTaskMarkdown = {
                     clipboardManager.setText(
@@ -1398,7 +1408,8 @@ private fun CollapsedTaskTitleWithStrike(
 }
 
 private fun hasCollapsedTaskBadges(task: TaskItem, isActivelyBlocked: Boolean = false): Boolean {
-    return task.scheduleState == ScheduleState.THIS_EVENING ||
+    return task.isMilestone ||
+        task.scheduleState == ScheduleState.THIS_EVENING ||
         task.scheduleState == ScheduleState.UPCOMING ||
         task.scheduleState == ScheduleState.SOMEDAY ||
         task.scheduledStartMinutes != null ||
@@ -1420,6 +1431,7 @@ private fun CollapsedTaskInlineBadges(
     allOpenTasks: List<TaskItem> = emptyList(),
     openTaskIds: Set<String> = emptySet(),
     locale: Locale,
+    onToggleMilestone: (() -> Unit)? = null,
     onOpenWhenDialog: (() -> Unit)? = null,
     onOpenDeadlineDialog: (() -> Unit)? = null,
     onOpenTimeblockDialog: (() -> Unit)? = null,
@@ -1442,6 +1454,25 @@ private fun CollapsedTaskInlineBadges(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        if (task.isMilestone) {
+            val milestoneTooltip = if (onToggleMilestone != null) {
+                stringResource(R.string.v30_remove_milestone)
+            } else {
+                stringResource(R.string.v30_milestone_label)
+            }
+            ThingsHoverTooltip(
+                text = milestoneTooltip,
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(
+                    title = "◆ ${stringResource(R.string.v30_milestone_label)}",
+                    containerColor = colors.milestoneVioletSoft,
+                    contentColor = colors.milestoneViolet,
+                    borderColor = colors.milestoneViolet.copy(alpha = 0.45f),
+                    onClick = onToggleMilestone
+                )
+            }
+        }
         if (activeOpenBlockerIds.isNotEmpty()) {
             val firstBlockerTitle = remember(activeOpenBlockerIds, allOpenTasks) {
                 if (activeOpenBlockerIds.size == 1) {
@@ -2112,6 +2143,7 @@ private fun ExpandedTaskCardBody(
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
     onTogglePin: (() -> Unit)? = null,
+    onToggleMilestone: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onStartFocusTimer: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
@@ -2204,7 +2236,7 @@ private fun ExpandedTaskCardBody(
     val bentoZoneBorder = BorderStroke(width = 0.75.dp, color = colors.hairlineDivider)
 
     val renderPinnedHeaderRow: @Composable () -> Unit = {
-        // Pinned Top Header Row: Checkbox + Large Title BasicTextField + Pin + Close ✕
+        // Pinned Top Header Row: Checkbox + Large Title BasicTextField + Milestone + Pin + Close ✕
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2224,6 +2256,7 @@ private fun ExpandedTaskCardBody(
                     status = effectiveVisualStatus,
                     onStatusChange = onStatusChange,
                     isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
+                    isMilestone = task.isMilestone,
                     size = 22.dp
                 )
             }
@@ -2276,8 +2309,41 @@ private fun ExpandedTaskCardBody(
                 }
             )
 
-            if (onTogglePin != null) {
+            if (onToggleMilestone != null) {
                 Spacer(modifier = Modifier.width(8.dp))
+                val milestoneLabel = stringResource(
+                    if (task.isMilestone) R.string.v30_remove_milestone else R.string.v30_mark_as_milestone
+                )
+                ThingsHoverTooltip(text = milestoneLabel) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(
+                                if (task.isMilestone) colors.milestoneVioletSoft else colors.tagPillBg.copy(alpha = 0.65f)
+                            )
+                            .border(
+                                width = 0.75.dp,
+                                color = if (task.isMilestone) colors.milestoneViolet.copy(alpha = 0.55f) else colors.hairlineDivider,
+                                shape = RoundedCornerShape(9.dp)
+                            )
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onToggleMilestone()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        ThingsMilestoneDiamondIcon(
+                            filled = task.isMilestone,
+                            tint = if (task.isMilestone) colors.milestoneViolet else colors.secondaryText,
+                            size = 15.dp
+                        )
+                    }
+                }
+            }
+
+            if (onTogglePin != null) {
+                Spacer(modifier = Modifier.width(6.dp))
                 val pinLabel = stringResource(
                     if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
                 )
@@ -2872,6 +2938,30 @@ private fun ExpandedTaskCardBody(
                                 onClick = onOpenRepeatDialog
                             )
                         }
+
+                        if (onToggleMilestone != null || task.isMilestone) {
+                            val milestoneToggleTooltip = stringResource(
+                                if (task.isMilestone) R.string.v30_remove_milestone else R.string.v30_mark_as_milestone
+                            )
+                            ThingsHoverTooltip(text = milestoneToggleTooltip) {
+                                ThingsTagPill(
+                                    title = if (task.isMilestone) {
+                                        "◆ ${stringResource(R.string.v30_milestone_label)}"
+                                    } else {
+                                        "◇ ${stringResource(R.string.v30_milestone_label)}"
+                                    },
+                                    containerColor = if (task.isMilestone) colors.milestoneVioletSoft else null,
+                                    contentColor = if (task.isMilestone) colors.milestoneViolet else null,
+                                    borderColor = if (task.isMilestone) colors.milestoneViolet.copy(alpha = 0.5f) else null,
+                                    onClick = if (onToggleMilestone != null) {
+                                        {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onToggleMilestone()
+                                        }
+                                    } else null
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -3351,6 +3441,32 @@ private fun ExpandedTaskCardBody(
                                 )
                             }
 
+                            if (onToggleMilestone != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(
+                                                if (task.isMilestone) R.string.v30_remove_milestone else R.string.v30_mark_as_milestone
+                                            ),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (task.isMilestone) colors.milestoneViolet else colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        ThingsMilestoneDiamondIcon(
+                                            filled = task.isMilestone,
+                                            tint = colors.milestoneViolet,
+                                            size = 16.dp
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onToggleMilestone()
+                                    }
+                                )
+                            }
+
                             if (onOpenDependenciesDialog != null) {
                                 DropdownMenuItem(
                                     text = {
@@ -3540,6 +3656,7 @@ private fun TaskContextDropdownMenu(
     onTriggerGeminiMagicBreakdown: () -> Unit,
     onStartFocusTimer: (() -> Unit)? = null,
     onTogglePin: (() -> Unit)? = null,
+    onToggleMilestone: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onCopyTaskMarkdown: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
@@ -3565,7 +3682,7 @@ private fun TaskContextDropdownMenu(
                 modifier = Modifier
                     .size(7.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(colors.thingsBlue)
+                    .background(if (task.isMilestone) colors.milestoneViolet else colors.thingsBlue)
             )
             Text(
                 text = targetTaskTitle,
@@ -3672,6 +3789,30 @@ private fun TaskContextDropdownMenu(
                 onClick = {
                     onDismiss()
                     onTogglePin()
+                }
+            )
+        }
+        if (onToggleMilestone != null) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = stringResource(
+                            if (task.isMilestone) R.string.v30_remove_milestone else R.string.v30_mark_as_milestone
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (task.isMilestone) colors.milestoneViolet else colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    ThingsMilestoneDiamondIcon(
+                        filled = task.isMilestone,
+                        tint = colors.milestoneViolet,
+                        size = 16.dp
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onToggleMilestone()
                 }
             )
         }

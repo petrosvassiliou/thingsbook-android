@@ -226,6 +226,14 @@ interface InternalUndoSnapshot {
 type Listener = (snapshot: DataSnapshot) => void;
 type UndoListener = (event: UndoEventPayload) => void;
 
+export function normalizeTask(raw: TaskRecord): TaskRecord {
+  return {
+    ...raw,
+    isPinned: Boolean(raw.isPinned),
+    isMilestone: Boolean(raw.isMilestone)
+  };
+}
+
 export class ThingsLocalDb {
   private dbPromise: Promise<IDBPDatabase> | null = null;
   private readonly customDbOpener?: () => Promise<IDBPDatabase>;
@@ -431,6 +439,7 @@ export class ThingsLocalDb {
         scheduledStartMinutes: null,
         durationMinutes: null,
         isPinned: false,
+        isMilestone: false,
         effortLevel: null,
         blockedByTaskIds: [],
         workspaceId: null,
@@ -484,6 +493,8 @@ export class ThingsLocalDb {
           deadline: enrich.deadline !== undefined ? enrich.deadline : winner.deadline,
           reminderTime: enrich.reminderTime !== undefined ? enrich.reminderTime : winner.reminderTime,
           isPinned: enrich.isPinned !== undefined ? enrich.isPinned : winner.isPinned,
+          isMilestone:
+            enrich.isMilestone !== undefined ? enrich.isMilestone : Boolean(winner.isMilestone),
           effortLevel:
             enrich.effortLevel !== undefined ? enrich.effortLevel : winner.effortLevel,
           updatedAt: Math.max(now, winner.updatedAt + 1, enrich.minUpdatedAt),
@@ -637,7 +648,7 @@ export class ThingsLocalDb {
 
   async refreshSnapshot(): Promise<DataSnapshot> {
     const db = await this.getDb();
-    const [areas, projects, headings, tasks, checklistItems, tags, attachments, projectTemplates] =
+    const [areas, projects, headings, rawTasks, checklistItems, tags, attachments, projectTemplates] =
       await Promise.all([
         db.getAll('areas') as Promise<AreaRecord[]>,
         db.getAll('projects') as Promise<ProjectRecord[]>,
@@ -648,6 +659,7 @@ export class ThingsLocalDb {
         db.getAll('attachments') as Promise<AttachmentRecord[]>,
         db.getAll('projectTemplates') as Promise<ProjectTemplate[]>
       ]);
+    const tasks = rawTasks.map(normalizeTask);
 
     const hasSampleTasks = tasks.some((t) => isActiveSampleTask(t));
 
@@ -698,6 +710,7 @@ export class ThingsLocalDb {
     scheduledStartMinutes?: number | null;
     durationMinutes?: number | null;
     isPinned?: boolean;
+    isMilestone?: boolean;
     effortLevel?: EffortLevel | null;
     blockedByTaskIds?: string[];
     workspaceId?: string | null;
@@ -884,6 +897,10 @@ export class ThingsLocalDb {
       scheduledStartMinutes,
       durationMinutes,
       isPinned: params.isPinned !== undefined ? Boolean(params.isPinned) : Boolean(existing?.isPinned),
+      isMilestone:
+        params.isMilestone !== undefined
+          ? Boolean(params.isMilestone)
+          : (existing?.isMilestone ?? false),
       effortLevel: resolvedEffort,
       blockedByTaskIds: resolvedBlockedBy,
       workspaceId: resolvedWorkspaceId,
@@ -972,6 +989,7 @@ export class ThingsLocalDb {
     scheduledStartMinutes?: number | null;
     durationMinutes?: number | null;
     isPinned?: boolean;
+    isMilestone?: boolean;
     effortLevel?: EffortLevel | null;
     blockedByTaskIds?: string[];
     workspaceId?: string | null;
@@ -1002,6 +1020,7 @@ export class ThingsLocalDb {
       scheduledStartMinutes?: number | null;
       durationMinutes?: number | null;
       isPinned?: boolean;
+      isMilestone?: boolean;
       effortLevel?: EffortLevel | null;
       blockedByTaskIds?: string[];
       workspaceId?: string | null;
@@ -2070,6 +2089,7 @@ export class ThingsLocalDb {
           completedAt: null,
           reminderTime: src.reminderTime != null && src.reminderTime > now ? src.reminderTime : null,
           isPinned: Boolean(src.isPinned),
+          isMilestone: Boolean(src.isMilestone),
           effortLevel: src.effortLevel ?? null,
           blockedByTaskIds: safeParseBlockedByTaskIds(src.blockedByTaskIds, newId),
           workspaceId: src.workspaceId ?? null,
@@ -2556,6 +2576,7 @@ export class ThingsLocalDb {
           reminderTime: null,
           scheduledStartMinutes: bpTask.scheduledStartMinutes ?? null,
           durationMinutes: bpTask.durationMinutes ?? null,
+          isMilestone: Boolean(bpTask.isMilestone),
           completedAt: null,
           projectId,
           headingId,
@@ -2938,6 +2959,7 @@ export class ThingsLocalDb {
             status: 'OPEN',
             completedAt: null,
             reminderTime: null,
+            isMilestone: Boolean(t.isMilestone),
             createdAt: now,
             updatedAt: now,
             isDeleted: false,
@@ -4138,6 +4160,7 @@ export class ThingsLocalDb {
           const {
             omittedTimeblockFields,
             omittedPinnedField,
+            omittedMilestoneField,
             omittedV30TaskFields,
             omittedEffortField,
             omittedBlockedByField,
@@ -4194,6 +4217,11 @@ export class ThingsLocalDb {
               : omittedPinnedField
                 ? Boolean(local?.isPinned)
                 : Boolean(remote.isPinned);
+            const resolvedMilestone = remote.purgedFromTrash
+              ? false
+              : omittedMilestoneField
+                ? (local?.isMilestone ?? false)
+                : Boolean(remote.isMilestone);
 
             const resolvedEffort = remote.isDeleted
               ? null
@@ -4241,6 +4269,7 @@ export class ThingsLocalDb {
                 ? (local?.durationMinutes ?? null)
                 : (remote.durationMinutes ?? null),
               isPinned: resolvedPinned,
+              isMilestone: resolvedMilestone,
               effortLevel: resolvedEffort,
               blockedByTaskIds: resolvedBlockedBy,
               workspaceId: resolvedWorkspaceId,
@@ -4783,6 +4812,7 @@ export class ThingsLocalDb {
           deadline: extTask.deadline,
           reminderTime: null,
           isPinned: Boolean(extTask.isPinned),
+          isMilestone: Boolean(extTask.isMilestone),
           effortLevel: extTask.effortLevel ?? null,
           workspaceId: extTask.workspaceId?.trim() || resolvedProjectWorkspaceId,
           assigneeId: extTask.assigneeId?.trim() || null,

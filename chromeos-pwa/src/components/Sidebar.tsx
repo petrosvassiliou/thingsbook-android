@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
+  ArrowLeftRight,
   BookOpen,
   CalendarDays,
   ChevronDown,
@@ -71,6 +73,7 @@ interface SidebarProps {
   onCloseMobile: () => void;
   onCreateProjectInArea: (areaId: string | null) => void;
   onOpenTemplates: (areaId: string | null) => void;
+  onOpenExternalImport?: (areaId: string | null) => void;
   onOpenWeeklyReview: () => void;
   onOpenManageAreas: () => void;
   onOpenManageTags?: () => void;
@@ -120,6 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   onCreateProjectInArea,
   onOpenTemplates,
+  onOpenExternalImport,
   onOpenWeeklyReview,
   onOpenManageAreas,
   onOpenManageTags,
@@ -132,6 +136,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
   const [collapsedAreas, setCollapsedAreas] = useState<Record<string, boolean>>({});
   const [newProjectMenuOpen, setNewProjectMenuOpen] = useState(false);
+  const [areaCtxMenu, setAreaCtxMenu] = useState<{
+    area: AreaRecord;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!areaCtxMenu) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setAreaCtxMenu(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [areaCtxMenu]);
 
   const activeAreas = areas.filter((a) => !a.isDeleted);
   const activeProjects = projects.filter((p) => !p.isDeleted && p.status === 'ACTIVE');
@@ -153,8 +174,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     activeNav.kind === 'area'
       ? activeNav.areaId
       : activeNav.kind === 'project'
-        ? (projects.find((p) => p.id === activeNav.projectId)?.areaId ?? activeAreas[0]?.id ?? null)
-        : (activeAreas[0]?.id ?? null);
+        ? (projects.find((p) => p.id === activeNav.projectId)?.areaId ?? null)
+        : null;
 
   const makeDropHandlers = (key: string, target: SidebarDropTarget) => ({
     onDragOver: (e: React.DragEvent) => {
@@ -467,11 +488,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     <button
                       type="button"
+                      data-testid={`sidebar-area-row-${area.id}`}
                       className={`nav-item area-row ${isAreaActive ? 'active' : ''} ${
                         dragTargetKey === areaKey ? 'drag-over' : ''
                       }`}
                       title={`${t.entityArea}: ${area.title}`}
                       onClick={() => onSelectNav({ kind: 'area', areaId: area.id })}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const x = Math.min(e.clientX, window.innerWidth - 264);
+                        const y = Math.min(e.clientY, window.innerHeight - 180);
+                        setAreaCtxMenu({ area, x: Math.max(12, x), y: Math.max(12, y) });
+                      }}
                       {...makeDropHandlers(areaKey, { kind: 'area', areaId: area.id })}
                     >
                       <span className="nav-item-icon">
@@ -662,6 +691,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <span>{t.templatesBtn}</span>
                     </span>
                   </button>
+                  {onOpenExternalImport && (
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="sidebar-import-external-btn"
+                      onClick={() => {
+                        setNewProjectMenuOpen(false);
+                        onCloseMobile();
+                        onOpenExternalImport(resolveCurrentAreaId());
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <ArrowLeftRight size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.importAsanaPlannerLabel}</span>
+                      </span>
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -734,6 +780,76 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {isBetaBuild && <span className="v2-beta-pill">{t.betaChannelBadge}</span>}
         </div>
       </aside>
+
+      {areaCtxMenu &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <>
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+              onClick={() => setAreaCtxMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setAreaCtxMenu(null);
+              }}
+            />
+            <div
+              className="context-menu"
+              data-testid="sidebar-area-context-menu"
+              style={{ left: areaCtxMenu.x, top: areaCtxMenu.y }}
+            >
+              <div className="context-menu-banner">
+                <Folder size={13} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                <span className="context-menu-task-title">{areaCtxMenu.area.title}</span>
+              </div>
+              <button
+                type="button"
+                className="context-menu-item"
+                data-testid="sidebar-area-ctx-new-project"
+                onClick={() => {
+                  const targetAreaId = areaCtxMenu.area.id;
+                  setAreaCtxMenu(null);
+                  onCloseMobile();
+                  onCreateProjectInArea(targetAreaId);
+                }}
+              >
+                <Plus size={14} style={{ color: 'var(--things-blue)' }} />
+                <span>{t.entityNewProject}</span>
+              </button>
+              <button
+                type="button"
+                className="context-menu-item"
+                data-testid="sidebar-area-ctx-templates"
+                onClick={() => {
+                  const targetAreaId = areaCtxMenu.area.id;
+                  setAreaCtxMenu(null);
+                  onCloseMobile();
+                  onOpenTemplates(targetAreaId);
+                }}
+              >
+                <ClipboardList size={14} style={{ color: 'var(--things-blue)' }} />
+                <span>{t.templatesBtn}</span>
+              </button>
+              {onOpenExternalImport && (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  data-testid="sidebar-area-ctx-import-external"
+                  onClick={() => {
+                    const targetAreaId = areaCtxMenu.area.id;
+                    setAreaCtxMenu(null);
+                    onCloseMobile();
+                    onOpenExternalImport(targetAreaId);
+                  }}
+                >
+                  <ArrowLeftRight size={14} style={{ color: 'var(--things-blue)' }} />
+                  <span>{t.importAsanaPlannerLabel}</span>
+                </button>
+              )}
+            </div>
+          </>,
+          document.body
+        )}
     </>
   );
 };

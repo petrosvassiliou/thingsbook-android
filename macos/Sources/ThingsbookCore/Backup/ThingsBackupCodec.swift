@@ -255,6 +255,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
     public var recurrenceRuleJson: String?
     public var sortOrder: Double
     public var isPinned: Bool
+    public var isMilestone: Bool
     public var effortLevel: String?
     public var blockedByJson: String
     public var workspaceId: String?
@@ -281,6 +282,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         recurrenceRuleJson: String? = nil,
         sortOrder: Double = 0,
         isPinned: Bool = false,
+        isMilestone: Bool = false,
         effortLevel: String? = nil,
         blockedByJson: String = "[]",
         workspaceId: String? = nil,
@@ -306,6 +308,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.recurrenceRuleJson = recurrenceRuleJson
         self.sortOrder = sortOrder
         self.isPinned = isPinned
+        self.isMilestone = isMilestone
         self.effortLevel = effortLevel
         self.blockedByJson = blockedByJson
         self.workspaceId = workspaceId
@@ -318,7 +321,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, title, notes, status, scheduleState, whenDate, deadline, reminderTime
         case scheduledStartMinutes, durationMinutes, completedAt, projectId, headingId, areaId
-        case recurrenceRuleJson, sortOrder, isPinned, effortLevel, blockedByJson, blockedByTaskIds
+        case recurrenceRuleJson, sortOrder, isPinned, isMilestone, effortLevel, blockedByJson, blockedByTaskIds
         case workspaceId, assigneeId, tagIdsJson, createdAt, updatedAt
     }
 
@@ -341,6 +344,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.recurrenceRuleJson = try? c.decodeIfPresent(String.self, forKey: .recurrenceRuleJson)
         self.sortOrder = (try? c.decode(Double.self, forKey: .sortOrder)) ?? 0
         self.isPinned = (try? c.decodeIfPresent(Bool.self, forKey: .isPinned)) ?? false
+        self.isMilestone = (try? c.decodeIfPresent(Bool.self, forKey: .isMilestone)) ?? false
         self.effortLevel = try? c.decodeIfPresent(String.self, forKey: .effortLevel)
         if let rawJson = try? c.decodeIfPresent(String.self, forKey: .blockedByJson) {
             self.blockedByJson = rawJson
@@ -377,6 +381,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         try c.encodeIfPresent(recurrenceRuleJson, forKey: .recurrenceRuleJson)
         try c.encode(sortOrder, forKey: .sortOrder)
         try c.encode(isPinned, forKey: .isPinned)
+        try c.encode(isMilestone, forKey: .isMilestone)
         try c.encodeIfPresent(effortLevel, forKey: .effortLevel)
         try c.encode(blockedByJson, forKey: .blockedByJson)
         try c.encodeIfPresent(workspaceId, forKey: .workspaceId)

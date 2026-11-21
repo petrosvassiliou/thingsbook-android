@@ -299,4 +299,52 @@ class FirestoreDtosAndSyncLogicTest {
         // SQL LIKE pattern escaping for % _ and \
         assertEquals("100\\%\\_done\\\\now", ThingsDatabase.escapeSqlLikePattern("100%_done\\now"))
     }
+
+    @Test
+    fun `TaskFirestoreDto round-trips isMilestone and preserves local milestone when legacy remote omits field`() {
+        val localMilestoneEntity = TaskEntity(
+            id = "task-ms-sync",
+            title = "Launch Milestone",
+            notes = "",
+            status = TaskStatus.OPEN,
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = 1_765_100_000_000L,
+            deadline = 1_765_100_000_000L,
+            reminderTime = null,
+            completedAt = null,
+            projectId = "proj-1",
+            headingId = null,
+            areaId = null,
+            recurrenceRuleJson = null,
+            tagIdsJson = "[]",
+            sortOrder = 1.0,
+            isPinned = false,
+            isMilestone = true,
+            createdAt = 1_765_000_000_000L,
+            updatedAt = 1_765_050_000_000L
+        )
+
+        val dto = TaskFirestoreDto.fromEntity(localMilestoneEntity)
+        assertEquals(true, dto.isMilestone)
+        val map = dto.toFirestoreMap()
+        assertEquals(true, map["isMilestone"])
+        val parsedDto = TaskFirestoreDto.fromFirestoreMap(map)!!
+        assertEquals(true, parsedDto.isMilestone)
+        assertTrue(parsedDto.toEntity().isMilestone)
+
+        // Legacy remote payload without "isMilestone" preserves existingLocal.isMilestone == true
+        val legacyMapWithoutMilestone = map.toMutableMap().apply { remove("isMilestone") }
+        val legacyDto = TaskFirestoreDto.fromFirestoreMap(legacyMapWithoutMilestone)!!
+        assertEquals(null, legacyDto.isMilestone)
+        assertTrue(legacyDto.toEntity(existingLocal = localMilestoneEntity).isMilestone)
+        assertFalse(legacyDto.toEntity(existingLocal = null).isMilestone)
+
+        // Explicit remote isMilestone = false clears local milestone
+        val explicitClearedMap = map.toMutableMap().apply { put("isMilestone", false) }
+        val explicitClearedDto = TaskFirestoreDto.fromFirestoreMap(explicitClearedMap)!!
+        assertEquals(false, explicitClearedDto.isMilestone)
+        assertFalse(explicitClearedDto.toEntity(existingLocal = localMilestoneEntity).isMilestone)
+    }
 }
+
+

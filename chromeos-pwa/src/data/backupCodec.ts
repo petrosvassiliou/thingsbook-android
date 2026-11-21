@@ -110,6 +110,7 @@ export interface BackupTaskDto {
   scheduledStartMinutes?: number | null;
   durationMinutes?: number | null;
   isPinned?: boolean | null;
+  isMilestone?: boolean | null;
   effortLevel?: string | null;
   blockedByTaskIdsJson?: string | null;
   blockedByTaskIds?: string[] | null;
@@ -429,6 +430,7 @@ export function buildBackupPayloadFromEntities(params: {
         scheduledStartMinutes: t.scheduledStartMinutes ?? null,
         durationMinutes: t.durationMinutes ?? null,
         isPinned: Boolean(t.isPinned),
+        isMilestone: Boolean(t.isMilestone),
         effortLevel: t.effortLevel ?? null,
         blockedByTaskIdsJson: JSON.stringify(cleanBlocked),
         blockedByTaskIds: cleanBlocked,
@@ -1050,6 +1052,7 @@ export function normalizeBackupPayloadToEntities(
         scheduledStartMinutes,
         durationMinutes,
         isPinned: Boolean(t.isPinned),
+        isMilestone: Boolean(t.isMilestone),
         effortLevel: normalizeEffortLevel(t.effortLevel),
         blockedByTaskIds: cleanBlocked,
         workspaceId,

@@ -409,15 +409,15 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.14")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.14")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 105)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.15")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.15")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 106)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.14", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.14", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.14", current: "3.0.0-beta.13"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.14"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.14"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.15", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.15", current: "2.5.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.15", current: "3.0.0-beta.14"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.15"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.15"))
         XCTAssertTrue(TaskItem.standaloneDurationPresets.contains(480))
         XCTAssertEqual(TaskItem.formatCompactDuration(480), "1d")
         XCTAssertEqual(TaskItem.formatCompactDuration(720), "1d 4h")
@@ -5150,8 +5150,416 @@ final class ThingsbookCoreTests: XCTestCase {
         FirebaseConfig.saveCustom(FirebaseConfig(projectId: "   ", apiKey: "\n", appId: ""), defaults: defaults)
         XCTAssertEqual(FirebaseConfig.loadActive(defaults: defaults), .defaultProduction)
     }
+
+    // MARK: - 42. v3.0.0-beta.15 Task Milestones Across SQLite, Templates, Backup, Sync, Asana, Outline & Roadmap
+
+    func testMilestonePersistenceTemplatesBackupSyncAndAsanaRoundTrip() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let millis: (Int, Int, Int) -> Int64 = { y, m, d in
+            let date = cal.date(from: DateComponents(year: y, month: m, day: d))!
+            return DateEpochConverter.startOfDayMillis(for: date, calendar: cal)
+        }
+
+        // 1. SQLite createTask + setTaskMilestone + setTasksMilestone + QuickFind FTS + Duplication + Project Templates
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let area = try db.createArea(title: "Product Engineering")
+        let proj = try db.createProject(title: "Thingsbook 3.0 GA", areaId: area.id)
+        let phase = try db.createHeading(projectId: proj.id, title: "Launch Readiness")
+
+        let regularTask = try db.createTask(
+            title: "Regression QA sweep",
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 8, 10),
+            projectId: proj.id,
+            headingId: phase.id,
+            areaId: area.id
+        )
+        let milestoneTask = try db.createTask(
+            title: "App Store Submission Freeze",
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 8, 12),
+            deadline: millis(2026, 8, 15),
+            projectId: proj.id,
+            headingId: phase.id,
+            areaId: area.id,
+            isMilestone: true
+        )
+        XCTAssertFalse(regularTask.isMilestone)
+        XCTAssertTrue(milestoneTask.isMilestone)
+
+        try db.setTaskMilestone(taskId: regularTask.id, isMilestone: true)
+        var snap = try db.loadWorkspaceSnapshot(calendar: cal)
+        let promoted = try XCTUnwrap(snap.allOpenTasks.first { $0.id == regularTask.id })
+        XCTAssertTrue(promoted.isMilestone)
+        XCTAssertGreaterThanOrEqual(promoted.updatedAt, regularTask.updatedAt)
+
+        try db.setTasksMilestone([regularTask.id, milestoneTask.id], isMilestone: false)
+        snap = try db.loadWorkspaceSnapshot(calendar: cal)
+        XCTAssertEqual(snap.allOpenTasks.filter(\.isMilestone).count, 0)
+
+        try db.setTaskMilestone(taskId: milestoneTask.id, isMilestone: true)
+        snap = try db.loadWorkspaceSnapshot(calendar: cal)
+        XCTAssertTrue(snap.allOpenTasks.first(where: { $0.id == milestoneTask.id })?.isMilestone == true)
+        XCTAssertTrue(snap.allOpenTasks.first(where: { $0.id == regularTask.id })?.isMilestone == false)
+
+        // Verify QuickFind FTS5 queries preserve column index 25 (`is_milestone`)
+        let ftsHits = try db.searchQuickFind(rawQuery: "Submission Freeze")
+        let ftsMilestone = try XCTUnwrap(ftsHits.tasks.first { $0.id == milestoneTask.id })
+        XCTAssertTrue(ftsMilestone.isMilestone)
+
+        // Verify duplicateTasks & duplicateProject preserve isMilestone
+        let taskCopies = try db.duplicateTasks([milestoneTask.id], copySuffix: "Copy")
+        XCTAssertEqual(taskCopies.count, 1)
+        XCTAssertTrue(taskCopies[0].isMilestone)
+
+        let duplicatedProj = try XCTUnwrap(try db.duplicateProject(proj.id, copySuffix: "Copy"))
+        snap = try db.loadWorkspaceSnapshot(calendar: cal)
+        let dupProjTasks = snap.allOpenTasks.filter { $0.projectId == duplicatedProj.id }
+        XCTAssertTrue(dupProjTasks.contains(where: { $0.title == "App Store Submission Freeze" && $0.isMilestone }))
+        XCTAssertTrue(dupProjTasks.contains(where: { $0.title == "Regression QA sweep" && !$0.isMilestone }))
+
+        // Verify saveProjectAsTemplate & createProjectFromTemplate preserve BlueprintTask.isMilestone
+        let savedTemplate = try db.saveProjectAsTemplate(projectId: proj.id, templateTitle: "GA Blueprint")
+        let headingBlueprintTasks: [BlueprintTask] = try XCTUnwrap(savedTemplate.blueprint.headings.first?.tasks)
+        XCTAssertTrue(headingBlueprintTasks.contains(where: { $0.title == "App Store Submission Freeze" && $0.isMilestone }))
+        XCTAssertTrue(headingBlueprintTasks.contains(where: { $0.title == "Regression QA sweep" && !$0.isMilestone }))
+
+        let instantiatedProj = try db.createProjectFromTemplate(
+            savedTemplate,
+            titleOverride: "Q4 Enterprise Release",
+            areaIdOverride: area.id
+        )
+        snap = try db.loadWorkspaceSnapshot(calendar: cal)
+        let instantiatedTasks = snap.allOpenTasks.filter { $0.projectId == instantiatedProj.id }
+        XCTAssertTrue(instantiatedTasks.contains(where: { $0.title == "App Store Submission Freeze" && $0.isMilestone }))
+        XCTAssertTrue(instantiatedTasks.contains(where: { $0.title == "Regression QA sweep" && !$0.isMilestone }))
+
+        // 2. .tbbackup encrypted & plaintext round-trip of isMilestone
+        let backupPayload = try db.buildBackupPayload(preferences: AppPreferences())
+        let encryptedBackup = try ThingsBackupCodec.encodeBackup(payload: backupPayload, password: "MilestoneVaultPassword!")
+        let decodedBackup = try ThingsBackupCodec.decodeBackup(rawBytes: encryptedBackup, password: "MilestoneVaultPassword!")
+        let dbRestored = try ThingsSQLiteDatabase(path: ":memory:")
+        try dbRestored.restoreBackupPayload(decodedBackup)
+        var restoredSnap = try dbRestored.loadWorkspaceSnapshot(calendar: cal)
+        let restoredMilestone = try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == milestoneTask.id })
+        let restoredRegular = try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == regularTask.id })
+        XCTAssertTrue(restoredMilestone.isMilestone)
+        XCTAssertFalse(restoredRegular.isMilestone)
+
+        // 3. Firestore Sync: omitted isMilestone preserves local true; explicit isMilestone updates local state
+        let legacyRemoteWire: [String: Any] = [
+            "id": milestoneTask.id,
+            "title": "App Store Submission Freeze (Edited on Legacy Client)",
+            "status": "OPEN",
+            "scheduleState": "UPCOMING",
+            "whenDate": millis(2026, 8, 12),
+            "deadline": millis(2026, 8, 15),
+            "projectId": proj.id,
+            "headingId": phase.id,
+            "areaId": area.id,
+            "sortOrder": restoredMilestone.sortOrder,
+            "createdAt": restoredMilestone.createdAt,
+            "updatedAt": restoredMilestone.updatedAt + 5_000,
+            "isDeleted": false
+        ]
+        let legacyHints = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(legacyRemoteWire))
+        XCTAssertTrue(legacyHints.omittedMilestone)
+        _ = try dbRestored.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tasks: [legacyHints.task],
+                taskOmittedMilestoneTaskIds: legacyHints.omittedMilestone ? [legacyHints.task.id] : []
+            )
+        )
+        restoredSnap = try dbRestored.loadWorkspaceSnapshot(calendar: cal)
+        let afterLegacySync = try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == milestoneTask.id })
+        XCTAssertEqual(afterLegacySync.title, "App Store Submission Freeze (Edited on Legacy Client)")
+        XCTAssertTrue(afterLegacySync.isMilestone, "Omitted remote isMilestone must preserve local milestone flag")
+
+        var explicitRemoteWire = legacyRemoteWire
+        explicitRemoteWire["isMilestone"] = false
+        explicitRemoteWire["updatedAt"] = afterLegacySync.updatedAt + 5_000
+        let explicitHints = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(explicitRemoteWire))
+        XCTAssertFalse(explicitHints.omittedMilestone)
+        XCTAssertFalse(explicitHints.task.isMilestone)
+        _ = try dbRestored.applyRemoteDeltas(RemoteDeltaBatch(tasks: [explicitHints.task]))
+        restoredSnap = try dbRestored.loadWorkspaceSnapshot(calendar: cal)
+        XCTAssertFalse(try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == milestoneTask.id }).isMilestone)
+
+        // 4. Asana JSON "resource_subtype": "milestone" & "is_milestone": true import + target Area + export
+        let asanaJson = """
+        {
+          "data": {
+            "name": "Asana Cloud Migration",
+            "notes": "Imported with milestones",
+            "sections": [
+              {
+                "name": "Cutover",
+                "tasks": [
+                  {
+                    "name": "Zero-Downtime DNS Switchover",
+                    "resource_subtype": "milestone",
+                    "due_on": "2026-09-15",
+                    "completed": false
+                  },
+                  {
+                    "name": "Post-Cutover Signoff",
+                    "is_milestone": true,
+                    "due_on": "2026-09-18",
+                    "completed": false
+                  },
+                  {
+                    "name": "Update runbooks",
+                    "resource_subtype": "default_task",
+                    "start_on": "2026-09-10",
+                    "due_on": "2026-09-14",
+                    "completed": false
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        """
+        let parsedAsana = try ExternalProjectCodec.importAsanaJson(Data(asanaJson.utf8), calendar: cal)
+        let cutoverTasks = try XCTUnwrap(parsedAsana.phases.first?.tasks)
+        XCTAssertEqual(cutoverTasks.count, 3)
+        XCTAssertTrue(cutoverTasks[0].isMilestone)
+        XCTAssertTrue(cutoverTasks[1].isMilestone)
+        XCTAssertFalse(cutoverTasks[2].isMilestone)
+
+        let dbAsana = try ThingsSQLiteDatabase(path: ":memory:")
+        let targetArea = try dbAsana.createArea(title: "Infrastructure")
+        let importedResult = try dbAsana.importExternalProject(
+            parsedAsana,
+            areaId: targetArea.id,
+            calendar: cal
+        )
+        XCTAssertEqual(importedResult.project.areaId, targetArea.id)
+        let asanaSnap = try dbAsana.loadWorkspaceSnapshot(calendar: cal)
+        let persistedSwitchover = try XCTUnwrap(asanaSnap.allOpenTasks.first { $0.title == "Zero-Downtime DNS Switchover" })
+        let persistedSignoff = try XCTUnwrap(asanaSnap.allOpenTasks.first { $0.title == "Post-Cutover Signoff" })
+        let persistedRunbooks = try XCTUnwrap(asanaSnap.allOpenTasks.first { $0.title == "Update runbooks" })
+        XCTAssertEqual(persistedSwitchover.areaId, targetArea.id)
+        XCTAssertTrue(persistedSwitchover.isMilestone)
+        XCTAssertTrue(persistedSignoff.isMilestone)
+        XCTAssertFalse(persistedRunbooks.isMilestone)
+
+        let exportedAsana = try dbAsana.exportProjectExternal(
+            projectId: importedResult.project.id,
+            format: .asanaJson,
+            calendar: cal
+        )
+        let rawExportObj = try XCTUnwrap(JSONSerialization.jsonObject(with: exportedAsana.data) as? [String: Any])
+        let dataObj = try XCTUnwrap(rawExportObj["data"] as? [String: Any])
+        let sectionsArr = try XCTUnwrap(dataObj["sections"] as? [[String: Any]])
+        let exportedSectionTasks = try XCTUnwrap(sectionsArr.first?["tasks"] as? [[String: Any]])
+        let switchoverJson = try XCTUnwrap(exportedSectionTasks.first { ($0["name"] as? String) == "Zero-Downtime DNS Switchover" })
+        let runbooksJson = try XCTUnwrap(exportedSectionTasks.first { ($0["name"] as? String) == "Update runbooks" })
+        XCTAssertEqual(switchoverJson["resource_subtype"] as? String, "milestone")
+        XCTAssertEqual(runbooksJson["resource_subtype"] as? String, "default_task")
+
+        let reimportedAsana = try ExternalProjectCodec.importAsanaJson(exportedAsana.data, calendar: cal)
+        let reimportedTasks = try XCTUnwrap(reimportedAsana.phases.first?.tasks)
+        XCTAssertTrue(reimportedTasks.first(where: { $0.title == "Zero-Downtime DNS Switchover" })?.isMilestone == true)
+        XCTAssertTrue(reimportedTasks.first(where: { $0.title == "Update runbooks" })?.isMilestone == false)
+
+        // 5. @milestone inline token parsing in parseOutlineToBlueprint
+        let outline = """
+        # Release Schedule
+        ## Milestones
+        - [ ] Feature Complete @milestone
+        - [ ] Go / No-Go Review @09:30 @1d @Milestone
+        - [ ] Draft changelog @45m
+        """
+        let parsedOutline = ThingsSQLiteDatabase.parseOutlineToBlueprint(outline)
+        let outlineTasks = try XCTUnwrap(parsedOutline.blueprint.headings.first?.tasks)
+        XCTAssertEqual(outlineTasks.count, 3)
+        XCTAssertEqual(outlineTasks[0].title, "Feature Complete")
+        XCTAssertTrue(outlineTasks[0].isMilestone)
+        XCTAssertEqual(outlineTasks[1].title, "Go / No-Go Review")
+        XCTAssertTrue(outlineTasks[1].isMilestone)
+        XCTAssertEqual(outlineTasks[1].scheduledStartMinutes, 9 * 60 + 30)
+        XCTAssertEqual(outlineTasks[1].durationMinutes, 480)
+        XCTAssertEqual(outlineTasks[2].title, "Draft changelog")
+        XCTAssertFalse(outlineTasks[2].isMilestone)
+    }
+
+    @MainActor
+    func testMilestoneRoadmapLayoutSingleDayAnchoringAndVectorExports() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let todayMs: Int64 = 1_795_046_400_000
+        let dayMs: Int64 = 86_400_000
+        let todayDay = DateEpochConverter.epochDay(forMillis: todayMs, calendar: cal)
+
+        let project = Project(
+            id: "proj-ms-roadmap",
+            title: "Milestone Gantt Verification",
+            viewMode: "roadmap",
+            totalTaskCount: 5,
+            completedTaskCount: 1,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        let phase = Heading(
+            id: "hdg-ms-1",
+            projectId: project.id,
+            title: "Phase 1",
+            sortOrder: 100,
+            startDate: todayMs,
+            endDate: todayMs + 12 * dayMs,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let regularSpanTask = TaskItem(
+            id: "ms-regular",
+            title: "Implementation Sprint",
+            scheduleState: .today,
+            whenDate: todayMs,
+            deadline: todayMs + 4 * dayMs,
+            projectId: project.id,
+            headingId: phase.id,
+            sortOrder: 10,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        // Has both earlier whenDate (+2d), multi-day duration, and deadline (+7d) -> must anchor as 1-day point on deadline (+7d)
+        let deadlineAnchoredMilestone = TaskItem(
+            id: "ms-both-dates",
+            title: "Security Audit Sign-Off",
+            scheduleState: .upcoming,
+            whenDate: todayMs + 2 * dayMs,
+            deadline: todayMs + 7 * dayMs,
+            durationMinutes: 3 * 480,
+            projectId: project.id,
+            headingId: phase.id,
+            sortOrder: 20,
+            isMilestone: true,
+            blockedByTaskIds: [regularSpanTask.id],
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        // Has only whenDate (+5d) -> must anchor as 1-day point on whenDate (+5d)
+        let whenOnlyMilestone = TaskItem(
+            id: "ms-when-only",
+            title: "Internal Beta Tag",
+            status: .completed,
+            scheduleState: .upcoming,
+            whenDate: todayMs + 5 * dayMs,
+            completedAt: todayMs,
+            projectId: project.id,
+            headingId: phase.id,
+            sortOrder: 30,
+            isMilestone: true,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        // Has only deadline (+10d) -> must anchor as 1-day point on deadline (+10d)
+        let deadlineOnlyMilestone = TaskItem(
+            id: "ms-deadline-only",
+            title: "Public Launch Day",
+            scheduleState: .anytime,
+            deadline: todayMs + 10 * dayMs,
+            projectId: project.id,
+            headingId: phase.id,
+            sortOrder: 40,
+            isMilestone: true,
+            blockedByTaskIds: [deadlineAnchoredMilestone.id],
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+        // Unscheduled milestone -> stays in unscheduledTasks
+        let unscheduledMilestone = TaskItem(
+            id: "ms-unscheduled",
+            title: "Post-Launch Retro",
+            scheduleState: .anytime,
+            projectId: project.id,
+            headingId: phase.id,
+            sortOrder: 50,
+            isMilestone: true,
+            createdAt: todayMs,
+            updatedAt: todayMs
+        )
+
+        let layout = ProjectRoadmapEngine.buildLayout(
+            project: project,
+            headings: [phase],
+            tasks: [
+                regularSpanTask,
+                deadlineAnchoredMilestone,
+                whenOnlyMilestone,
+                deadlineOnlyMilestone,
+                unscheduledMilestone
+            ],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+
+        let barById = Dictionary(uniqueKeysWithValues: layout.allTaskBars.map { ($0.id, $0) })
+        let regularBar = try XCTUnwrap(barById[regularSpanTask.id])
+        XCTAssertFalse(regularBar.isMilestone)
+        XCTAssertEqual(regularBar.spanDays, 5)
+
+        let bothBar = try XCTUnwrap(barById[deadlineAnchoredMilestone.id])
+        XCTAssertTrue(bothBar.isMilestone)
+        XCTAssertEqual(bothBar.startEpochDay, todayDay + 7)
+        XCTAssertEqual(bothBar.endEpochDay, todayDay + 7)
+        XCTAssertEqual(bothBar.spanDays, 1)
+
+        let whenBar = try XCTUnwrap(barById[whenOnlyMilestone.id])
+        XCTAssertTrue(whenBar.isMilestone)
+        XCTAssertEqual(whenBar.startEpochDay, todayDay + 5)
+        XCTAssertEqual(whenBar.endEpochDay, todayDay + 5)
+        XCTAssertEqual(whenBar.spanDays, 1)
+
+        let dlBar = try XCTUnwrap(barById[deadlineOnlyMilestone.id])
+        XCTAssertTrue(dlBar.isMilestone)
+        XCTAssertEqual(dlBar.startEpochDay, todayDay + 10)
+        XCTAssertEqual(dlBar.endEpochDay, todayDay + 10)
+        XCTAssertEqual(dlBar.spanDays, 1)
+
+        XCTAssertEqual(layout.unscheduledTasks.map(\.id), [unscheduledMilestone.id])
+        XCTAssertTrue(layout.unscheduledTasks.first?.isMilestone == true)
+
+        // Verify filteredLayoutForExport preserves isMilestone
+        let exportOptions = RoadmapPDFExportOptions(
+            selectedSectionIds: [phase.id],
+            startEpochDay: todayDay,
+            endEpochDay: todayDay + 14,
+            orientation: .landscape
+        )
+        let filtered = ProjectRoadmapEngine.filteredLayoutForExport(
+            layout: layout,
+            headings: [phase],
+            options: exportOptions
+        )
+        XCTAssertEqual(filtered.allTaskBars.filter(\.isMilestone).count, 3)
+
+        // Verify PDF & PNG vector exports succeed with royal-violet Milestone diamonds + labels
+        let pdfData = try XCTUnwrap(
+            ProjectRoadmapExporter.exportRoadmapPDFData(
+                project: project,
+                headings: [phase],
+                layout: layout,
+                options: exportOptions
+            )
+        )
+        XCTAssertTrue(pdfData.starts(with: Data("%PDF-".utf8)))
+        XCTAssertGreaterThan(pdfData.count, 256)
+
+        let pngData = try XCTUnwrap(
+            ProjectRoadmapExporter.exportRoadmapPNGData(
+                project: project,
+                headings: [phase],
+                layout: layout,
+                scale: 2.0
+            )
+        )
+        let pngMagic: [UInt8] = [0x89, 0x50, 0x4E, 0x47]
+        XCTAssertTrue(pngData.starts(with: pngMagic))
+        XCTAssertGreaterThan(pngData.count, 256)
+    }
 }
-
-
-
 

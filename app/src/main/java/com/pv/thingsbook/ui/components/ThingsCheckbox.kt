@@ -63,6 +63,7 @@ fun ThingsCheckbox(
     modifier: Modifier = Modifier,
     shape: ThingsCheckboxShape = ThingsCheckboxShape.ROUNDED_SQUARE,
     isDashedSomeday: Boolean = false,
+    isMilestone: Boolean = false,
     size: Dp = 20.dp,
     showHoverTooltip: Boolean = true,
     tooltipText: String? = null
@@ -109,14 +110,19 @@ fun ThingsCheckbox(
         label = "checkDrawProgress"
     )
 
+    val activeFillTarget = if (isMilestone) colors.milestoneViolet else colors.checkboxCheckedFill
     val fillColor by animateColorAsState(
-        targetValue = if (isActive) colors.checkboxCheckedFill else Color.Transparent,
+        targetValue = if (isActive) activeFillTarget else Color.Transparent,
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "checkboxFillColor"
     )
 
     val borderColor by animateColorAsState(
-        targetValue = if (isActive) colors.checkboxCheckedFill else colors.checkboxBorder,
+        targetValue = when {
+            isActive -> activeFillTarget
+            isMilestone -> colors.milestoneViolet
+            else -> colors.checkboxBorder
+        },
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
         label = "checkboxBorderColor"
     )
@@ -155,57 +161,94 @@ fun ThingsCheckbox(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(modifier = Modifier.size(size + 10.dp)) {
-                val canvasW = this.size.width
-                val canvasH = this.size.height
-                val boxSizePx = size.toPx().coerceAtMost(minOf(canvasW, canvasH))
-                if (boxSizePx <= 0f) return@Canvas
+            Box(
+                modifier = Modifier
+                    .size(size + 10.dp)
+                    .graphicsLayer {
+                        rotationZ = if (isMilestone) 45f else 0f
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.size(size + 10.dp)) {
+                    val canvasW = this.size.width
+                    val canvasH = this.size.height
+                    val rawBoxPx = size.toPx().coerceAtMost(minOf(canvasW, canvasH))
+                    val boxSizePx = if (isMilestone) rawBoxPx * 0.84f else rawBoxPx
+                    if (boxSizePx <= 0f) return@Canvas
 
-                val insetX = (canvasW - boxSizePx) / 2f
-                val insetY = (canvasH - boxSizePx) / 2f
-                val strokePx = 1.75.dp.toPx()
-                val rectWidth = (boxSizePx - strokePx).coerceAtLeast(0f)
-                val rectHeight = (boxSizePx - strokePx).coerceAtLeast(0f)
-                if (rectWidth <= 0f || rectHeight <= 0f) return@Canvas
+                    val insetX = (canvasW - boxSizePx) / 2f
+                    val insetY = (canvasH - boxSizePx) / 2f
+                    val strokePx = if (isMilestone) 1.85.dp.toPx() else 1.75.dp.toPx()
+                    val rectWidth = (boxSizePx - strokePx).coerceAtLeast(0f)
+                    val rectHeight = (boxSizePx - strokePx).coerceAtLeast(0f)
+                    if (rectWidth <= 0f || rectHeight <= 0f) return@Canvas
 
-                val squircleCornerPx = 6.5.dp.toPx()
-                val circleCornerPx = boxSizePx / 2f
-                val clampedMorph = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
-                val cornerPx = if (shape == ThingsCheckboxShape.CIRCLE) {
-                    circleCornerPx
-                } else {
-                    squircleCornerPx + (circleCornerPx - squircleCornerPx) * clampedMorph
-                }
+                    val squircleCornerPx = if (isMilestone) 3.6.dp.toPx() else 6.5.dp.toPx()
+                    val circleCornerPx = boxSizePx / 2f
+                    val clampedMorph = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
+                    val cornerPx = when {
+                        isMilestone -> squircleCornerPx
+                        shape == ThingsCheckboxShape.CIRCLE -> circleCornerPx
+                        else -> squircleCornerPx + (circleCornerPx - squircleCornerPx) * clampedMorph
+                    }
 
-                val borderStroke = if (isDashedSomeday && status == TaskStatus.OPEN) {
-                    Stroke(
-                        width = strokePx,
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 4f), 0f)
-                    )
-                } else {
-                    Stroke(width = strokePx)
-                }
+                    if (isMilestone && status == TaskStatus.OPEN) {
+                        drawRoundRect(
+                            color = colors.milestoneVioletSoft.copy(alpha = 0.60f),
+                            topLeft = Offset(insetX + strokePx / 2f, insetY + strokePx / 2f),
+                            size = Size(rectWidth, rectHeight),
+                            cornerRadius = CornerRadius(cornerPx, cornerPx)
+                        )
+                    }
 
-                // Outer border
-                drawRoundRect(
-                    color = borderColor,
-                    topLeft = Offset(insetX + strokePx / 2f, insetY + strokePx / 2f),
-                    size = Size(rectWidth, rectHeight),
-                    cornerRadius = CornerRadius(cornerPx, cornerPx),
-                    style = borderStroke
-                )
+                    val borderStroke = if (isDashedSomeday && status == TaskStatus.OPEN) {
+                        Stroke(
+                            width = strokePx,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 4f), 0f)
+                        )
+                    } else {
+                        Stroke(width = strokePx)
+                    }
 
-                // Animated fill (clamped against spring overshoot > 1f or < 0f)
-                val clampedAlpha = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
-                if (clampedAlpha > 0.01f) {
+                    // Outer border
                     drawRoundRect(
-                        color = fillColor.copy(alpha = clampedAlpha),
-                        topLeft = Offset(insetX, insetY),
-                        size = Size(boxSizePx, boxSizePx),
-                        cornerRadius = CornerRadius(cornerPx, cornerPx)
+                        color = borderColor,
+                        topLeft = Offset(insetX + strokePx / 2f, insetY + strokePx / 2f),
+                        size = Size(rectWidth, rectHeight),
+                        cornerRadius = CornerRadius(cornerPx, cornerPx),
+                        style = borderStroke
                     )
 
-                    val iconStroke = 2.dp.toPx()
+                    // Animated fill (clamped against spring overshoot > 1f or < 0f)
+                    val clampedAlpha = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
+                    if (clampedAlpha > 0.01f) {
+                        drawRoundRect(
+                            color = fillColor.copy(alpha = clampedAlpha),
+                            topLeft = Offset(insetX, insetY),
+                            size = Size(boxSizePx, boxSizePx),
+                            cornerRadius = CornerRadius(cornerPx, cornerPx)
+                        )
+                    }
+                }
+
+                // Counter-rotated (-45f when Milestone) inner checkmark / X icon so glyph stays upright
+                Canvas(
+                    modifier = Modifier
+                        .size(size + 10.dp)
+                        .graphicsLayer {
+                            rotationZ = if (isMilestone) -45f else 0f
+                        }
+                ) {
+                    val canvasW = this.size.width
+                    val canvasH = this.size.height
+                    val boxSizePx = size.toPx().coerceAtMost(minOf(canvasW, canvasH))
+                    if (boxSizePx <= 0f) return@Canvas
+                    val clampedAlpha = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
+                    if (clampedAlpha <= 0.01f) return@Canvas
+
+                    val insetX = (canvasW - boxSizePx) / 2f
+                    val insetY = (canvasH - boxSizePx) / 2f
+                    val iconStroke = (if (isMilestone) 1.9.dp else 2.dp).toPx()
                     val w = boxSizePx
                     val h = boxSizePx
 
@@ -213,9 +256,9 @@ fun ThingsCheckbox(
                         val clampedProgress = checkDrawProgress.coerceIn(0f, 1f)
                         if (clampedProgress > 0.01f) {
                             val fullCheckPath = Path().apply {
-                                moveTo(insetX + w * 0.25f, insetY + h * 0.52f)
-                                lineTo(insetX + w * 0.44f, insetY + h * 0.70f)
-                                lineTo(insetX + w * 0.76f, insetY + h * 0.33f)
+                                moveTo(insetX + w * 0.27f, insetY + h * 0.52f)
+                                lineTo(insetX + w * 0.44f, insetY + h * 0.69f)
+                                lineTo(insetX + w * 0.74f, insetY + h * 0.34f)
                             }
                             val segmentPath = Path()
                             val pathMeasure = PathMeasure()
@@ -237,7 +280,7 @@ fun ThingsCheckbox(
                             )
                         }
                     } else if (status == TaskStatus.CANCELED) {
-                        val pad = w * 0.30f
+                        val pad = w * 0.31f
                         drawLine(
                             color = Color.White.copy(alpha = clampedAlpha),
                             start = Offset(insetX + pad, insetY + pad),

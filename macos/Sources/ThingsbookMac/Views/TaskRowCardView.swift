@@ -57,6 +57,7 @@ public struct TaskRowCardView: View {
             ThingsCheckboxButton(
                 status: task.status,
                 isSomeday: task.scheduleState == .someday,
+                isMilestone: task.isMilestone,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     if isInlineQuickEditing {
@@ -162,6 +163,24 @@ public struct TaskRowCardView: View {
 
             // Trailing metadata badges + permanently reserved hover Quick Edit / When / Open Details slot (zero layout shift on hover)
             HStack(spacing: 6) {
+                if task.isMilestone {
+                    Text("◆ \(store.tr("v30_milestone_label"))")
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(ThingsMacPalette.milestoneViolet)
+                        .padding(.horizontal, 7.5)
+                        .padding(.vertical, 2.5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(ThingsMacPalette.milestoneViolet.opacity(0.13))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(ThingsMacPalette.milestoneViolet.opacity(0.28), lineWidth: 0.75)
+                        )
+                        .thingsTooltip(store.tr("v30_milestone_label"))
+                }
                 if let blockedBadge = store.blockedByBadgeText(for: task) {
                     Button {
                         isCollapsedDependenciesPopoverOpen = true
@@ -557,6 +576,11 @@ public struct TaskRowCardView: View {
             Button(store.tr("v25_batch_pin")) {
                 store.togglePinForSelectedTasks()
             }
+            Button {
+                store.toggleMilestoneForSelectedTasks()
+            } label: {
+                Label(store.tr("v30_mark_as_milestone"), systemImage: "diamond")
+            }
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
             }
@@ -596,6 +620,14 @@ public struct TaskRowCardView: View {
             }
             Button(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task")) {
                 store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+            }
+            Button {
+                store.setTasksMilestone([latestTask.id], isMilestone: !latestTask.isMilestone)
+            } label: {
+                Label(
+                    store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
+                )
             }
             Divider()
             Button(store.tr("view_today")) {

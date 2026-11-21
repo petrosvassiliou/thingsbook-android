@@ -60,10 +60,14 @@ public struct TemplatesAndImportSheetView: View {
         .background(ThingsMacPalette.cardSurface)
         .onAppear {
             selectedTab = store.templatesInitialTab
-            if case .area(let aid) = store.selectedDestination {
+            if let overrideAreaId = store.newProjectDefaultAreaId {
+                selectedAreaId = overrideAreaId
+                store.newProjectDefaultAreaId = nil
+            } else if case .area(let aid) = store.selectedDestination {
                 selectedAreaId = aid
-            } else if let aid = store.newProjectDefaultAreaId {
-                selectedAreaId = aid
+            } else if case .project(let pid) = store.selectedDestination,
+                      let projAreaId = store.project(byId: pid)?.areaId {
+                selectedAreaId = projAreaId
             }
             syncDefaultExportProjectSelection()
         }
@@ -398,6 +402,54 @@ public struct TemplatesAndImportSheetView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
+                    // Prominent Target Area Selector right above Asana / Planner import actions
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "tray.2.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(ThingsMacPalette.areaGreen)
+                            Text(store.tr("v30_external_import_target_area"))
+                                .font(.system(size: 11.5, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+
+                        ThingsFlowLayout(horizontalSpacing: 7, verticalSpacing: 7) {
+                            targetAreaImportPill(
+                                title: store.tr("areas_none"),
+                                systemImage: "tray",
+                                isSelected: selectedAreaId == nil
+                            ) {
+                                withAnimation(.easeOut(duration: 0.14)) {
+                                    selectedAreaId = nil
+                                }
+                            }
+
+                            ForEach(store.areas) { area in
+                                targetAreaImportPill(
+                                    title: area.title,
+                                    systemImage: "tray.2.fill",
+                                    isSelected: selectedAreaId == area.id
+                                ) {
+                                    withAnimation(.easeOut(duration: 0.14)) {
+                                        selectedAreaId = area.id
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(ThingsMacPalette.subtleContainer)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
+                            )
+                    )
+
                     ThingsFlowLayout(horizontalSpacing: 10, verticalSpacing: 10) {
                         softBentoActionButton(
                             title: store.tr("v30_import_asana"),
@@ -563,6 +615,43 @@ public struct TemplatesAndImportSheetView: View {
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func targetAreaImportPill(
+        title: String,
+        systemImage: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        let tint = ThingsMacPalette.areaGreen
+        return Button(action: action) {
+            HStack(spacing: 5.5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isSelected ? tint : .secondary)
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? tint : .primary.opacity(0.88))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .padding(.horizontal, 10.5)
+            .padding(.vertical, 5.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isSelected ? tint.opacity(0.15) : ThingsMacPalette.cardSurface)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(
+                        isSelected ? tint.opacity(0.45) : Color.primary.opacity(0.10),
+                        lineWidth: isSelected ? 1.1 : 0.8
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)

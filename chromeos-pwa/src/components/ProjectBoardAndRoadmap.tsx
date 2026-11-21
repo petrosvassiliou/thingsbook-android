@@ -11,6 +11,7 @@ import {
   Clock,
   Cloud,
   Copy,
+  Diamond,
   Download,
   Edit3,
   FileImage,
@@ -98,6 +99,7 @@ export interface ProjectBoardWorkspaceProps {
   openTaskIdSet: ReadonlySet<string>;
   tasksByIdMap: ReadonlyMap<string, TaskRecord>;
   selectedTaskIds: string[];
+  isMultiSelectMode?: boolean;
   orderedVisibleTaskIds: string[];
   viewSortMode: ViewSortMode;
   lang: SupportedLang;
@@ -139,6 +141,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
   openTaskIdSet,
   tasksByIdMap,
   selectedTaskIds,
+  isMultiSelectMode = false,
   orderedVisibleTaskIds,
   viewSortMode,
   lang,
@@ -394,7 +397,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
           e.stopPropagation();
           if (e.shiftKey) {
             onSelectTask(tk.id, true, true);
-          } else if (e.ctrlKey || e.metaKey || selectedTaskIds.length > 0) {
+          } else if (e.ctrlKey || e.metaKey || isMultiSelectMode) {
             onSelectTask(tk.id, true, false);
           } else if (lastBoardPointerTypeRef.current === 'touch') {
             onOpenTaskEditor(tk.id);
@@ -429,11 +432,11 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
           >
             <button
               type="button"
-              className={`things-checkbox ${
+              className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''} ${
                 tk.scheduleState === 'SOMEDAY' && tk.status === 'OPEN'
                   ? 'someday-dashed'
                   : ''
-              } ${tk.status === 'COMPLETED' ? 'completed' : ''} ${
+              } ${tk.status === 'COMPLETED' ? 'completed checked' : ''} ${
                 tk.status === 'CANCELED' ? 'canceled' : ''
               }`}
               title={t.shortcutCancelHint}
@@ -553,6 +556,15 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
         )}
 
         <div className="board-card-badges">
+          {tk.isMilestone && (
+            <span
+              className="meta-badge milestone-badge"
+              data-testid="task-row-milestone-pill"
+              title={t.milestoneLabel}
+            >
+              <span>◆ {t.milestoneLabel}</span>
+            </span>
+          )}
           {isBlocked && (
             <span className="meta-badge blocked-badge" title={blockedLabel}>
               <Link2 size={10} />
@@ -1046,6 +1058,22 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
               <button
                 type="button"
                 className="context-menu-item"
+                data-testid="task-ctx-milestone-btn"
+                onClick={() => {
+                  const tk = cardCtxMenu.task;
+                  setCardCtxMenu(null);
+                  void localDb.upsertTask({ id: tk.id, isMilestone: !tk.isMilestone });
+                }}
+              >
+                <Diamond size={14} style={{ color: 'var(--milestone-violet)' }} />
+                <span>
+                  {cardCtxMenu.task.isMilestone ? t.removeMilestone : t.markAsMilestone}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="context-menu-item"
                 onClick={() => {
                   const tk = cardCtxMenu.task;
                   setCardCtxMenu(null);
@@ -1159,6 +1187,7 @@ export interface ProjectRoadmapWorkspaceProps {
   onToggleFullScreen?: () => void;
   layout: ProjectRoadmapLayout;
   selectedTaskIds: string[];
+  isMultiSelectMode?: boolean;
   orderedVisibleTaskIds: string[];
   lang: SupportedLang;
   isDark: boolean;
@@ -1180,6 +1209,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   onToggleFullScreen,
   layout,
   selectedTaskIds,
+  isMultiSelectMode = false,
   orderedVisibleTaskIds,
   lang,
   isDark,
@@ -1450,17 +1480,26 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
           clampedS,
           Math.min(layout.totalDays - 1, pt.endDayIndex + offsetDays)
         );
-        const barLeft = clampedS * dayWidth + 4;
-        const maxAvailW = Math.max(18, timelineWidthPx - barLeft - 4);
-        const barWidth = Math.min(
-          maxAvailW,
-          Math.max(18, (clampedE - clampedS + 1) * dayWidth - 8)
-        );
-        coords.set(pt.task.id, {
-          xLeft: barLeft,
-          xRight: barLeft + barWidth,
-          yMid: yCursor + TASK_ROW_HEIGHT_PX / 2
-        });
+        if (pt.isMilestone || pt.task.isMilestone) {
+          const diamondCenterX = clampedS * dayWidth + dayWidth / 2;
+          coords.set(pt.task.id, {
+            xLeft: Math.max(2, diamondCenterX - 10),
+            xRight: Math.min(timelineWidthPx - 2, diamondCenterX + 10),
+            yMid: yCursor + TASK_ROW_HEIGHT_PX / 2
+          });
+        } else {
+          const barLeft = clampedS * dayWidth + 4;
+          const maxAvailW = Math.max(18, timelineWidthPx - barLeft - 4);
+          const barWidth = Math.min(
+            maxAvailW,
+            Math.max(18, (clampedE - clampedS + 1) * dayWidth - 8)
+          );
+          coords.set(pt.task.id, {
+            xLeft: barLeft,
+            xRight: barLeft + barWidth,
+            yMid: yCursor + TASK_ROW_HEIGHT_PX / 2
+          });
+        }
         yCursor += TASK_ROW_HEIGHT_PX;
       }
     }
@@ -2311,6 +2350,17 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                     const dlDiff =
                       tk.deadline != null ? daysBetweenToday(tk.deadline) : null;
                     const dlUrgent = dlDiff != null && dlDiff <= 2 && tk.status === 'OPEN';
+                    const isMilestoneTask = Boolean(pt.isMilestone || tk.isMilestone);
+                    const isMilestoneOverdue =
+                      tk.status === 'OPEN' &&
+                      ((dlDiff != null && dlDiff < 0) ||
+                        (tk.deadline == null &&
+                          tk.whenDate != null &&
+                          daysBetweenToday(tk.whenDate) < 0));
+                    const milestoneLeft = Math.max(
+                      2,
+                      clampedTaskS * dayWidth + dayWidth / 2 - 8
+                    );
                     const durBadge =
                       tk.durationMinutes != null && tk.durationMinutes > 0
                         ? formatStandaloneDuration(tk.durationMinutes)
@@ -2356,7 +2406,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             if (isFullScreen) return;
                             if (e.shiftKey) {
                               onSelectTask(tk.id, true, true);
-                            } else if (e.ctrlKey || e.metaKey || selectedTaskIds.length > 0) {
+                            } else if (e.ctrlKey || e.metaKey || isMultiSelectMode) {
                               onSelectTask(tk.id, true, false);
                             } else if (lastRoadmapPointerTypeRef.current === 'touch') {
                               onOpenTaskEditor(tk.id);
@@ -2373,8 +2423,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                           <button
                             type="button"
                             className={`things-checkbox ${
-                              tk.status === 'COMPLETED' ? 'completed' : ''
-                            }`}
+                              isMilestoneTask ? 'milestone' : ''
+                            } ${tk.status === 'COMPLETED' ? 'completed checked' : ''}`}
                             disabled={isFullScreen}
                             aria-disabled={isFullScreen || undefined}
                             style={
@@ -2382,6 +2432,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 ? { pointerEvents: 'none', opacity: 0.55, cursor: 'default' }
                                 : undefined
                             }
+                            title={isFullScreen ? undefined : t.actionComplete}
+                            aria-label={t.actionComplete}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (isFullScreen) return;
@@ -2407,8 +2459,15 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             className={`roadmap-task-label ${
                               tk.status === 'COMPLETED' ? 'done' : ''
                             }`}
+                            style={
+                              isMilestoneTask && tk.status !== 'COMPLETED'
+                                ? { color: 'var(--milestone-violet)', fontWeight: 620 }
+                                : undefined
+                            }
                           >
-                            {tk.title || t.placeholderTodoTitle}
+                            {isMilestoneTask
+                              ? `◆ ${tk.title || t.placeholderTodoTitle}`
+                              : tk.title || t.placeholderTodoTitle}
                           </span>
 
                           {!isFullScreen && (
@@ -2417,6 +2476,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 type="button"
                                 className="roadmap-step-btn"
                                 title={t.roadmapShiftEarlier}
+                                aria-label={t.roadmapShiftEarlier}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   stepTaskByDays(tk, -1);
@@ -2429,6 +2489,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 type="button"
                                 className="roadmap-step-btn"
                                 title={t.roadmapShiftLater}
+                                aria-label={t.roadmapShiftLater}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   stepTaskByDays(tk, 1);
@@ -2461,8 +2522,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                         >
                           <div
                             className={`roadmap-task-bar ${
-                              pt.isActivelyBlocked ? 'blocked' : ''
-                            } ${
+                              isMilestoneTask ? 'milestone' : ''
+                            } ${pt.isActivelyBlocked ? 'blocked' : ''} ${
                               tk.scheduleState === 'TODAY' ||
                               tk.scheduleState === 'THIS_EVENING'
                                 ? 'today-active'
@@ -2478,11 +2539,19 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 : ''
                             } ${taskDragDelta !== 0 ? 'dragging' : ''}`}
                             data-testid={`roadmap-task-bar-${tk.id}`}
-                            style={{
-                              left: barLeft,
-                              width: barWidth,
-                              cursor: isFullScreen ? 'default' : undefined
-                            }}
+                            data-milestone={isMilestoneTask ? 'true' : undefined}
+                            style={
+                              isMilestoneTask
+                                ? {
+                                    left: milestoneLeft,
+                                    cursor: isFullScreen ? 'default' : undefined
+                                  }
+                                : {
+                                    left: barLeft,
+                                    width: barWidth,
+                                    cursor: isFullScreen ? 'default' : undefined
+                                  }
+                            }
                             onPointerDown={(e) => {
                               if (isFullScreen) return;
                               if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -2511,7 +2580,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                               }
                               if (e.shiftKey) {
                                 onSelectTask(tk.id, true, true);
-                              } else if (e.ctrlKey || e.metaKey || selectedTaskIds.length > 0) {
+                              } else if (e.ctrlKey || e.metaKey || isMultiSelectMode) {
                                 onSelectTask(tk.id, true, false);
                               } else if (lastRoadmapPointerTypeRef.current === 'touch') {
                                 onOpenTaskEditor(tk.id);
@@ -2525,43 +2594,103 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                               onOpenTaskEditor(tk.id);
                             }}
                           >
-                            {tk.scheduleState === 'TODAY' && (
-                              <Sun
-                                size={11}
-                                style={{ color: 'var(--today-star)', flexShrink: 0 }}
-                              />
-                            )}
-                            {pt.isActivelyBlocked && (
-                              <Link2 size={10.5} style={{ flexShrink: 0 }} />
-                            )}
-                            {tk.effortLevel === 'QUICK_WIN' && <span>⚡</span>}
-                            {tk.effortLevel === 'DEEP_FOCUS' && <span>🧠</span>}
+                            {isMilestoneTask ? (
+                              <>
+                                <span
+                                  className={`roadmap-milestone-diamond ${
+                                    isMilestoneOverdue ? 'overdue' : ''
+                                  } ${tk.status === 'COMPLETED' ? 'completed' : ''}`}
+                                  aria-hidden="true"
+                                />
+                                <span
+                                  className={`roadmap-milestone-label ${
+                                    isMilestoneOverdue ? 'overdue' : ''
+                                  } ${tk.status === 'COMPLETED' ? 'done' : ''}`}
+                                >
+                                  <span>◆ {tk.title || t.placeholderTodoTitle}</span>
+                                  {pt.isActivelyBlocked && (
+                                    <Link2 size={10.5} style={{ flexShrink: 0 }} />
+                                  )}
+                                </span>
+                                {!isFullScreen && (
+                                  <span className="roadmap-bar-step-controls">
+                                    <button
+                                      type="button"
+                                      className="roadmap-bar-step-btn"
+                                      title={t.roadmapShiftEarlier}
+                                      aria-label={t.roadmapShiftEarlier}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        stepTaskByDays(tk, -1);
+                                      }}
+                                      onDoubleClick={(e) => e.stopPropagation()}
+                                    >
+                                      <ChevronLeft size={11} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="roadmap-bar-step-btn"
+                                      title={t.roadmapShiftLater}
+                                      aria-label={t.roadmapShiftLater}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        stepTaskByDays(tk, 1);
+                                      }}
+                                      onDoubleClick={(e) => e.stopPropagation()}
+                                    >
+                                      <ChevronRight size={11} />
+                                    </button>
+                                  </span>
+                                )}
+                                {taskDragDelta !== 0 && (
+                                  <span className="roadmap-drag-delta-pill">
+                                    {taskDragDelta > 0
+                                      ? `+${taskDragDelta}d`
+                                      : `${taskDragDelta}d`}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                {tk.scheduleState === 'TODAY' && (
+                                  <Sun
+                                    size={11}
+                                    style={{ color: 'var(--today-star)', flexShrink: 0 }}
+                                  />
+                                )}
+                                {pt.isActivelyBlocked && (
+                                  <Link2 size={10.5} style={{ flexShrink: 0 }} />
+                                )}
+                                {tk.effortLevel === 'QUICK_WIN' && <span>⚡</span>}
+                                {tk.effortLevel === 'DEEP_FOCUS' && <span>🧠</span>}
 
-                            <span className="roadmap-task-bar-title">
-                              {tk.title || t.placeholderTodoTitle}
-                            </span>
+                                <span className="roadmap-task-bar-title">
+                                  {tk.title || t.placeholderTodoTitle}
+                                </span>
 
-                            {durBadge && barWidth >= 86 && (
-                              <span className="roadmap-task-bar-pill">{durBadge}</span>
-                            )}
-                            {tk.deadline != null && barWidth >= 70 && (
-                              <Flag
-                                size={10}
-                                style={{
-                                  color: dlUrgent
-                                    ? 'var(--deadline-red)'
-                                    : 'var(--things-blue)',
-                                  flexShrink: 0
-                                }}
-                              />
-                            )}
+                                {durBadge && barWidth >= 86 && (
+                                  <span className="roadmap-task-bar-pill">{durBadge}</span>
+                                )}
+                                {tk.deadline != null && barWidth >= 70 && (
+                                  <Flag
+                                    size={10}
+                                    style={{
+                                      color: dlUrgent
+                                        ? 'var(--deadline-red)'
+                                        : 'var(--things-blue)',
+                                      flexShrink: 0
+                                    }}
+                                  />
+                                )}
 
-                            {taskDragDelta !== 0 && (
-                              <span className="roadmap-drag-delta-pill">
-                                {taskDragDelta > 0
-                                  ? `+${taskDragDelta}d`
-                                  : `${taskDragDelta}d`}
-                              </span>
+                                {taskDragDelta !== 0 && (
+                                  <span className="roadmap-drag-delta-pill">
+                                    {taskDragDelta > 0
+                                      ? `+${taskDragDelta}d`
+                                      : `${taskDragDelta}d`}
+                                  </span>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -2654,7 +2783,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                     <div className="roadmap-unscheduled-item-left">
                       <button
                         type="button"
-                        className="things-checkbox"
+                        className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''}`}
                         aria-label={t.actionComplete}
                         title={t.actionComplete}
                         onClick={() =>
@@ -2668,6 +2797,14 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       >
                         {tk.title || t.placeholderTodoTitle}
                       </button>
+                      {tk.isMilestone && (
+                        <span
+                          className="meta-badge milestone-badge"
+                          data-testid="task-row-milestone-pill"
+                        >
+                          ◆ {t.milestoneLabel}
+                        </span>
+                      )}
                     </div>
 
                     <div className="roadmap-unscheduled-actions">

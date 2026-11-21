@@ -73,6 +73,7 @@ class V3Milestone3RoadmapTest {
         deadline: Long? = null,
         durationMinutes: Int? = null,
         blockedByTaskIds: List<String> = emptyList(),
+        isMilestone: Boolean = false,
         sortOrder: Double = 1.0
     ) = TaskItem(
         id = id,
@@ -91,6 +92,7 @@ class V3Milestone3RoadmapTest {
         recurrenceRule = null,
         sortOrder = sortOrder,
         blockedByTaskIds = blockedByTaskIds,
+        isMilestone = isMilestone,
         createdAt = 1000L,
         updatedAt = 1000L
     )
@@ -603,4 +605,70 @@ class V3Milestone3RoadmapTest {
             }
         }
     }
+
+    @Test
+    fun `Milestone tasks anchor as 1-day point-in-time checkpoints on deadline else whenDate`() {
+        val today = LocalDate.of(2026, 11, 21)
+        val todayEpoch = today.toEpochDay()
+
+        val milestoneDeadlineOnly = makeTask(
+            id = "ms-deadline",
+            title = "Code Freeze",
+            deadline = dayMillis(today.plusDays(7)),
+            isMilestone = true
+        )
+        val milestoneWhenOnly = makeTask(
+            id = "ms-when",
+            title = "Beta Kickoff",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = dayMillis(today.plusDays(3)),
+            isMilestone = true
+        )
+        val milestoneBothDates = makeTask(
+            id = "ms-both",
+            title = "Production Launch",
+            scheduleState = ScheduleState.UPCOMING,
+            whenDate = dayMillis(today.plusDays(2)),
+            deadline = dayMillis(today.plusDays(12)),
+            durationMinutes = 960,
+            isMilestone = true
+        )
+        val milestoneUnscheduled = makeTask(
+            id = "ms-unsched",
+            title = "TBD Gate",
+            isMilestone = true
+        )
+
+        val layout = ProjectRoadmapEngine.buildRoadmapLayout(
+            project = sampleProject,
+            headings = emptyList(),
+            tasks = listOf(milestoneDeadlineOnly, milestoneWhenOnly, milestoneBothDates, milestoneUnscheduled),
+            todayEpochDay = todayEpoch,
+            zoneId = berlinZone
+        )
+
+        val barsById = layout.taskBars.associateBy { it.taskId }
+        assertEquals(setOf("ms-deadline", "ms-when", "ms-both"), barsById.keys)
+        assertEquals(listOf("ms-unsched"), layout.unscheduledTasks.map { it.id })
+
+        val dlBar = barsById.getValue("ms-deadline")
+        assertTrue(dlBar.isMilestone)
+        assertEquals(todayEpoch + 7L, dlBar.startEpochDay)
+        assertEquals(todayEpoch + 7L, dlBar.endEpochDay)
+        assertEquals(1, dlBar.spanDays)
+
+        val whenBar = barsById.getValue("ms-when")
+        assertTrue(whenBar.isMilestone)
+        assertEquals(todayEpoch + 3L, whenBar.startEpochDay)
+        assertEquals(todayEpoch + 3L, whenBar.endEpochDay)
+        assertEquals(1, whenBar.spanDays)
+
+        // When both whenDate and deadline exist on a Milestone, anchors as 1-day checkpoint on deadline
+        val bothBar = barsById.getValue("ms-both")
+        assertTrue(bothBar.isMilestone)
+        assertEquals(todayEpoch + 12L, bothBar.startEpochDay)
+        assertEquals(todayEpoch + 12L, bothBar.endEpochDay)
+        assertEquals(1, bothBar.spanDays)
+    }
 }
+

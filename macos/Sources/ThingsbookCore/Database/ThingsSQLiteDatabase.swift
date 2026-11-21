@@ -73,6 +73,7 @@ public struct RemoteDeltaBatch: Sendable {
     public var taskTagIdsByTaskId: [String: [String]]
     public var taskOmittedTimeblockTaskIds: Set<String>
     public var taskOmittedPinTaskIds: Set<String>
+    public var taskOmittedMilestoneTaskIds: Set<String>
     public var taskOmittedV30TaskIds: Set<String>
     public var checklistItems: [ChecklistItem]
     public var attachments: [RemoteAttachmentDelta]
@@ -90,6 +91,7 @@ public struct RemoteDeltaBatch: Sendable {
         taskTagIdsByTaskId: [String: [String]] = [:],
         taskOmittedTimeblockTaskIds: Set<String> = [],
         taskOmittedPinTaskIds: Set<String> = [],
+        taskOmittedMilestoneTaskIds: Set<String> = [],
         taskOmittedV30TaskIds: Set<String> = [],
         checklistItems: [ChecklistItem] = [],
         attachments: [RemoteAttachmentDelta] = [],
@@ -106,6 +108,7 @@ public struct RemoteDeltaBatch: Sendable {
         self.taskTagIdsByTaskId = taskTagIdsByTaskId
         self.taskOmittedTimeblockTaskIds = taskOmittedTimeblockTaskIds
         self.taskOmittedPinTaskIds = taskOmittedPinTaskIds
+        self.taskOmittedMilestoneTaskIds = taskOmittedMilestoneTaskIds
         self.taskOmittedV30TaskIds = taskOmittedV30TaskIds
         self.checklistItems = checklistItems
         self.attachments = attachments
@@ -317,6 +320,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             recurrence_rule TEXT,
             sort_order REAL NOT NULL DEFAULT 0.0,
             is_pinned INTEGER NOT NULL DEFAULT 0,
+            is_milestone INTEGER NOT NULL DEFAULT 0,
             effort_level TEXT DEFAULT NULL,
             blocked_by_json TEXT NOT NULL DEFAULT '[]',
             workspace_id TEXT DEFAULT NULL,
@@ -429,6 +433,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
         // Safe non-destructive v2.5.0 & v3.0.0 column migrations
         try? execLocked("ALTER TABLE tasks ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;")
+        try? execLocked("ALTER TABLE tasks ADD COLUMN is_milestone INTEGER NOT NULL DEFAULT 0;")
         try? execLocked("ALTER TABLE tasks ADD COLUMN effort_level TEXT DEFAULT NULL;")
         try? execLocked("ALTER TABLE tasks ADD COLUMN blocked_by_json TEXT NOT NULL DEFAULT '[]';")
         try? execLocked("ALTER TABLE tasks ADD COLUMN workspace_id TEXT DEFAULT NULL;")
@@ -709,7 +714,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         todayDaytime.append(t)
                     }
                     if (t.scheduleState == .upcoming && (t.whenDate == nil || t.whenDate! >= startOfTomorrow))
-                        || (t.whenDate != nil && t.whenDate! >= startOfTomorrow) {
+                        || (t.whenDate != nil && t.whenDate! >= startOfTomorrow)
+                        || (t.isMilestone && t.whenDate == nil && t.deadline != nil && t.deadline! >= startOfTomorrow) {
                         upcoming.append(t)
                     }
                     if t.scheduleState == .anytime || t.scheduleState == .today || t.scheduleState == .thisEvening {
@@ -732,8 +738,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             }
             thisEvening = TaskViewSorter.sort(thisEvening, mode: "manual")
             upcoming.sort {
-                let w0 = $0.whenDate ?? Int64.max
-                let w1 = $1.whenDate ?? Int64.max
+                let w0 = $0.whenDate ?? ($0.isMilestone ? $0.deadline : nil) ?? Int64.max
+                let w1 = $1.whenDate ?? ($1.isMilestone ? $1.deadline : nil) ?? Int64.max
                 if w0 != w1 { return w0 < w1 }
                 if $0.isPinned != $1.isPinned { return $0.isPinned && !$1.isPinned }
                 return $0.sortOrder < $1.sortOrder
@@ -801,7 +807,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
                                t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
                                t.scheduled_start_minutes, t.duration_minutes,
-                               t.is_pinned, t.effort_level, t.blocked_by_json, t.workspace_id, t.assignee_id
+                               t.is_pinned, t.effort_level, t.blocked_by_json, t.workspace_id, t.assignee_id, t.is_milestone
                         FROM tasks t
                         JOIN tasks_fts fts ON t.rowid = fts.rowid
                         WHERE tasks_fts MATCH ? AND t.is_deleted = 0\(statusClause)
@@ -814,7 +820,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                t.reminder_time, t.completed_at, t.project_id, t.heading_id, t.area_id,
                                t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
                                t.scheduled_start_minutes, t.duration_minutes,
-                               t.is_pinned, t.effort_level, t.blocked_by_json, t.workspace_id, t.assignee_id
+                               t.is_pinned, t.effort_level, t.blocked_by_json, t.workspace_id, t.assignee_id, t.is_milestone
                         FROM tasks t
                         WHERE t.is_deleted = 0\(statusClause)
                         ORDER BY CASE WHEN t.status = 'OPEN' THEN 0 ELSE 1 END ASC, t.updated_at DESC
@@ -1073,7 +1079,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         recurrenceRule: RecurrenceRule? = nil,
         tagIds: [String] = [],
         checklistTitles: [String] = [],
-        sortOrder: Double? = nil
+        sortOrder: Double? = nil,
+        isMilestone: Bool = false
     ) throws -> TaskItem {
         let created = try queue.sync { () -> TaskItem in
             let now = nowMillis()
@@ -1123,6 +1130,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     areaId: resolvedAreaId,
                     recurrenceRule: recurrenceRule,
                     sortOrder: resolvedSortOrder,
+                    isMilestone: isMilestone,
                     checklistItems: items,
                     tags: tags,
                     createdAt: now,
@@ -1208,6 +1216,41 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     sqlite3_reset(stmt)
                     sqlite3_clear_bindings(stmt)
                     bindBool(stmt, 1, isPinned)
+                    bindInt64(stmt, 2, now)
+                    bindInt64(stmt, 3, now)
+                    bindText(stmt, 4, tid)
+                    if sqlite3_step(stmt) == SQLITE_DONE, sqlite3_changes(db) > 0 {
+                        changed = true
+                    }
+                }
+            }
+            return changed
+        }
+        if didMutate { notifyMutation() }
+    }
+
+    public func setTaskMilestone(taskId: String, isMilestone: Bool) throws {
+        try setTasksMilestone([taskId], isMilestone: isMilestone)
+    }
+
+    public func setTasksMilestone(_ taskIds: [String], isMilestone: Bool) throws {
+        guard !taskIds.isEmpty else { return }
+        let didMutate: Bool = try queue.sync {
+            let now = nowMillis()
+            var changed = false
+            try inTransactionLocked {
+                let stmt = try prepareLocked("""
+                    UPDATE tasks
+                    SET is_milestone = ?,
+                        updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END,
+                        is_dirty = 1
+                    WHERE id = ? AND is_deleted = 0;
+                """)
+                defer { sqlite3_finalize(stmt) }
+                for tid in Set(taskIds) {
+                    sqlite3_reset(stmt)
+                    sqlite3_clear_bindings(stmt)
+                    bindBool(stmt, 1, isMilestone)
                     bindInt64(stmt, 2, now)
                     bindInt64(stmt, 3, now)
                     bindText(stmt, 4, tid)
@@ -1490,6 +1533,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             recurrenceRule: rule,
             sortOrder: maxOrder + 1000.0,
             isPinned: false,
+            isMilestone: completedTask.isMilestone,
             effortLevel: completedTask.effortLevel,
             blockedByTaskIds: [],
             workspaceId: completedTask.workspaceId,
@@ -1729,7 +1773,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(ttStmt, 1, taskId)
         _ = sqlite3_step(ttStmt)
 
-        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, is_pinned = 0, effort_level = NULL, blocked_by_json = '[]', workspace_id = NULL, assignee_id = NULL, title = '', notes = '', recurrence_rule = NULL, tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, updated_at = MAX(updated_at + 1, ?) WHERE id = ?;")
+        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, is_pinned = 0, is_milestone = 0, effort_level = NULL, blocked_by_json = '[]', workspace_id = NULL, assignee_id = NULL, title = '', notes = '', recurrence_rule = NULL, tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, updated_at = MAX(updated_at + 1, ?) WHERE id = ?;")
         defer { sqlite3_finalize(stmt) }
         bindInt64(stmt, 1, now)
         bindText(stmt, 2, taskId)
@@ -1834,6 +1878,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             recurrenceRule: source.recurrenceRule,
             sortOrder: source.sortOrder + sortOrderOffset,
             isPinned: source.isPinned,
+            isMilestone: source.isMilestone,
             effortLevel: source.effortLevel,
             blockedByTaskIds: source.blockedByTaskIds,
             workspaceId: source.workspaceId,
@@ -2997,6 +3042,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         recurrenceRule: t.recurrenceRule,
                         sortOrder: t.sortOrder,
                         isPinned: t.isPinned,
+                        isMilestone: t.isMilestone,
                         effortLevel: t.effortLevel,
                         blockedByTaskIds: remappedBlockers,
                         workspaceId: t.workspaceId ?? newProject.workspaceId,
@@ -3122,7 +3168,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     notes: t.notes,
                     checklistItems: t.checklistItems.sorted { $0.sortOrder < $1.sortOrder }.map(\.title),
                     scheduledStartMinutes: t.scheduledStartMinutes,
-                    durationMinutes: t.durationMinutes
+                    durationMinutes: t.durationMinutes,
+                    isMilestone: t.isMilestone
                 )
             }
 
@@ -3171,6 +3218,19 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
         notifyMutation()
         return created
+    }
+
+    @discardableResult
+    public func createProjectFromTemplate(
+        _ template: ProjectTemplate,
+        titleOverride: String? = nil,
+        areaIdOverride: String? = nil
+    ) throws -> Project {
+        try instantiateProjectFromTemplate(
+            template,
+            titleOverride: titleOverride,
+            areaIdOverride: areaIdOverride
+        )
     }
 
     @discardableResult
@@ -3284,6 +3344,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     headingId: headingId,
                     areaId: areaId,
                     sortOrder: nextTaskOrder,
+                    isMilestone: spec.isMilestone,
                     checklistItems: checklists,
                     createdAt: now,
                     updatedAt: now
@@ -3483,7 +3544,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 let spec = TemplateTaskSpec(
                     title: meta.cleanTitle,
                     scheduledStartMinutes: meta.scheduledStartMinutes,
-                    durationMinutes: meta.durationMinutes
+                    durationMinutes: meta.durationMinutes,
+                    isMilestone: meta.isMilestone
                 )
                 if let hIdx = currentHeadingIndex {
                     headings[hIdx].tasks.append(spec)
@@ -3504,7 +3566,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 let spec = TemplateTaskSpec(
                     title: meta.cleanTitle,
                     scheduledStartMinutes: meta.scheduledStartMinutes,
-                    durationMinutes: meta.durationMinutes
+                    durationMinutes: meta.durationMinutes,
+                    isMilestone: meta.isMilestone
                 )
                 if let hIdx = currentHeadingIndex {
                     headings[hIdx].tasks.append(spec)
@@ -3521,10 +3584,26 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     private static func extractOutlineTaskInlineMetadata(
         _ rawTitle: String
-    ) -> (cleanTitle: String, scheduledStartMinutes: Int?, durationMinutes: Int?) {
+    ) -> (cleanTitle: String, scheduledStartMinutes: Int?, durationMinutes: Int?, isMilestone: Bool) {
         var working = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         var startMinutes: Int? = nil
         var durationMinutes: Int? = nil
+        var isMilestone = false
+
+        // 0. Inline @milestone token (case-insensitive anywhere as whitespace-delimited token)
+        if let milestoneRegex = try? NSRegularExpression(pattern: #"(?:^|\s)@milestone(?=\s|$)"#, options: [.caseInsensitive]) {
+            while true {
+                let nsRange = NSRange(working.startIndex..<working.endIndex, in: working)
+                guard let match = milestoneRegex.firstMatch(in: working, range: nsRange),
+                      let fullRange = Range(match.range(at: 0), in: working) else {
+                    break
+                }
+                isMilestone = true
+                let prefix = String(working[..<fullRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let suffix = String(working[fullRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                working = [prefix, suffix].filter { !$0.isEmpty }.joined(separator: " ")
+            }
+        }
 
         // 1. Trailing @<duration> token (e.g. "@45m", "@1d", "@2.5d", "@1h30m"), requiring a unit letter so "@123" is untouched
         if let atDurRegex = try? NSRegularExpression(pattern: #"\s+@([^\s]+)$"#) {
@@ -3593,7 +3672,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
 
         let clean = working.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (clean.isEmpty ? rawTitle.trimmingCharacters(in: .whitespacesAndNewlines) : clean, startMinutes, durationMinutes)
+        return (clean.isEmpty ? rawTitle.trimmingCharacters(in: .whitespacesAndNewlines) : clean, startMinutes, durationMinutes, isMilestone)
     }
 
     @discardableResult
@@ -4346,6 +4425,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         areaId: validatedAreaId,
                         sortOrder: nextTaskOrder,
                         isPinned: spec.isPinned,
+                        isMilestone: spec.isMilestone,
                         effortLevel: spec.effortLevel?.rawValue,
                         workspaceId: normalizedTaskWorkspace,
                         assigneeId: normalizedAssignee,
@@ -4522,6 +4602,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     recurrenceRuleJson: encodeRecurrence(t.recurrenceRule),
                     sortOrder: t.sortOrder,
                     isPinned: t.isPinned,
+                    isMilestone: t.isMilestone,
                     effortLevel: t.effortLevel,
                     blockedByJson: encodeStringArray(t.blockedByTaskIds),
                     workspaceId: t.workspaceId,
@@ -4774,6 +4855,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         recurrenceRule: decodeRecurrence(dto.recurrenceRuleJson),
                         sortOrder: dto.sortOrder,
                         isPinned: dto.isPinned,
+                        isMilestone: dto.isMilestone,
                         effortLevel: TaskEffortLevel.normalized(dto.effortLevel)?.rawValue,
                         blockedByTaskIds: restoredBlockers,
                         workspaceId: dto.workspaceId,
@@ -5175,6 +5257,11 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                !toSave.isDeleted,
                                deltas.taskOmittedPinTaskIds.contains(remote.id) {
                                 toSave.isPinned = existingLocal.isPinned
+                            }
+                            if let existingLocal,
+                               !toSave.isDeleted,
+                               deltas.taskOmittedMilestoneTaskIds.contains(remote.id) {
+                                toSave.isMilestone = existingLocal.isMilestone
                             }
                             if let existingLocal,
                                !toSave.isDeleted,
@@ -6192,6 +6279,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let uniqueTags = task.isDeleted ? [] : Array(Set(tagIds))
         let isPurgedTombstone = task.isDeleted && task.title.isEmpty && task.notes.isEmpty
         let effectivePinned = !task.isDeleted && task.isPinned
+        let effectiveMilestone = !task.isDeleted && task.isMilestone
         let effectiveEffort = task.isDeleted ? nil : TaskEffortLevel.normalized(task.effortLevel)?.rawValue
         let effectiveBlockers: [String] = {
             guard !task.isDeleted else { return [] }
@@ -6209,9 +6297,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
                 scheduled_start_minutes, duration_minutes,
                 completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
-                is_pinned, effort_level, blocked_by_json, workspace_id, assignee_id,
+                is_pinned, is_milestone, effort_level, blocked_by_json, workspace_id, assignee_id,
                 tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 notes = excluded.notes,
@@ -6229,6 +6317,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 recurrence_rule = excluded.recurrence_rule,
                 sort_order = excluded.sort_order,
                 is_pinned = excluded.is_pinned,
+                is_milestone = excluded.is_milestone,
                 effort_level = excluded.effort_level,
                 blocked_by_json = excluded.blocked_by_json,
                 workspace_id = excluded.workspace_id,
@@ -6261,16 +6350,17 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(stmt, 15, encodeRecurrence(task.recurrenceRule))
         sqlite3_bind_double(stmt, 16, task.sortOrder)
         bindBool(stmt, 17, effectivePinned)
-        bindText(stmt, 18, effectiveEffort)
-        bindText(stmt, 19, encodeStringArray(effectiveBlockers))
-        bindText(stmt, 20, task.isDeleted ? nil : task.workspaceId)
-        bindText(stmt, 21, task.isDeleted ? nil : task.assigneeId)
-        bindText(stmt, 22, encodeStringArray(uniqueTags))
-        bindInt64(stmt, 23, task.createdAt)
-        bindInt64(stmt, 24, task.updatedAt)
-        bindBool(stmt, 25, task.isDeleted)
-        bindBool(stmt, 26, isPurgedTombstone)
-        bindBool(stmt, 27, isDirty)
+        bindBool(stmt, 18, effectiveMilestone)
+        bindText(stmt, 19, effectiveEffort)
+        bindText(stmt, 20, encodeStringArray(effectiveBlockers))
+        bindText(stmt, 21, task.isDeleted ? nil : task.workspaceId)
+        bindText(stmt, 22, task.isDeleted ? nil : task.assigneeId)
+        bindText(stmt, 23, encodeStringArray(uniqueTags))
+        bindInt64(stmt, 24, task.createdAt)
+        bindInt64(stmt, 25, task.updatedAt)
+        bindBool(stmt, 26, task.isDeleted)
+        bindBool(stmt, 27, isPurgedTombstone)
+        bindBool(stmt, 28, isDirty)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -6712,7 +6802,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                    completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
                    tag_ids_json, created_at, updated_at, is_deleted,
                    scheduled_start_minutes, duration_minutes,
-                   is_pinned, effort_level, blocked_by_json, workspace_id, assignee_id
+                   is_pinned, effort_level, blocked_by_json, workspace_id, assignee_id, is_milestone
             FROM tasks WHERE \(whereClause) ORDER BY \(orderBy);
         """)
         defer { sqlite3_finalize(stmt) }
@@ -6749,6 +6839,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let blockedByTaskIds = isDeleted ? [] : decodeStringArray(colString(stmt, 22)).filter { $0 != id && !$0.isEmpty }
         let workspaceId = isDeleted ? nil : colString(stmt, 23)
         let assigneeId = isDeleted ? nil : colString(stmt, 24)
+        let isMilestone = !isDeleted && colBool(stmt, 25)
 
         return TaskItem(
             id: id,
@@ -6768,6 +6859,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             recurrenceRule: decodeRecurrence(colString(stmt, 12)),
             sortOrder: sqlite3_column_double(stmt, 13),
             isPinned: isPinned,
+            isMilestone: isMilestone,
             effortLevel: effortLevel,
             blockedByTaskIds: blockedByTaskIds,
             workspaceId: workspaceId,

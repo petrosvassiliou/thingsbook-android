@@ -501,7 +501,7 @@ public struct SmartViewCanvas: View {
         } else {
             let todayEpochDay = DateEpochConverter.epochDay(for: Date())
             let groupedTasks = Dictionary(grouping: filtered) { task -> Int in
-                guard let w = task.whenDate else { return Int.max }
+                guard let w = task.whenDate ?? (task.isMilestone ? task.deadline : nil) else { return Int.max }
                 return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
             }
             let groupedMilestones = Dictionary(grouping: milestones, by: \.epochDay)
@@ -511,7 +511,9 @@ public struct SmartViewCanvas: View {
                 ForEach(sortedDays, id: \.self) { epochDay in
                     let dayTasks = TaskViewSorter.sort(groupedTasks[epochDay] ?? [], mode: store.preferences.viewSortMode)
                     let dayMilestones = groupedMilestones[epochDay] ?? []
-                    let sampleMillis = dayTasks.first?.whenDate ?? dayMilestones.first?.heading.endDate
+                    let sampleMillis = dayTasks.first?.whenDate
+                        ?? dayTasks.first?.deadline
+                        ?? dayMilestones.first?.heading.endDate
                     VStack(alignment: .leading, spacing: 8) {
                         upcomingDayHeader(sampleMillis: sampleMillis)
 
@@ -2356,6 +2358,14 @@ private struct TodayDailyTimelineView: View {
                         store.toggleTaskCompletion(task)
                     }
                     Button {
+                        store.setTasksMilestone([task.id], isMilestone: !task.isMilestone)
+                    } label: {
+                        Label(
+                            store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                            systemImage: task.isMilestone ? "diamond.fill" : "diamond"
+                        )
+                    }
+                    Button {
                         store.copyTaskToPasteboard(task)
                     } label: {
                         Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
@@ -2389,7 +2399,7 @@ private struct TodayDailyTimelineView: View {
             if isFullScreen {
                 Text(timeLabelText)
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                    .foregroundStyle(task.isMilestone ? ThingsMacPalette.milestoneViolet : ThingsMacPalette.anytimeTeal)
                     .frame(width: 98, alignment: .leading)
             } else {
                 Button {
@@ -2397,7 +2407,7 @@ private struct TodayDailyTimelineView: View {
                 } label: {
                     Text(timeLabelText)
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                        .foregroundStyle(task.isMilestone ? ThingsMacPalette.milestoneViolet : ThingsMacPalette.anytimeTeal)
                         .frame(width: 98, alignment: .leading)
                 }
                 .buttonStyle(.plain)
@@ -2415,6 +2425,7 @@ private struct TodayDailyTimelineView: View {
             ThingsCheckboxButton(
                 status: task.status,
                 isSomeday: false,
+                isMilestone: task.isMilestone,
                 helpText: isFullScreen ? "" : store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     guard !store.isTimelineFullScreen else { return }
@@ -2431,8 +2442,12 @@ private struct TodayDailyTimelineView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 7) {
                     Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 14, weight: task.isMilestone ? .semibold : .medium))
                         .lineLimit(1)
+
+                    if task.isMilestone {
+                        milestoneTimelinePill
+                    }
 
                     Text(TaskItem.formatCompactDuration(task.effectiveDurationMinutes))
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -2507,7 +2522,12 @@ private struct TodayDailyTimelineView: View {
         .thingsCardSurface(cornerRadius: 11, isSelected: !isFullScreen && store.selectedTaskIds.contains(task.id))
         .overlay(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .strokeBorder(hasConflict ? ThingsMacPalette.somedayAmber.opacity(0.65) : Color.clear, lineWidth: 1.2)
+                .strokeBorder(
+                    hasConflict
+                        ? ThingsMacPalette.somedayAmber.opacity(0.65)
+                        : (task.isMilestone ? ThingsMacPalette.milestoneViolet.opacity(0.52) : Color.clear),
+                    lineWidth: (hasConflict || task.isMilestone) ? 1.2 : 1.0
+                )
         )
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
@@ -2522,14 +2542,19 @@ private struct TodayDailyTimelineView: View {
             ThingsCheckboxButton(
                 status: task.status,
                 isSomeday: false,
+                isMilestone: task.isMilestone,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: { store.toggleTaskCompletion(task) },
                 onCancelTask: { store.cancelTask(task) }
             )
 
             Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
-                .font(.system(size: 13.5, weight: .medium))
+                .font(.system(size: 13.5, weight: task.isMilestone ? .semibold : .medium))
                 .lineLimit(1)
+
+            if task.isMilestone {
+                milestoneTimelinePill
+            }
 
             Spacer()
 
@@ -2578,6 +2603,13 @@ private struct TodayDailyTimelineView: View {
         .padding(.horizontal, 13)
         .padding(.vertical, 9)
         .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(
+                    task.isMilestone ? ThingsMacPalette.milestoneViolet.opacity(0.48) : Color.clear,
+                    lineWidth: 1.15
+                )
+        )
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .thingsInstantTaskTap(
             onSingleClick: { modifiers in
@@ -2597,6 +2629,14 @@ private struct TodayDailyTimelineView: View {
             Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
                 store.toggleTaskCompletion(task)
             }
+            Button {
+                store.setTasksMilestone([task.id], isMilestone: !task.isMilestone)
+            } label: {
+                Label(
+                    store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: task.isMilestone ? "diamond.fill" : "diamond"
+                )
+            }
             Divider()
             Button(role: .destructive) {
                 store.deleteTask(task)
@@ -2605,6 +2645,24 @@ private struct TodayDailyTimelineView: View {
             }
         }
         .thingsTaskDraggable(store: store, task: task)
+    }
+
+    private var milestoneTimelinePill: some View {
+        Text("◆ \(store.tr("v30_milestone_label"))")
+            .font(.system(size: 10.5, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(ThingsMacPalette.milestoneViolet)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ThingsMacPalette.milestoneViolet.opacity(0.14))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(ThingsMacPalette.milestoneViolet.opacity(0.30), lineWidth: 0.75)
+            )
     }
 
     private var conflictBadge: some View {

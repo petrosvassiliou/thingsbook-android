@@ -347,6 +347,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var recurrenceRule: RecurrenceRule?
     public var sortOrder: Double
     public var isPinned: Bool
+    public var isMilestone: Bool
     public var effortLevel: String?
     public var blockedByTaskIds: [String]
     public var workspaceId: String?
@@ -376,6 +377,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         recurrenceRule: RecurrenceRule? = nil,
         sortOrder: Double = 1000.0,
         isPinned: Bool = false,
+        isMilestone: Bool = false,
         effortLevel: String? = nil,
         blockedByTaskIds: [String] = [],
         workspaceId: String? = nil,
@@ -404,6 +406,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.recurrenceRule = recurrenceRule
         self.sortOrder = sortOrder
         self.isPinned = isPinned
+        self.isMilestone = isMilestone
         self.effortLevel = effortLevel
         self.blockedByTaskIds = blockedByTaskIds
         self.workspaceId = workspaceId
@@ -419,7 +422,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, title, notes, status, scheduleState, whenDate, deadline, reminderTime
         case scheduledStartMinutes, durationMinutes, completedAt, projectId, headingId, areaId
-        case recurrenceRule, sortOrder, isPinned, effortLevel, blockedByTaskIds, workspaceId, assigneeId
+        case recurrenceRule, sortOrder, isPinned, isMilestone, effortLevel, blockedByTaskIds, workspaceId, assigneeId
         case checklistItems, tags, attachments, createdAt, updatedAt, isDeleted
     }
 
@@ -442,6 +445,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.recurrenceRule = try c.decodeIfPresent(RecurrenceRule.self, forKey: .recurrenceRule)
         self.sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder) ?? 1000.0
         self.isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        self.isMilestone = try c.decodeIfPresent(Bool.self, forKey: .isMilestone) ?? false
         self.effortLevel = try c.decodeIfPresent(String.self, forKey: .effortLevel)
         self.blockedByTaskIds = try c.decodeIfPresent([String].self, forKey: .blockedByTaskIds) ?? []
         self.workspaceId = try c.decodeIfPresent(String.self, forKey: .workspaceId)
@@ -625,23 +629,26 @@ public struct TemplateTaskSpec: Codable, Equatable, Hashable, Sendable {
     public var checklistItems: [String]
     public var scheduledStartMinutes: Int?
     public var durationMinutes: Int?
+    public var isMilestone: Bool
 
     public init(
         title: String,
         notes: String = "",
         checklistItems: [String] = [],
         scheduledStartMinutes: Int? = nil,
-        durationMinutes: Int? = nil
+        durationMinutes: Int? = nil,
+        isMilestone: Bool = false
     ) {
         self.title = title
         self.notes = notes
         self.checklistItems = checklistItems
         self.scheduledStartMinutes = scheduledStartMinutes
         self.durationMinutes = durationMinutes
+        self.isMilestone = isMilestone
     }
 
     private enum CodingKeys: String, CodingKey {
-        case title, notes, checklistItems, checklist, subtasks, scheduledStartMinutes, durationMinutes
+        case title, notes, checklistItems, checklist, subtasks, scheduledStartMinutes, durationMinutes, isMilestone
     }
 
     public init(from decoder: Decoder) throws {
@@ -659,6 +666,7 @@ public struct TemplateTaskSpec: Codable, Equatable, Hashable, Sendable {
         }
         self.scheduledStartMinutes = try c.decodeIfPresent(Int.self, forKey: .scheduledStartMinutes)
         self.durationMinutes = try c.decodeIfPresent(Int.self, forKey: .durationMinutes)
+        self.isMilestone = try c.decodeIfPresent(Bool.self, forKey: .isMilestone) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -668,8 +676,13 @@ public struct TemplateTaskSpec: Codable, Equatable, Hashable, Sendable {
         try c.encode(checklistItems, forKey: .checklistItems)
         try c.encodeIfPresent(scheduledStartMinutes, forKey: .scheduledStartMinutes)
         try c.encodeIfPresent(durationMinutes, forKey: .durationMinutes)
+        if isMilestone {
+            try c.encode(true, forKey: .isMilestone)
+        }
     }
 }
+
+public typealias BlueprintTask = TemplateTaskSpec
 
 public struct TemplateHeadingSpec: Codable, Equatable, Hashable, Sendable {
     public var title: String
@@ -3412,17 +3425,20 @@ public struct RoadmapTaskBar: Identifiable, Equatable, Hashable, Sendable {
     public let headingId: String?
     public let startEpochDay: Int
     public let endEpochDay: Int
+    public let isMilestone: Bool
 
     public init(
         task: TaskItem,
         headingId: String?,
         startEpochDay: Int,
-        endEpochDay: Int
+        endEpochDay: Int,
+        isMilestone: Bool? = nil
     ) {
         self.task = task
         self.headingId = headingId
         self.startEpochDay = startEpochDay
         self.endEpochDay = max(startEpochDay, endEpochDay)
+        self.isMilestone = isMilestone ?? task.isMilestone
     }
 
     public var spanDays: Int {
@@ -3599,7 +3615,21 @@ public enum ProjectRoadmapEngine {
             }()
             let spanDays = durationSpanDays(for: task.durationMinutes)
 
-            if let whenMs = task.whenDate, let deadlineMs = task.deadline {
+            if task.isMilestone, let targetMillis = task.deadline ?? task.whenDate {
+                let targetDay = DateEpochConverter.epochDay(forMillis: targetMillis, calendar: calendar)
+                let bar = RoadmapTaskBar(
+                    task: task,
+                    headingId: resolvedHid,
+                    startEpochDay: targetDay,
+                    endEpochDay: targetDay,
+                    isMilestone: true
+                )
+                if let hid = resolvedHid {
+                    barsByHeading[hid, default: []].append(bar)
+                } else {
+                    generalBars.append(bar)
+                }
+            } else if let whenMs = task.whenDate, let deadlineMs = task.deadline {
                 let wDay = DateEpochConverter.epochDay(forMillis: whenMs, calendar: calendar)
                 let dDay = DateEpochConverter.epochDay(forMillis: deadlineMs, calendar: calendar)
                 let sDay = min(wDay, dDay)
@@ -3779,7 +3809,8 @@ public enum ProjectRoadmapEngine {
                 task: bar.task,
                 headingId: bar.headingId,
                 startEpochDay: max(windowStart, bar.startEpochDay),
-                endEpochDay: min(windowEnd, bar.endEpochDay)
+                endEpochDay: min(windowEnd, bar.endEpochDay),
+                isMilestone: bar.isMilestone
             )
         }
 

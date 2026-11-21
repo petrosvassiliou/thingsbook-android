@@ -500,12 +500,52 @@ async function main() {
     assert(perspTitle === 'Sprint Focus', `Expected Custom Perspective title "Sprint Focus", got "${perspTitle}"`);
     await auditVisibleButtonsAndHoverStability(cdp, 'Custom Perspective');
 
-    // Area Dashboard check
+    // Area Dashboard + Asana/Planner Target Area Preselector check
     await cdp.clickSelector('[data-testid="sidebar-areas-section"] .area-header-row button, [data-testid="sidebar-areas-section"] .nav-item');
     await cdp.waitForSelector('.area-view-title');
     await auditVisibleButtonsAndHoverStability(cdp, 'Area Dashboard');
-    cdp.assertZeroErrors('Area Dashboard');
-    console.log('[4/9] Verified all 7 Smart Views, Today Timeline + Full Screen, Custom Perspective & Area Dashboard');
+
+    const activeAreaTitle = await cdp.evalJs(
+      `return document.querySelector('.area-view-title')?.textContent?.trim() || '';`
+    );
+    assert(activeAreaTitle.length > 0, 'Expected non-empty active Area title');
+
+    // Open Asana & Planner Import via Sidebar Area right-click context menu and verify preselection
+    await cdp.evalJs(`
+      const areaRow = document.querySelector('[data-testid="sidebar-areas-section"] .nav-item.area-row');
+      if (!areaRow) throw new Error('Sidebar Area row not found');
+      const r = areaRow.getBoundingClientRect();
+      areaRow.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: r.left + 24,
+        clientY: r.top + 12
+      }));
+    `);
+    await cdp.waitForSelector('[data-testid="sidebar-area-ctx-import-external"]');
+    await cdp.clickSelector('[data-testid="sidebar-area-ctx-import-external"]');
+    await cdp.waitForSelector('[data-testid="external-import-area-selector"]');
+    await auditVisibleButtonsAndHoverStability(cdp, 'Asana/Planner Import Modal (Area Preselected)');
+
+    const extAreaPreselect = await cdp.evalJs(`
+      const sel = document.querySelector('[data-testid="external-import-area-selector"]');
+      const activeChip = sel?.querySelector('.chip-btn.active')?.textContent?.trim() || '';
+      const noneChip = sel?.querySelector('[data-testid="external-import-area-chip-none"]')?.textContent?.trim() || '';
+      return { activeChip, noneChip };
+    `);
+    assert(
+      extAreaPreselect.activeChip === activeAreaTitle,
+      `Expected external import selector to preselect active Area "${activeAreaTitle}", got "${extAreaPreselect.activeChip}"`
+    );
+    assert(
+      extAreaPreselect.noneChip === 'No Area',
+      `Expected unassigned Area chip to read "No Area", got "${extAreaPreselect.noneChip}"`
+    );
+    await cdp.pressKey('Escape', 'Escape', 27);
+    await sleep(140);
+
+    cdp.assertZeroErrors('Area Dashboard + Asana/Planner Area Preselection');
+    console.log('[4/9] Verified all 7 Smart Views, Today Timeline + Full Screen, Custom Perspective, Area Dashboard & Asana Area Preselector');
 
     // Templates & Sample Markdown Outline (@45m) check
     await cdp.clickSelector('[data-testid="sidebar-new-project-btn"]');
@@ -831,11 +871,54 @@ async function main() {
       `Expected Checklist + Magic Breakdown to populate subtasks, got header "${checklistHeader}"`
     );
 
+    // Toggle Milestone inside Soft Bento Task Modal + Pin
+    await cdp.clickSelector('[data-testid="task-milestone-chip"]');
+    await sleep(140);
+    const msHeaderActive = await cdp.evalJs(`
+      return document.querySelector('[data-testid="task-milestone-btn"]')?.classList.contains('milestone-active') === true;
+    `);
+    assert(msHeaderActive, 'Expected task-milestone-btn in modal header to reflect active milestone state');
+
     await cdp.clickSelector('[data-testid="task-pin-btn"]');
     await sleep(140);
     await cdp.clickSelector('[data-testid="task-modal-done-btn"]');
     await sleep(180);
     await cdp.waitForSelector('[data-testid="task-pin-indicator"]');
+    await cdp.waitForSelector('[data-testid="task-row-milestone-pill"]');
+    await assertHoverZeroShift(cdp, '.things-checkbox.milestone', 'Milestone Diamond Checkbox');
+
+    // macOS 1:1 Selection Parity E2E Check:
+    // Plain-click Task 1 -> ONLY Task 1 has .selected and .multi-select-bar is NOT shown;
+    // Plain-click Task 2 -> Task 1 deselects and ONLY Task 2 has .selected!
+    await cdp.clickSelector(`.task-row[data-task-id="${seededIds.taskShortId}"] .task-row-title`);
+    const selAfterFirstClick = await cdp.evalJs(`
+      const selected = Array.from(document.querySelectorAll('.task-row.selected')).map((el) => el.getAttribute('data-task-id'));
+      const multiBar = document.querySelector('.multi-select-bar');
+      return { selected, hasMultiBar: Boolean(multiBar) };
+    `);
+    assert(
+      selAfterFirstClick.selected.length === 1 && selAfterFirstClick.selected[0] === seededIds.taskShortId,
+      `Expected plain-click on Task 1 to select ONLY Task 1, got ${JSON.stringify(selAfterFirstClick)}`
+    );
+    assert(
+      !selAfterFirstClick.hasMultiBar,
+      'Expected .multi-select-bar NOT to appear for a single plain-clicked task'
+    );
+
+    await cdp.clickSelector(`.task-row[data-task-id="${seededIds.taskDeId}"] .task-row-title`);
+    const selAfterSecondClick = await cdp.evalJs(`
+      const selected = Array.from(document.querySelectorAll('.task-row.selected')).map((el) => el.getAttribute('data-task-id'));
+      const multiBar = document.querySelector('.multi-select-bar');
+      return { selected, hasMultiBar: Boolean(multiBar) };
+    `);
+    assert(
+      selAfterSecondClick.selected.length === 1 && selAfterSecondClick.selected[0] === seededIds.taskDeId,
+      `Expected plain-click on Task 2 to deselect Task 1 and select ONLY Task 2, got ${JSON.stringify(selAfterSecondClick)}`
+    );
+    assert(
+      !selAfterSecondClick.hasMultiBar,
+      'Expected .multi-select-bar NOT to appear after plain-clicking Task 2'
+    );
 
     // Quick Find via Ctrl+K (modifiers: 2 = Ctrl)
     await cdp.pressKey('k', 'KeyK', 75, 2);
@@ -847,11 +930,104 @@ async function main() {
     `);
     assert(qfMatchFound, 'Quick Find must locate "Migrationskonzept"');
     await cdp.pressKey('Escape', 'Escape', 27);
-    await sleep(120);
+    await sleep(140);
 
-    cdp.assertZeroErrors('5d duration + reload + Timeblock clear + Checklist + Pin + Quick Find');
+    // Navigate to Project "IT-Infrastruktur 2026" -> Gantt Roadmap -> Verify Milestone Diamond & Callout Pill + Save smoke_milestone_roadmap.png!
+    await cdp.evalJs(`
+      const todayD = new Date();
+      const todayMidnight = new Date(todayD.getFullYear(), todayD.getMonth(), todayD.getDate(), 0, 0, 0, 0).getTime();
+      const dbReq = indexedDB.open('thingsbook_chromeos_db');
+      const db = await new Promise((res, rej) => {
+        dbReq.onsuccess = () => res(dbReq.result);
+        dbReq.onerror = () => rej(dbReq.error);
+      });
+      await new Promise((res, rej) => {
+        const tx = db.transaction(['headings', 'tasks'], 'readwrite');
+        tx.oncomplete = () => res(true);
+        tx.onerror = () => rej(tx.error);
+        const hStore = tx.objectStore('headings');
+        const tStore = tx.objectStore('tasks');
+        hStore.put({
+          id: 'smoke-heading-phase1',
+          projectId: 'smoke-proj-infra',
+          title: 'Phase 1 · Architektur & Go-Live',
+          startDate: todayMidnight,
+          endDate: todayMidnight + 8 * 86400000,
+          sortOrder: 1,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          isDeleted: false,
+          isDirty: false
+        });
+        const r1 = tStore.get(${JSON.stringify(seededIds.taskDeId)});
+        r1.onsuccess = () => {
+          const t1 = r1.result;
+          if (t1) {
+            t1.headingId = 'smoke-heading-phase1';
+            t1.whenDate = todayMidnight;
+            t1.deadline = todayMidnight + 4 * 86400000;
+            tStore.put(t1);
+          }
+        };
+        const r2 = tStore.get(${JSON.stringify(seededIds.taskShortId)});
+        r2.onsuccess = () => {
+          const t2 = r2.result;
+          if (t2) {
+            t2.title = 'Go-Live Freigabe (M365 Cutover)';
+            t2.headingId = 'smoke-heading-phase1';
+            t2.whenDate = todayMidnight + 6 * 86400000;
+            t2.deadline = todayMidnight + 6 * 86400000;
+            t2.blockedByTaskIds = [${JSON.stringify(seededIds.taskDeId)}];
+            tStore.put(t2);
+          }
+        };
+      });
+      db.close();
+    `);
+    await cdp.send('Page.reload', { ignoreCache: false });
+    await cdp.waitForSelector('.sidebar .project-nav-item');
+    await sleep(220);
+    await cdp.evalJs(`
+      const projBtns = Array.from(document.querySelectorAll('.sidebar .project-nav-item'));
+      const target = projBtns.find((b) => (b.textContent || '').includes('IT-Infrastruktur 2026'));
+      if (!target) throw new Error('Sidebar project IT-Infrastruktur 2026 not found');
+      target.click();
+    `);
+    await cdp.waitForSelector('[data-testid="project-view-mode-roadmap"]');
+    await cdp.clickSelector('[data-testid="project-view-mode-roadmap"]');
+    await cdp.waitForSelector('[data-milestone="true"]');
+    await sleep(220);
+
+    const roadmapMilestoneInfo = await cdp.evalJs(`
+      const bar = document.querySelector('[data-milestone="true"]');
+      const diamond = bar?.querySelector('.roadmap-milestone-diamond');
+      const label = bar?.querySelector('.roadmap-milestone-label');
+      const dRect = diamond?.getBoundingClientRect();
+      const lRect = label?.getBoundingClientRect();
+      return {
+        hasBar: Boolean(bar),
+        hasDiamond: Boolean(diamond && dRect && dRect.width > 0 && dRect.height > 0),
+        labelText: label?.textContent?.trim() || '',
+        labelVisible: Boolean(lRect && lRect.width > 40 && lRect.right <= window.innerWidth)
+      };
+    `);
+    assert(
+      roadmapMilestoneInfo.hasBar && roadmapMilestoneInfo.hasDiamond,
+      `Expected visible 45° Milestone diamond on Project Gantt Roadmap, got ${JSON.stringify(roadmapMilestoneInfo)}`
+    );
+    assert(
+      roadmapMilestoneInfo.labelText.includes('◆ Go-Live Freigabe'),
+      `Expected floating Milestone callout pill with "◆ Go-Live Freigabe", got "${roadmapMilestoneInfo.labelText}"`
+    );
+    await auditVisibleButtonsAndHoverStability(cdp, 'Project Gantt Roadmap (Milestone Diamond)');
+
+    const milestoneRoadmapShotPath = path.join(ARTIFACT_DIR, 'smoke_milestone_roadmap.png');
+    await cdp.saveScreenshot(milestoneRoadmapShotPath);
+    console.log(`Captured Milestone Gantt Roadmap screenshot -> ${milestoneRoadmapShotPath}`);
+
+    cdp.assertZeroErrors('Milestone toggle + Selection Parity + Roadmap Diamond + Quick Find');
     console.log(
-      '[9/9] ALL E2E Headless Chromium UI Smoke Checks PASSED (0 console.error, 0 exceptions, <=1px Bento alignment)!'
+      '[9/9] ALL E2E Headless Chromium UI Smoke Checks PASSED (0 console.error, 0 exceptions, <=1px Bento alignment, Milestone Roadmap & Selection Parity verified)!'
     );
   } finally {
     if (cdp) cdp.close();

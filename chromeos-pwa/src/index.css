@@ -39,6 +39,9 @@
   --deadline-red-bg: rgba(229, 57, 53, 0.11);
   --gemini-violet: #6E56CF;
   --gemini-violet-bg: rgba(110, 86, 207, 0.11);
+  --milestone-violet: #7c3aed;
+  --milestone-violet-soft: rgba(124, 58, 237, 0.12);
+  --milestone-violet-border: rgba(124, 58, 237, 0.36);
 
   --shadow-xs: 0 1px 2px rgba(18, 26, 38, 0.05);
   --shadow-sm: 0 2px 8px rgba(18, 26, 38, 0.08), 0 1px 2px rgba(18, 26, 38, 0.04);
@@ -89,6 +92,9 @@
   --evening-moon-bg: rgba(132, 143, 242, 0.16);
   --gemini-violet: #9B85F7;
   --gemini-violet-bg: rgba(155, 133, 247, 0.15);
+  --milestone-violet: #a78bfa;
+  --milestone-violet-soft: rgba(167, 139, 250, 0.16);
+  --milestone-violet-border: rgba(167, 139, 250, 0.42);
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
   --shadow-sm: 0 3px 10px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.24);
@@ -1572,6 +1578,33 @@ button {
   background: var(--border-strong);
   border-color: var(--border-strong);
   border-style: solid;
+}
+
+.things-checkbox.milestone {
+  border-radius: 4.5px;
+  transform: rotate(45deg) scale(0.82);
+  border-color: var(--milestone-violet);
+}
+
+.things-checkbox.milestone:hover {
+  border-color: var(--milestone-violet);
+  background: var(--milestone-violet-soft);
+}
+
+.things-checkbox.milestone.pop {
+  transform: rotate(45deg) scale(0.9);
+}
+
+.things-checkbox.milestone.completed,
+.things-checkbox.milestone.checked {
+  border-radius: 4.5px;
+  background: var(--milestone-violet);
+  border-color: var(--milestone-violet);
+  border-style: solid;
+}
+
+.things-checkbox.milestone > svg {
+  transform: rotate(-45deg);
 }
 
 .task-row-body {
@@ -6150,4 +6183,187 @@ button.v2-stalled-pill:hover {
   overflow-wrap: break-word;
   margin-right: 4px;
 }
+
+/* ==================== v3.0.0-beta.15: Milestones & External Import Area Preselection ==================== */
+
+.v3-external-area-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.v3-external-area-label {
+  font-size: 11.8px;
+  font-weight: 680;
+  color: var(--text-secondary);
+}
+
+.v3-external-area-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-badge.milestone-badge {
+  background: var(--milestone-violet-soft);
+  color: var(--milestone-violet);
+  box-shadow: inset 0 0 0 1px var(--milestone-violet-border);
+  font-weight: 650;
+}
+
+.icon-btn.milestone-active {
+  background: var(--milestone-violet-soft);
+  color: var(--milestone-violet);
+  box-shadow: inset 0 0 0 1px var(--milestone-violet-border);
+}
+
+.icon-btn.milestone-active:hover {
+  background: var(--milestone-violet-soft);
+  color: var(--milestone-violet);
+  filter: brightness(0.97);
+}
+
+.chip-btn.milestone-active,
+.task-bento-prop-pills .chip-btn.milestone-active {
+  background: var(--milestone-violet-soft);
+  border-color: var(--milestone-violet-border);
+  color: var(--milestone-violet);
+  font-weight: 630;
+}
+
+.chip-btn.milestone-active:hover,
+.task-bento-prop-pills .chip-btn.milestone-active:hover,
+.task-bento-prop-pills .chip-btn.milestone-active:hover:not(.active):not(.urgent):not(.evening-quick) {
+  background: var(--milestone-violet-soft);
+  border-color: var(--milestone-violet);
+  color: var(--milestone-violet);
+  filter: brightness(0.98);
+}
+
+/* Project Gantt Roadmap Milestone Diamond & Floating Callout Pill */
+.roadmap-task-bar.milestone {
+  width: max-content;
+  min-width: 16px;
+  height: 26px;
+  padding: 0;
+  gap: 9px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+  z-index: 6;
+}
+
+.roadmap-task-bar.milestone.selected {
+  outline: none;
+}
+
+.roadmap-task-bar.milestone.armed,
+.roadmap-task-bar.milestone.dragging {
+  background: transparent;
+  box-shadow: none;
+  z-index: 9;
+}
+
+.roadmap-milestone-diamond {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 3.5px;
+  transform: rotate(45deg);
+  background: var(--milestone-violet);
+  border: 1.5px solid var(--milestone-violet);
+  box-shadow: inset 0 0 0 2px var(--bg-card), 0 2px 8px rgba(124, 58, 237, 0.36);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: box-shadow 0.14s ease, filter 0.14s ease;
+}
+
+.roadmap-milestone-diamond.overdue {
+  background: var(--deadline-red);
+  border-color: var(--deadline-red);
+  box-shadow: inset 0 0 0 2px var(--bg-card), 0 2px 8px rgba(229, 57, 53, 0.38);
+}
+
+.roadmap-milestone-diamond.completed {
+  opacity: 0.72;
+}
+
+.roadmap-task-bar.milestone.selected .roadmap-milestone-diamond {
+  box-shadow: inset 0 0 0 2px var(--bg-card), 0 0 0 2.5px var(--things-blue), 0 3px 10px rgba(124, 58, 237, 0.44);
+}
+
+.roadmap-milestone-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9.5px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--milestone-violet-border);
+  box-shadow: 0 2px 7px rgba(18, 26, 38, 0.08);
+  color: var(--milestone-violet);
+  font-size: 11.5px;
+  font-weight: 680;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.roadmap-milestone-label.overdue {
+  border-color: rgba(229, 57, 53, 0.42);
+  color: var(--deadline-red);
+}
+
+.roadmap-milestone-label.done {
+  text-decoration: line-through;
+  opacity: 0.72;
+}
+
+.roadmap-task-bar.milestone.selected .roadmap-milestone-label {
+  border-color: var(--things-blue);
+  box-shadow: 0 0 0 1.5px var(--things-blue), 0 2px 8px rgba(56, 152, 236, 0.22);
+}
+
+.roadmap-task-bar.milestone .roadmap-bar-step-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.roadmap-task-bar.milestone:hover .roadmap-bar-step-controls {
+  opacity: 1;
+}
+
+.roadmap-task-bar.milestone .roadmap-bar-step-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--milestone-violet-border);
+  color: var(--milestone-violet);
+}
+
+.roadmap-task-bar.milestone .roadmap-bar-step-btn:hover {
+  background: var(--milestone-violet-soft);
+}
+
+/* Today Daily Timeline Milestone Accents */
+.v2-timeline-card.milestone-item {
+  border-left: 3.5px solid var(--milestone-violet);
+  background: linear-gradient(90deg, var(--milestone-violet-soft) 0%, var(--bg-card) 48%);
+}
+
+.v2-unscheduled-row.milestone-item {
+  border-left: 3.5px solid var(--milestone-violet);
+  background: linear-gradient(90deg, var(--milestone-violet-soft) 0%, var(--bg-card) 48%);
+}
+
 

@@ -75,6 +75,7 @@ public struct ExternalImportedTask: Equatable, Sendable {
     public var whenDate: Int64?
     public var deadline: Int64?
     public var isPinned: Bool
+    public var isMilestone: Bool
     public var effortLevel: EffortLevel?
     public var tagNames: [String]
     public var checklistItems: [ExternalImportedChecklistItem]
@@ -89,6 +90,7 @@ public struct ExternalImportedTask: Equatable, Sendable {
         whenDate: Int64? = nil,
         deadline: Int64? = nil,
         isPinned: Bool = false,
+        isMilestone: Bool = false,
         effortLevel: EffortLevel? = nil,
         tagNames: [String] = [],
         checklistItems: [ExternalImportedChecklistItem] = [],
@@ -102,6 +104,7 @@ public struct ExternalImportedTask: Equatable, Sendable {
         self.whenDate = whenDate
         self.deadline = deadline
         self.isPinned = isPinned
+        self.isMilestone = isMilestone
         self.effortLevel = effortLevel
         self.tagNames = tagNames
         self.checklistItems = checklistItems
@@ -719,6 +722,8 @@ public enum ExternalProjectCodec {
             let dueMs = parseJsonDateField(dict["due_on"] ?? dict["due_at"] ?? dict["dueDate"] ?? dict["deadline"], calendar: calendar)
 
             let isPinned = boolValue(dict["is_pinned"] ?? dict["isPinned"] ?? dict["hearted"] ?? dict["liked"]) ?? false
+            let isMilestone = subtype == "milestone"
+                || (boolValue(dict["is_milestone"] ?? dict["isMilestone"]) ?? false)
             let effort = EffortLevel.normalized(
                 (dict["effort_level"] as? String) ?? (dict["effortLevel"] as? String) ?? parsePriorityToEffort(dict["priority"] as? String)?.rawValue
             )
@@ -822,6 +827,7 @@ public enum ExternalProjectCodec {
                 whenDate: whenMs,
                 deadline: dueMs,
                 isPinned: isPinned || pinnedFromPriority,
+                isMilestone: isMilestone,
                 effortLevel: effort,
                 tagNames: tags,
                 checklistItems: checklists,
@@ -1077,6 +1083,7 @@ public enum ExternalProjectCodec {
             var obj: [String: Any] = [
                 "gid": task.id,
                 "name": task.title,
+                "resource_subtype": task.isMilestone ? "milestone" : "default_task",
                 "notes": task.notes,
                 "completed": isDone,
                 "completed_at": completedAtValue,

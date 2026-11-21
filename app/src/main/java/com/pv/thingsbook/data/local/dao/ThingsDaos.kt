@@ -616,6 +616,9 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks WHERE isDeleted = 1 AND (title != '' OR notes != '') ORDER BY updatedAt DESC")
     suspend fun getDeletedTasksList(): List<TaskEntity>
+
+    @Query("UPDATE tasks SET isMilestone = :isMilestone, updatedAt = :updatedAt, isDirty = 1 WHERE id = :taskId")
+    suspend fun updateTaskMilestone(taskId: String, isMilestone: Boolean, updatedAt: Long)
 }
 
 @Dao

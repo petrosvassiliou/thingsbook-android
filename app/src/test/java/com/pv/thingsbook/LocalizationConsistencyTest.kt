@@ -151,5 +151,84 @@ class LocalizationConsistencyTest {
         assertEquals("receipt.pdf", decoded.attachments.first().fileName)
         assertEquals("JVBERi0xLjQK", decoded.attachments.first().dataBase64)
     }
+
+    @Test
+    fun `v3_0_0_beta_15 milestone and target area strings exist across all 5 locales and backup codec preserves isMilestone`() {
+        val resRoot = resolveResRoot()
+        val expectedByLocale = mapOf(
+            "values" to mapOf(
+                "v30_milestone_label" to "Milestone",
+                "v30_mark_as_milestone" to "Mark as Milestone",
+                "v30_remove_milestone" to "Remove Milestone",
+                "v30_external_import_target_area" to "Target Area for Import"
+            ),
+            "values-de" to mapOf(
+                "v30_milestone_label" to "Meilenstein",
+                "v30_mark_as_milestone" to "Als Meilenstein markieren",
+                "v30_remove_milestone" to "Meilenstein entfernen",
+                "v30_external_import_target_area" to "Ziel-Bereich für Import"
+            ),
+            "values-fr" to mapOf(
+                "v30_milestone_label" to "Jalon",
+                "v30_mark_as_milestone" to "Marquer comme jalon",
+                "v30_remove_milestone" to "Retirer le jalon",
+                "v30_external_import_target_area" to "Domaine cible pour l\\'import"
+            ),
+            "values-it" to mapOf(
+                "v30_milestone_label" to "Traguardo",
+                "v30_mark_as_milestone" to "Segna come traguardo",
+                "v30_remove_milestone" to "Rimuovi traguardo",
+                "v30_external_import_target_area" to "Area di destinazione per l\\'importazione"
+            ),
+            "values-es" to mapOf(
+                "v30_milestone_label" to "Hito",
+                "v30_mark_as_milestone" to "Marcar como hito",
+                "v30_remove_milestone" to "Quitar hito",
+                "v30_external_import_target_area" to "Área de destino para la importación"
+            )
+        )
+
+        expectedByLocale.forEach { (dir, expectedMap) ->
+            val (strings, _) = parseStringsXml(File(resRoot, "$dir/strings.xml"))
+            expectedMap.forEach { (key, expectedText) ->
+                val actual = strings[key]
+                assertTrue("Missing '$key' in $dir/strings.xml", actual != null)
+                // Android XML escapes \' as \' in raw textContent before resource compilation; normalize \' -> '
+                assertEquals(
+                    "Unexpected translation for '$key' in $dir/strings.xml",
+                    expectedText.replace("\\'", "'"),
+                    actual!!.replace("\\'", "'")
+                )
+            }
+        }
+
+        val payload = ThingsbookBackupPayload(
+            createdAt = 1_765_000_000_000L,
+            appVersionName = "3.0.0-beta.15",
+            tasks = listOf(
+                com.pv.thingsbook.data.backup.BackupTaskDto(
+                    id = "ms-1",
+                    title = "GA Release Gate",
+                    isMilestone = true
+                ),
+                com.pv.thingsbook.data.backup.BackupTaskDto(
+                    id = "std-1",
+                    title = "Draft release notes",
+                    isMilestone = false
+                )
+            )
+        )
+        val encoded = ThingsBackupCodec.encodeBackup(payload, null, "3.0.0-beta.15", 106)
+        val decoded = ThingsBackupCodec.decodeBackup(encoded, null)
+        assertEquals(true, decoded.tasks.first { it.id == "ms-1" }.isMilestone)
+        assertEquals(false, decoded.tasks.first { it.id == "std-1" }.isMilestone)
+
+        // Legacy backup JSON omitting isMilestone defaults safely to false
+        val legacyDecoded = ThingsBackupCodec.json.decodeFromString<ThingsbookBackupPayload>(
+            """{"schemaVersion":1,"createdAt":1762500000000,"tasks":[{"id":"legacy-1","title":"Old Task"}]}"""
+        )
+        assertFalse(legacyDecoded.tasks.single().isMilestone)
+    }
 }
+
 

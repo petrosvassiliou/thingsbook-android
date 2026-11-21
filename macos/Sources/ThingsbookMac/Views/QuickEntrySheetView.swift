@@ -406,6 +406,7 @@ public struct QuickEntrySheetView: View {
         HStack(spacing: 8) {
             ThingsCheckboxButton(
                 status: task.status,
+                isMilestone: task.isMilestone,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: { store.toggleTaskCompletion(task) },
                 onCancelTask: { store.cancelTask(task) }

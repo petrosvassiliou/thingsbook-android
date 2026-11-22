@@ -664,26 +664,60 @@ public extension View {
 
     /// Preserves VoiceOver accessibility hint without rendering a visual tooltip outside the top bar.
     func thingsTooltip(_ text: String) -> some View {
-        modifier(ThingsMacTooltipModifier(text: text, isTopBarIcon: false))
+        modifier(
+            ThingsMacTooltipModifier(
+                text: text,
+                isVisualTooltipEnabled: false,
+                requiresMouseOnly: false,
+                isSuppressed: false
+            )
+        )
     }
 
     /// Attaches a discreet floating tooltip strictly to top-bar icon buttons (`MacToolbarIconButton`).
     func thingsTopBarIconTooltip(_ text: String) -> some View {
-        modifier(ThingsMacTooltipModifier(text: text, isTopBarIcon: true))
+        modifier(
+            ThingsMacTooltipModifier(
+                text: text,
+                isVisualTooltipEnabled: true,
+                requiresMouseOnly: false,
+                isSuppressed: false
+            )
+        )
+    }
+
+    /// Attaches a mouse-only floating tooltip to timeline task bars, milestones, and rows.
+    func thingsTimelineMouseTooltip(_ text: String, isSuppressed: Bool = false) -> some View {
+        modifier(
+            ThingsMacTooltipModifier(
+                text: text,
+                isVisualTooltipEnabled: true,
+                requiresMouseOnly: true,
+                isSuppressed: isSuppressed
+            )
+        )
     }
 }
 
-// MARK: - Discreet Top-Bar-Icon-Only AppKit Floating Tooltip Engine
+// MARK: - Discreet Top-Bar & Timeline Mouse-Only AppKit Floating Tooltip Engine
 
 private struct ThingsMacTooltipModifier: ViewModifier {
     let text: String
-    let isTopBarIcon: Bool
+    let isVisualTooltipEnabled: Bool
+    let requiresMouseOnly: Bool
+    let isSuppressed: Bool
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if isTopBarIcon && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if isVisualTooltipEnabled && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             content
-                .background(ThingsTooltipTrackingRepresentable(text: text))
+                .background(
+                    ThingsTooltipTrackingRepresentable(
+                        text: text,
+                        requiresMouseOnly: requiresMouseOnly,
+                        isSuppressed: isSuppressed
+                    )
+                )
                 .accessibilityHint(text)
         } else {
             content
@@ -694,17 +728,30 @@ private struct ThingsMacTooltipModifier: ViewModifier {
 
 private struct ThingsTooltipTrackingRepresentable: NSViewRepresentable {
     let text: String
+    let requiresMouseOnly: Bool
+    let isSuppressed: Bool
 
     func makeNSView(context: Context) -> ThingsTooltipTrackingNSView {
         let view = ThingsTooltipTrackingNSView()
         view.tooltipText = text
+        view.requiresMouseOnly = requiresMouseOnly
+        view.isSuppressed = isSuppressed
         return view
     }
 
     func updateNSView(_ nsView: ThingsTooltipTrackingNSView, context: Context) {
+        nsView.requiresMouseOnly = requiresMouseOnly
+        if nsView.isSuppressed != isSuppressed {
+            nsView.isSuppressed = isSuppressed
+            if isSuppressed {
+                ThingsMacTooltipController.shared.anchorExited(nsView)
+            }
+        }
         if nsView.tooltipText != text {
             nsView.tooltipText = text
-            ThingsMacTooltipController.shared.anchorUpdatedText(nsView)
+            if !isSuppressed {
+                ThingsMacTooltipController.shared.anchorUpdatedText(nsView)
+            }
         }
     }
 
@@ -717,6 +764,8 @@ private struct ThingsTooltipTrackingRepresentable: NSViewRepresentable {
 fileprivate final class ThingsTooltipTrackingNSView: NSView {
     let anchorId: String = UUID().uuidString
     var tooltipText: String = ""
+    var requiresMouseOnly: Bool = false
+    var isSuppressed: Bool = false
     private var trackingAreaRef: NSTrackingArea?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -738,11 +787,33 @@ fileprivate final class ThingsTooltipTrackingNSView: NSView {
         super.updateTrackingAreas()
     }
 
+    private func isEligibleMouseHoverEvent(_ event: NSEvent) -> Bool {
+        var isMousePointer = !requiresMouseOnly || ThingsMacTooltipController.shared.isMouseInputActive
+        if event.type == .mouseMoved {
+            if event.subtype == .touch {
+                isMousePointer = false
+            }
+        }
+        return TooltipTimingCoordinator.isEligibleMouseHover(
+            isMousePointer: isMousePointer,
+            pressedMouseButtons: NSEvent.pressedMouseButtons,
+            isSuppressed: isSuppressed
+        )
+    }
+
     override func mouseEntered(with event: NSEvent) {
+        guard isEligibleMouseHoverEvent(event) else {
+            ThingsMacTooltipController.shared.anchorExited(self)
+            return
+        }
         ThingsMacTooltipController.shared.anchorEntered(self)
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard isEligibleMouseHoverEvent(event) else {
+            ThingsMacTooltipController.shared.anchorExited(self)
+            return
+        }
         ThingsMacTooltipController.shared.anchorMoved(self)
     }
 
@@ -777,8 +848,8 @@ fileprivate final class WeakTooltipAnchorEntry {
 fileprivate final class ThingsTooltipBubbleNSView: NSView {
     static let textFont: NSFont = .systemFont(ofSize: 11.5, weight: .medium)
     static let horizontalPadding: CGFloat = 9.5
-    static let verticalPadding: CGFloat = 4.5
-    static let maxTextWidth: CGFloat = 300.0
+    static let verticalPadding: CGFloat = 5.0
+    static let maxTextWidth: CGFloat = 320.0
 
     var tooltipText: String = "" {
         didSet {
@@ -793,7 +864,7 @@ fileprivate final class ThingsTooltipBubbleNSView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 6.0
+        layer?.cornerRadius = 6.5
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
     }
@@ -806,18 +877,24 @@ fileprivate final class ThingsTooltipBubbleNSView: NSView {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return NSSize(width: 36.0, height: 23.0) }
 
-        let singleLineSize = (trimmed as NSString).size(withAttributes: [.font: textFont])
-        if ceil(singleLineSize.width) <= maxTextWidth {
-            let bubbleW = max(32.0, ceil(singleLineSize.width + horizontalPadding * 2.0))
-            let bubbleH = max(23.0, ceil(singleLineSize.height + verticalPadding * 2.0))
-            return NSSize(width: bubbleW, height: bubbleH)
+        let isMultiline = trimmed.contains("\n")
+        if !isMultiline {
+            let singleLineSize = (trimmed as NSString).size(withAttributes: [.font: textFont])
+            if ceil(singleLineSize.width) <= maxTextWidth {
+                let bubbleW = max(32.0, ceil(singleLineSize.width + horizontalPadding * 2.0))
+                let bubbleH = max(23.0, ceil(singleLineSize.height + verticalPadding * 2.0))
+                return NSSize(width: bubbleW, height: bubbleH)
+            }
         }
 
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
+        paragraph.alignment = isMultiline ? .left : .center
         paragraph.lineBreakMode = .byWordWrapping
+        if isMultiline {
+            paragraph.lineSpacing = 2.0
+        }
         let wrappedRect = (trimmed as NSString).boundingRect(
-            with: NSSize(width: maxTextWidth, height: 160.0),
+            with: NSSize(width: maxTextWidth, height: 220.0),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [
                 .font: textFont,
@@ -831,7 +908,7 @@ fileprivate final class ThingsTooltipBubbleNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.375, dy: 0.375), xRadius: 6.0, yRadius: 6.0)
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.375, dy: 0.375), xRadius: 6.5, yRadius: 6.5)
         let textColor: NSColor
         if isDark {
             // Soft elevated slate matching Dark mode surface — never pitch black
@@ -852,44 +929,51 @@ fileprivate final class ThingsTooltipBubbleNSView: NSView {
         let trimmed = tooltipText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        let singleAttrs: [NSAttributedString.Key: Any] = [
-            .font: Self.textFont,
-            .foregroundColor: textColor
-        ]
-        let singleLineSize = (trimmed as NSString).size(withAttributes: singleAttrs)
-        if ceil(singleLineSize.width) <= Self.maxTextWidth {
-            let drawOrigin = NSPoint(
-                x: (bounds.width - singleLineSize.width) / 2.0,
-                y: (bounds.height - singleLineSize.height) / 2.0
-            )
-            (trimmed as NSString).draw(at: drawOrigin, withAttributes: singleAttrs)
-        } else {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = .center
-            paragraph.lineBreakMode = .byWordWrapping
-            let wrappedAttrs: [NSAttributedString.Key: Any] = [
+        let isMultiline = trimmed.contains("\n")
+        if !isMultiline {
+            let singleAttrs: [NSAttributedString.Key: Any] = [
                 .font: Self.textFont,
-                .foregroundColor: textColor,
-                .paragraphStyle: paragraph
+                .foregroundColor: textColor
             ]
-            let availW = max(16.0, bounds.width - Self.horizontalPadding * 2.0)
-            let wrappedRect = (trimmed as NSString).boundingRect(
-                with: NSSize(width: availW, height: 160.0),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: wrappedAttrs
-            )
-            let drawRect = NSRect(
-                x: Self.horizontalPadding,
-                y: (bounds.height - wrappedRect.height) / 2.0,
-                width: availW,
-                height: ceil(wrappedRect.height) + 2.0
-            )
-            (trimmed as NSString).draw(
-                with: drawRect,
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: wrappedAttrs
-            )
+            let singleLineSize = (trimmed as NSString).size(withAttributes: singleAttrs)
+            if ceil(singleLineSize.width) <= Self.maxTextWidth {
+                let drawOrigin = NSPoint(
+                    x: (bounds.width - singleLineSize.width) / 2.0,
+                    y: (bounds.height - singleLineSize.height) / 2.0
+                )
+                (trimmed as NSString).draw(at: drawOrigin, withAttributes: singleAttrs)
+                return
+            }
         }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = isMultiline ? .left : .center
+        paragraph.lineBreakMode = .byWordWrapping
+        if isMultiline {
+            paragraph.lineSpacing = 2.0
+        }
+        let wrappedAttrs: [NSAttributedString.Key: Any] = [
+            .font: Self.textFont,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraph
+        ]
+        let availW = max(16.0, bounds.width - Self.horizontalPadding * 2.0)
+        let wrappedRect = (trimmed as NSString).boundingRect(
+            with: NSSize(width: availW, height: 220.0),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: wrappedAttrs
+        )
+        let drawRect = NSRect(
+            x: Self.horizontalPadding,
+            y: (bounds.height - wrappedRect.height) / 2.0,
+            width: availW,
+            height: ceil(wrappedRect.height) + 2.0
+        )
+        (trimmed as NSString).draw(
+            with: drawRect,
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: wrappedAttrs
+        )
     }
 }
 
@@ -902,6 +986,7 @@ public final class ThingsMacTooltipController {
     private var pendingWorkItem: DispatchWorkItem?
     private var watchdogTimer: Timer?
     private var localEventMonitor: Any?
+    fileprivate private(set) var isMouseInputActive: Bool = true
 
     private var panel: NSPanel?
     private var bubbleView: ThingsTooltipBubbleNSView?
@@ -938,16 +1023,49 @@ public final class ThingsMacTooltipController {
         }
 
         localEventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel, .keyDown]
+            matching: [
+                .mouseMoved,
+                .leftMouseDown,
+                .rightMouseDown,
+                .otherMouseDown,
+                .leftMouseDragged,
+                .rightMouseDragged,
+                .otherMouseDragged,
+                .scrollWheel,
+                .keyDown
+            ]
         ) { [weak self] event in
             MainActor.assumeIsolated {
-                self?.dismissImmediately(allowWarmHandoff: false)
+                guard let self else { return }
+                if event.type == .mouseMoved {
+                    if event.subtype == .touch {
+                        self.isMouseInputActive = false
+                        self.dismissImmediately(allowWarmHandoff: false)
+                    } else if NSEvent.pressedMouseButtons == 0 {
+                        self.isMouseInputActive = true
+                    } else {
+                        self.dismissImmediately(allowWarmHandoff: false)
+                    }
+                } else {
+                    if event.type == .leftMouseDown || event.type == .leftMouseDragged {
+                        if event.subtype == .touch {
+                            self.isMouseInputActive = false
+                        }
+                    }
+                    self.dismissImmediately(allowWarmHandoff: false)
+                }
             }
             return event
         }
     }
 
     fileprivate func anchorEntered(_ view: ThingsTooltipTrackingNSView) {
+        guard NSEvent.pressedMouseButtons == 0,
+              !view.isSuppressed,
+              (!view.requiresMouseOnly || isMouseInputActive) else {
+            anchorExited(view)
+            return
+        }
         pruneDetachedAnchors()
         if !hoveredAnchors.contains(where: { $0.id == view.anchorId }) {
             hoveredAnchors.append(WeakTooltipAnchorEntry(id: view.anchorId, view: view))
@@ -956,6 +1074,12 @@ public final class ThingsMacTooltipController {
     }
 
     fileprivate func anchorMoved(_ view: ThingsTooltipTrackingNSView) {
+        guard NSEvent.pressedMouseButtons == 0,
+              !view.isSuppressed,
+              (!view.requiresMouseOnly || isMouseInputActive) else {
+            anchorExited(view)
+            return
+        }
         if !hoveredAnchors.contains(where: { $0.id == view.anchorId }) {
             hoveredAnchors.append(WeakTooltipAnchorEntry(id: view.anchorId, view: view))
             reconcileActiveAnchor()
@@ -985,8 +1109,12 @@ public final class ThingsMacTooltipController {
 
     private func pruneDetachedAnchors() {
         let mouseLoc = NSEvent.mouseLocation
+        let buttonsPressed = NSEvent.pressedMouseButtons != 0
         hoveredAnchors.removeAll { entry in
-            guard let v = entry.view,
+            guard !buttonsPressed,
+                  let v = entry.view,
+                  !v.isSuppressed,
+                  (!v.requiresMouseOnly || isMouseInputActive),
                   let win = v.window,
                   win.isVisible,
                   !v.isHiddenOrHasHiddenAncestor,
@@ -1001,7 +1129,7 @@ public final class ThingsMacTooltipController {
 
     private func selectBestHoveredAnchor() -> ThingsTooltipTrackingNSView? {
         pruneDetachedAnchors()
-        guard NSApp.isActive, !hoveredAnchors.isEmpty else { return nil }
+        guard NSApp.isActive, NSEvent.pressedMouseButtons == 0, !hoveredAnchors.isEmpty else { return nil }
 
         let keyWindow = NSApp.keyWindow
         let candidates = hoveredAnchors.compactMap { $0.view }
@@ -1069,7 +1197,10 @@ public final class ThingsMacTooltipController {
             panel?.orderOut(nil)
             let work = DispatchWorkItem { [weak self, weak anchorView] in
                 guard let self else { return }
-                guard let anchorView,
+                guard NSEvent.pressedMouseButtons == 0,
+                      let anchorView,
+                      !anchorView.isSuppressed,
+                      (!anchorView.requiresMouseOnly || self.isMouseInputActive),
                       anchorView.window != nil,
                       anchorView.window?.isVisible == true,
                       NSApp.isActive,
@@ -1090,7 +1221,10 @@ public final class ThingsMacTooltipController {
         case .showImmediately(_, let text):
             pendingWorkItem?.cancel()
             pendingWorkItem = nil
-            guard let anchorView,
+            guard NSEvent.pressedMouseButtons == 0,
+                  let anchorView,
+                  !anchorView.isSuppressed,
+                  (!anchorView.requiresMouseOnly || isMouseInputActive),
                   let parentWin = anchorView.window,
                   parentWin.isVisible,
                   NSApp.isActive else {
@@ -1190,7 +1324,7 @@ public final class ThingsMacTooltipController {
     }
 
     private func watchdogTick() {
-        if !NSApp.isActive {
+        if !NSApp.isActive || NSEvent.pressedMouseButtons != 0 {
             dismissImmediately(allowWarmHandoff: false)
             return
         }

@@ -4,16 +4,16 @@
 
 # Thingsbook
 
-**Native GTD Productivity Suite for Android, ChromeOS & macOS (`v2.1.0`, Build `73`)**
+**Native GTD & Visual Project Planning Suite for Android, ChromeOS & macOS (`v3.0.0`, Build `111`)**
 
-[![Version](https://img.shields.io/badge/version-2.1.0%20(Build%2073)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v2.1.0)
-[![Android](https://img.shields.io/badge/Android-100%25%20Kotlin%20%2B%20Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](#1-thingsbook-for-android-native-apk--v210)
-[![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20App-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos-standalone-pwa--v200)
-[![macOS](https://img.shields.io/badge/macOS-100%25%20Swift%20%2B%20SwiftUI%20Universal-000000?style=flat-square&logo=apple&logoColor=white)](#3-thingsbook-for-macos-native-universal-app--v210)
-[![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES-6E56CF?style=flat-square)](#localization-5-languages)
+[![Version](https://img.shields.io/badge/version-3.0.0%20(Build%20111)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v3.0.0)
+[![Android](https://img.shields.io/badge/Android%20%26%20Googlebook-100%25%20Kotlin%20%2B%20Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](#1-thingsbook-for-android--googlebook-os-native-apk--v300)
+[![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20PWA-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos--web-standalone-pwa--v300)
+[![macOS](https://img.shields.io/badge/macOS-100%25%20Swift%20%2B%20SwiftUI%20Universal-000000?style=flat-square&logo=apple&logoColor=white)](#3-thingsbook-for-macos-native-universal-app--v300)
+[![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES%20(650%20keys)-6E56CF?style=flat-square)](#localization-5-languages)
 [![Encryption](https://img.shields.io/badge/backup-AES--256--GCM-16A34A?style=flat-square)](#offline-first-storage-backups--cloud-sync)
 
-[**📱 Download Android APK (v2.1.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.1.0/Thingsbook-v2.1.0-GTD-Full.apk) · [**🍎 Download macOS Universal DMG (v2.1.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.1.0/Thingsbook-macOS-v2.1.0-Universal.dmg) · [**💻 Launch ChromeOS / Web App**](https://thingsbook-prod.web.app) · [**📦 GitHub Releases**](https://github.com/petrosvassiliou/thingsbook-android/releases/latest) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
+[**📱 Download Android APK (v3.0.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-v3.0.0-GTD-Full.apk) · [**🍎 Download macOS Universal DMG (v3.0.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-macOS-v3.0.0-Universal.dmg) · [**💻 Launch ChromeOS / Web App**](https://thingsbook-prod.web.app) · [**📦 GitHub Releases**](https://github.com/petrosvassiliou/thingsbook-android/releases/latest) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
 
 </div>
 
@@ -27,109 +27,95 @@
 
 ---
 
-## 🚀 What’s New in `v2.1.0` / `v2.0` (Build `73`) — Cross-Platform Release
+## 🚀 What’s New in `v3.0.0` (Build `111`) — Major Cross-Platform Release
 
-1. **🧭 Guided 4-Step GTD Weekly Review & Cross-Device Review Sync (`Ctrl + Shift + R` / `⇧⌘R`)**
-   - Interactive 4-step wizard across Android, ChromeOS, and macOS: **(1) Clear Inbox**, **(2) Today & Overdue Deadlines**, **(3) Projects Attention Audit**, and **(4) Someday & Weekly Wrap-Up**.
-   - Automatically highlights open projects that have **zero open next-action tasks** or haven't been reviewed in **14+ days** — with inline **"Add next action…"**, **"Mark Reviewed ✓"** (`lastReviewedAt` synced monotonically across devices), and **"Move to Someday"**.
-2. **📋 Reusable Project Templates & 1-Click Markdown / JSON Outline Importer**
-   - Save any active project (headings, open tasks, checklists, tags, durations, and relative schedule offsets) as a reusable **`ProjectTemplate`** synced via Firestore and included inside encrypted `.tbbackup` archives.
-   - Includes **4 localized Starter GTD Templates** (*Trip & Packing*, *Product Launch*, *Client Onboarding*, *Weekly Sprint*) across `EN`, `DE`, `FR`, `IT`, and `ES`.
-   - Paste structured Markdown (`# Project`, `## Heading`, `- [ ] Task`, indented `- [ ] Subtask`) or JSON blueprints to generate complete GTD projects in one click.
-3. **⏱️ Interactive Timeblocking, Daily Timeline & Quiet Subordinate Calendar Appointments**
-   - Assign start times (`scheduledStartMinutes`) and durations (`15m`–`2h`) to tasks with automatic Focus Timer duration matching.
-   - Toggle **Today** between **`📋 List`** and **`🗓️ Timeline`** to view an interleaved chronological schedule of Calendar Events and Timeblocked Tasks, complete with overlap conflict indicators, `+15m` quick nudges, and an **Unscheduled Today** tray.
-   - Past appointments automatically clear from *Today* and *Upcoming*, while active/upcoming calendar events render inside a compact, subordinate grouped container so visual focus stays squarely on your tasks.
-4. **⚡ Instant Pull-Before-Push Cloud Sync & Deterministic Recurring Task Deduplication**
-   - Sub-second multi-device wake notifications via `SHA-256` UID `ntfy` wake topics, per-collection Firestore delta cursors, automatic parent project/area self-healing, and `120s` clock-skew protection (`100%` forward & backward compatible with `v1.8.x`).
-   - Deterministic cross-platform recurring task UUID generation and non-poisoning midnight rollover eliminate duplicate recurring instances across synced devices.
-5. **✨ Unified Single-Row Inline Task Editor & UX Polish (`v2.1.0` Update)**
-   - **Unified Inline Task Card (`v2.1.0`):** Eliminates duplicate bottom action icons across Android, ChromeOS PWA, and macOS — keeping labeled metadata pills (`When`, `Timeblock`, `Repeat`, `Deadline`, `Project/Area`, `+ Tags`) on a single unified row alongside **Focus Timer (`⏲️`)**, **`⋯` More Actions** (*Attach*, *Take Photo*, *Voice Input*, *Duplicate*, *Delete*), and **Done (`✓`)**, with **Magic Breakdown (`✨`)** placed directly inside the checklist input bar.
-   - **Android "Planned" (`Upcoming` / *"Geplant"*) Scroll Fix (`v2.0.1`):** Opening the Planned smart view cleanly anchors at the very top (`index 0`) displaying the earliest scheduled task.
-   - **Project Deletion Choice + Undo:** Choose between cascade-deleting a project's tasks or detaching & keeping them in the parent Area, with full 5-second **Undo** and Trash restoration.
-   - **macOS Zero-DMG In-App Auto-Updater:** One-click **Settings → Updates → Install & Relaunch** on macOS, plus native AppKit/SwiftUI icon+label Settings toolbar.
-   - **Refined Task Cards, Draggable Magic Plus (`+`) & Instant Tooltips:** Opening an existing task card preserves cursor focus without selecting all text, *Today* cards feature a 1-click **`🌙 This Evening`** pill, draggable Magic Plus (`+`) drops directly into To-Do slots or Project Headings, and top-bar icon buttons feature centered `160ms` cold / `0ms` warm-handoff localized tooltips.
+1. **📊 Three-Mode Project Workspaces: `📋 List` · `🗂️ Kanban Board` · `📊 Interactive Gantt Timeline`**
+   - **Kanban Board by Project Phases:** Drag and drop single or multiple selected tasks across Phase columns, track per-phase completion rings, assign Phase Start & End dates, and promote or clear ungrouped (*General*) tasks cleanly.
+   - **Interactive Gantt Timeline / Roadmap:**
+     - Visualize Phases, multi-day task spans, **45° Royal-Violet Milestone Diamonds (`◆`)** with floating callout pills, and curved SVG **`Waiting On` dependency connectors**.
+     - **Press-and-Drag Rescheduling:** Hold and drag tasks, milestones, or entire phases horizontally to shift schedules cleanly with zero accidental hover drift.
+     - **Mouse-Only Timeline Hover Tooltips:** Hovering with a mouse or trackpad cursor over tasks in Timeline view surfaces a discreet floating summary (title, date span, deadline, duration, effort, checklist count, and blocked status) while remaining silent during touch interactions.
+     - **Full-Screen Presentation Mode & Vector PDF / High-DPI PNG Export:** Present roadmaps distraction-free (`F` / `⌃⌘F`) or export crisp multi-page **A4/Letter Vector PDFs** and **High-DPI PNGs** with custom date windows and phase selection.
+2. **🍱 Redesigned Two-Column Soft Bento Task Modal & Wide-Screen Inspector**
+   - **Soft Bento Task Editor Modal:** Symmetric two-column workspace pairing **Markdown Notes + Interactive Checklists** (with `✨` Magic Breakdown) on the left with **Schedule (`When`, `Deadline`, `Milestone ◆`, `Repeat`, `Timeblock`), Effort (`Low` / `Medium` / `High`), Duration (`5m`–`8h` + multi-day), Dependencies (`Waiting On`), Organization (`Area / Project / Phase`), Tags, and Attachments** on the right.
+   - **Wide-Screen Right-Side Inspector Panel:** Maximized windows on Googlebook OS, ChromeOS, Android tablets, and macOS automatically unlock a Soft Bento **Inspector / Context Panel**—displaying live task inspection & quick actions when a task is selected, or a **Today Focus / Project Progress / Smart View Overview** when nothing is selected.
+3. **🔄 Asana & Microsoft Planner Import/Export with Target Area Preselection**
+   - Round-trip **Asana JSON** (including `resource_subtype: "milestone"`, Sections/Phases, Subtasks, Tags, Notes, and Deadlines) and **Microsoft Planner / Todoist CSV** import & export—complete with a **Target Area preselector** and right-click Area import actions.
+4. **🔗 Task Dependencies (`Waiting On`), 📌 Pinned Tasks, ⚡ Effort Scale & `4h` / `8h` Full-Day Durations**
+   - Link prerequisite tasks with circular-dependency protection and automatic `⏳` blocked indicators; pin priority items to the top of views; classify cognitive/work Effort (`Low` / `Medium` / `High`); and estimate task durations from `5m` up to `4h` (half-day), `8h` (full-day), and multi-day spans.
+5. **🔍 Optional Custom Perspectives, 🧭 Weekly Review, 📋 Templates, 🧠 BYOK Gemini AI & Instant Cloud Sync**
+   - Sidebar stays clean by default with optional multi-rule **Custom Perspectives** enabled anytime in Settings, alongside the **4-Step Weekly Review (`Ctrl+Shift+R` / `⇧⌘R`)**, **Synced Project Templates**, **Today Interleaved Daily Timeline**, **Optional BYOK Gemini AI Hub**, **Real-Time Firestore Delta Sync**, **AES-256-GCM `.tbbackup`**, and **100% 5-language parity (`650` keys across `EN`, `DE`, `FR`, `IT`, `ES`)**.
 
 ---
 
-# 1. Thingsbook for Android (Native APK — `v2.1.0`)
+## 🖼️ High-Resolution `v3.0.0` Retina Showcase
 
-**Thingsbook for Android** (`app/`) is a 100% native GTD (*Getting Things Done*) productivity app built from scratch for **Android smartphones, tablets, and foldables** using **Kotlin**, **Jetpack Compose (Material 3)**, and an **offline-first Room + SQLite FTS5 (`unicode61`) database**.
+### Today Workspace + Wide-Screen Right-Side Soft Bento Inspector (`2880×1800` Retina)
+![Thingsbook 3.0 Today Workspace and Right-Side Inspector Panel](docs/screenshots/v3-today-workspace-light.png)
 
-### 📥 Direct Android Download (`v2.1.0`, Build `73`)
-- **[Download `Thingsbook-v2.1.0-GTD-Full.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.1.0/Thingsbook-v2.1.0-GTD-Full.apk)**
-- **[Download `Thingsbook-Full-GTD-Edition.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.1.0/Thingsbook-Full-GTD-Edition.apk)**
+### Interactive Project Gantt Timeline — Milestones (`◆`), Dependencies & Mouse Hover Tooltips (`2880×1800` Retina)
+![Thingsbook 3.0 Interactive Gantt Project Timeline with Milestones and Dependencies](docs/screenshots/v3-project-timeline-milestones.png)
 
----
+### Project Kanban Board in Dark Mode — Phases, Progress Rings, Effort & Durations (`2880×1800` Retina)
+![Thingsbook 3.0 Dark Mode Project Kanban Board](docs/screenshots/v3-project-kanban-dark.png)
 
-### 📸 Android Screenshots
+### Two-Column Soft Bento Task Editor Modal — Markdown Notes, Checklists, Milestones & Timeblocks (`2880×1800` Retina)
+![Thingsbook 3.0 Soft Bento Task Editor Modal](docs/screenshots/v3-task-bento-modal.png)
 
-#### Android Smartphones (`< 700dp` — Focus Timer, Google Calendar, Markdown Notes & Dark Mode)
+### Today Interleaved Daily Timeline & Asana / Microsoft Planner Import (`2880×1800` Retina)
 
 <div align="center">
 <table>
   <tr>
-    <td align="center"><b>Today: Focus Timer, Calendar, Project Grouping &amp; Undo</b></td>
-    <td align="center"><b>Inline Card: Live Markdown Notes &amp; Link Chips</b></td>
-    <td align="center"><b>Project &amp; Headings (Dark): Duplicate &amp; Links</b></td>
+    <td align="center"><b>Today Daily Timeline (Calendar Events + Timeblocks)</b></td>
+    <td align="center"><b>Project Templates &amp; Asana / Planner Import with Target Area</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/android-phone-today-light.png" alt="Android Phone Today View with Focus Timer, Google Calendar, Project Grouping and Undo" width="265" /></td>
-    <td><img src="docs/screenshots/android-phone-expanded-light.png" alt="Android Phone Expanded Task Card with Markdown Notes and Link Chips" width="265" /></td>
-    <td><img src="docs/screenshots/android-phone-project-dark.png" alt="Android Phone Project Dark Mode with Duplicate Project and Link Chips" width="265" /></td>
+    <td><img src="docs/screenshots/v3-today-timeline-light.png" alt="Thingsbook 3.0 Today Interleaved Daily Timeline" width="440" /></td>
+    <td><img src="docs/screenshots/v3-templates-asana-import.png" alt="Thingsbook 3.0 Templates and Asana/Planner Import Modal" width="440" /></td>
   </tr>
 </table>
 </div>
 
-#### Android GTD Power Pack — Quick Share Sheet, Trash & Undo, Calendar & Security Settings
+---
+
+# 1. Thingsbook for Android & Googlebook OS (Native APK — `v3.0.0`)
+
+**Thingsbook for Android** (`app/`) is a 100% native GTD & project planning app built from scratch for **Android smartphones, tablets, foldables, and Googlebook OS / ChromeOS ARCVM** using **Kotlin**, **Jetpack Compose (Material 3)**, and an **offline-first Room v7 + SQLite FTS5 (`unicode61`) database**.
+
+### 📥 Direct Android Download (`v3.0.0`, Build `111`)
+- **[Download `Thingsbook-v3.0.0-GTD-Full.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-v3.0.0-GTD-Full.apk)**
+- **[Download `Thingsbook-Full-GTD-Edition.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-Full-GTD-Edition.apk)**
+
+### 📱 Mobile Portrait Views (`1236×2745` `3x` Retina)
 
 <div align="center">
 <table>
   <tr>
-    <td align="center"><b>&ldquo;Share to Thingsbook&rdquo; Quick Entry Sheet</b></td>
-    <td align="center"><b>Trash / Recently Deleted &amp; 5s Undo Bar</b></td>
-    <td align="center"><b>Settings: Calendar, Grouping &amp; Biometric Lock</b></td>
+    <td align="center"><b>Mobile Today View (Light)</b></td>
+    <td align="center"><b>Mobile Project Timeline &amp; Milestones (Dark)</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/android-phone-quick-share-light.png" alt="Share to Thingsbook Quick Entry Sheet" width="265" /></td>
-    <td><img src="docs/screenshots/android-phone-trash-undo-light.png" alt="Trash View and 5-Second Undo Snackbar" width="265" /></td>
-    <td><img src="docs/screenshots/android-phone-settings-power-light.png" alt="Settings for Google Calendar, Group Today by Project/Area and Biometric App Lock" width="265" /></td>
+    <td><img src="docs/screenshots/v3-mobile-today-light.png" alt="Thingsbook 3.0 Mobile Today View Light Mode" width="280" /></td>
+    <td><img src="docs/screenshots/v3-mobile-roadmap-dark.png" alt="Thingsbook 3.0 Mobile Project Roadmap Dark Mode" width="280" /></td>
   </tr>
 </table>
 </div>
 
-#### Android Tablets & Unfolded Foldables (`>= 700dp` — Persistent 2-Column Workspace)
+### ✨ Native Android & Googlebook Highlights (`v3.0.0`)
 
-![Android Tablet & Foldable 2-Column Workspace](docs/screenshots/android-tablet-today-light.png)
-
----
-
-### ✨ Native Android Highlights (`v1.7` – `v2.0`)
-
-1. **⚡ Android System Quick Settings Tile (`TileService`) & Launcher App Shortcuts**
-   - Add the **Thingsbook — New To-Do** tile to your Android Quick Settings shade or long-press the home screen icon for 1-tap **New To-Do**, **Voice Capture**, **Today**, **Inbox**, and **Quick Find**.
-2. **🎙️ Voice-to-Task Dictation & 1-Tap "✨ Smart Parse with Gemini"**
-   - Dictate tasks hands-free via Android `RecognizerIntent` from the top bar, Quick Capture sheet, or Home Screen Widgets, and split spoken brain dumps into scheduled GTD tasks, tags, and checklists with Gemini.
-3. **📱 Home Screen Widgets (`4×1` Quick Capture Bar + `4×2` GTD List with Project Mode)**
-   - **Quick Capture Bar (`4×1`):** One-tap **Today**, **🔍 Quick Find**, **🎙️ Voice Capture**, and **+ New To-Do** pill bar.
-   - **Main GTD List (`4×2`):** Switch between *Today*, *Inbox*, *Upcoming*, and **🎯 Project** directly on your home screen.
-4. **📎 Rich Task & Project Attachments (Camera, Photos, PDFs & Files)**
-   - Attach photos (`📷 Take Photo` / `🖼️ Choose Image`), PDFs, or documents (`📄 Choose File / PDF`) with automatic JPEG compression, **`📎 N` count badges**, horizontal thumbnail strips, and an in-app **zoomable Image & native `PdfRenderer` PDF viewer** + OS Share.
-5. **📍 Location & Google Maps Chips + Live Markdown Notes**
-   - Real-time Markdown formatting (`# Headings`, `**bold**`, `*italic*`, `` `code` ``, `- ` lists) plus one-tap **Web**, **Email (`mailto:`)**, **Phone (`tel:`)**, and **Google Maps (`📍`)** chips.
-6. **📤 "Share to Thingsbook" (`ACTION_SEND`), 🔔 Actionable Notifications, ⏱️ 25m Focus Timer & 🔒 Biometric App Lock**
-   - Share links or text from any Android app directly into any Smart View, Project, or Area; complete or snooze (`+1h` / `Tomorrow`) tasks right from notifications; run Pomodoro sessions synced with an ongoing notification; and protect your workspace with `BiometricPrompt` / device PIN.
-
-### 🏗️ Core Native Android Architecture & GTD Features
-
-- **Adaptive Layout for Phones (`< 700dp`), Tablets & Foldables (`>= 700dp`):** Thumb-friendly drawer, fluid 120 Hz spring card expansion, and draggable **Magic Plus (`+`)** FAB on phones; persistent 2-column master-detail workspace with live pie-chart progress rings and hardware keyboard shortcuts on tablets and foldables.
-- **Complete GTD Hierarchy:** *Inbox*, *Today* (with **🌙 This Evening** & **🗓️ Daily Timeline**), *Upcoming*, *Anytime*, *Someday*, *Logbook*, and *Trash* — plus **Areas** (up to 8), **Projects** (with progress rings, deadlines `🏁`, & reusable **Templates**), collapsible **Headings**, reorderable **Checklists**, **Timeblocks**, flexible **Recurrence Rules**, hierarchical **Tags**, and LexoRank `sortOrder`.
-- <a id="offline-first-storage-backups--cloud-sync"></a>**Offline-First Room/SQLite FTS5 + Encrypted `.tbbackup` + Cloud Sync:**
-  - **Room + SQLite FTS5 (`unicode61 remove_diacritics 2`):** Sub-millisecond full-text search across titles, notes, projects, tags, and checklists — works 100% offline, with an optional strict **Local-Only Mode**.
-  - **Encrypted `.tbbackup` Backup & Restore:** Atomic single-file archive of all entities, templates, attachments & preferences — plain or encrypted with **AES-256-GCM** & **PBKDF2-HMAC-SHA256 (`120,000` iterations)** — plus CSV & Markdown/JSON outline import/export.
-  - **Optional Bidirectional Firebase Delta Sync:** Real-time multi-device sync via Firebase Auth (Email/Password & Google Sign-In) + Firestore delta queries + instant `ntfy` UID wake notifications.
-- **4 Multilingual Gemini AI Features (Optional — Bring Your Own Key):** **✨ Magic Breakdown**, **🧠 Brain Dump → GTD Import**, **📐 AI Project Architect**, and **📖 Logbook AI Reflection**.
-- <a id="localization-5-languages"></a>**Full 5-Language Localization (`DE`, `EN`, `FR`, `IT`, `ES`):** `517` verified localization keys per language, instant in-app language switcher, and a 5-language natural language date & time parser.
+1. **📊 Full List, Kanban Board & Interactive Gantt Timeline with Native Vector `PdfDocument` & PNG Export**
+   - Switch any project between List, Kanban Board, and Interactive Gantt Timeline with 45° Royal-Violet Milestones (`◆`), press-and-drag rescheduling, mouse-only hover tooltips on Chromebook/desktop mice, and native multi-page vector PDF & High-DPI PNG export.
+2. **🖥️ Wide-Screen 3-Pane Workspace for Googlebook OS, Tablets & Foldables**
+   - Responsive Soft Bento Sidebar + Fluid Task/Project Canvas + collapsible **360dp Right-Side Inspector Panel**, 1:1 desktop single-click selection parity (`Ctrl`/`Shift` multi-select), and responsive `FlowRow` batch action bar that automatically lifts the Magic Plus (`+`) FAB above selected actions.
+3. **⚡ System Quick Settings Tile (`TileService`), Home Screen Widgets (`4×1` & `4×2`) & Launcher Shortcuts**
+   - Instant capture from the Android Quick Settings shade, home screen widgets (*Today*, *Inbox*, *Upcoming*, *Project*, *Voice Capture*), and `"Share to Thingsbook"` (`ACTION_SEND`).
+4. **🎙️ Voice-to-Task Dictation, 📎 Camera/PDF/File Attachments (`PdfRenderer`), 📍 Google Maps Chips, 🔔 Actionable Notifications & 🔒 Biometric App Lock**
+   - Hands-free speech capture with optional Gemini smart parsing, compressed photo & native PDF previews, one-tap web/email/phone/map chips, Pomodoro Focus Timer, and `BiometricPrompt` security.
+5. <a id="offline-first-storage-backups--cloud-sync"></a>**Offline-First Room v7 SQLite FTS5 + Encrypted `.tbbackup` + Real-Time Firestore Sync**
+   - Sub-millisecond full-text search (`unicode61`), optional strict **Local-Only Mode**, **AES-256-GCM** (`PBKDF2-HMAC-SHA256`, `120,000` iterations) `.tbbackup` archives, Asana JSON / Microsoft Planner CSV import & export, and real-time multi-device Firestore delta sync with `ntfy` wake relay.
+6. <a id="localization-5-languages"></a>**Full 5-Language Localization (`DE`, `EN`, `FR`, `IT`, `ES`)**
+   - `650` verified localization keys per language with instant in-app switching and multilingual natural-language date & time parsing.
 
 ### 🛠️ Build Android APK Locally
 ```bash
@@ -138,60 +124,45 @@
 
 ---
 
-# 2. Thingsbook for ChromeOS (Standalone PWA — `v2.0.0`)
+# 2. Thingsbook for ChromeOS & Web (Standalone PWA — `v3.0.0`)
 
-Alongside the native Android APK, this repository includes a dedicated **ChromeOS Standalone PWA** (`chromeos-pwa/`) engineered specifically for Chromebooks and desktop browsers — with **100% `v2.0.0` feature, sync, and `.tbbackup` parity** — without requiring the Linux container (Crostini) or Android VM (ARCVM).
+Alongside the native Android APK, Thingsbook includes a dedicated **Standalone Offline-First PWA** (`chromeos-pwa/`) engineered for Chromebooks and desktop browsers—delivering **100% `v3.0.0` feature, Milestone, Gantt Roadmap, Soft Bento, Cloud Sync, and `.tbbackup` parity** without requiring Crostini or ARCVM.
 
-### 🚀 Launch & Install on ChromeOS
+### 🚀 Launch & Install on ChromeOS / Desktop Browser
 - **Live App URL:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(hosted on Firebase Hosting)*
-- **Pin to ChromeOS Start Menu (Launcher) & Shelf:**
-  1. Open **`https://thingsbook-prod.web.app`** in Chrome on your Chromebook.
-  2. Click **"Add to ChromeOS Launcher"** in the bottom-left sidebar (or the **Install `⊕` icon** in the Chrome address bar).
-  3. Thingsbook installs as a standalone Chromebook application in your **Start Menu (Launcher)** and **Shelf**, opens in its own frameless window, registers as a **ChromeOS Share Target** + **Launcher Shortcut** provider (*New To-Do*, *Voice Capture*, *Today*, *Inbox*, *Upcoming*, *Quick Find*), and runs **100% offline** via IndexedDB + Service Worker.
+- **Pin to ChromeOS Launcher & Shelf:**
+  1. Open **`https://thingsbook-prod.web.app`** in Chrome.
+  2. Click **"Add to ChromeOS Launcher"** in the sidebar (or the **Install `⊕` icon** in the address bar).
+  3. Runs in its own standalone window, registers as a **Share Target** + **Launcher Shortcut** provider, and works **100% offline** via IndexedDB + Workbox Service Worker.
 
-### ✨ ChromeOS `v2.0.0` Feature Parity
-- **🧭 Guided 4-Step GTD Weekly Review (`Ctrl + Shift + R`), 📋 Project Templates & Markdown Outline Importer, and 🗓️ Today Timeblocking Timeline.**
-- **🎙️ Voice-to-Task Dictation & "✨ Smart Parse with Gemini":** Dictate tasks via the Web Speech API and parse multi-task spoken brain dumps in one click.
-- **📎 Drag-and-Drop & File Picker Attachments (`IndexedDB` + `.tbbackup` + Cloud Sync):** Attach images, PDFs, or files to any Task or Project with automatic Canvas JPEG compression, **`📎 N` badges**, and an in-app **zoomable Image & PDF preview modal**.
-- **📍 Location & Google Maps Chips + 📝 Live Markdown Notes:** Clickable **Web**, **Email**, **Phone**, and **Google Maps (`📍`)** chips on tasks and projects.
-- **⏱️ 25m Focus / Pomodoro Timer, 🗑️ Trash View (`Ctrl + 7`) & 5s Undo (`Ctrl + Z`), 📋 Duplicate To-Do / Project (`Ctrl + D`), 🔔 Actionable Service Worker Notifications, 📅 Google Calendar / `.ics` Agenda, and 🔒 Chromebook Fingerprint (WebAuthn) / PIN App Lock.**
+### ✨ ChromeOS & Web `v3.0.0` Highlights
+- **📊 Interactive Project List, Kanban Board & Gantt Timeline** with press-and-drag rescheduling (both mouse press-and-drag and touch hold-and-drag), 45° Milestones (`◆`), SVG dependency curves, mouse-only hover tooltips, Full-Screen mode (`F`), and multi-page A4/Letter Vector PDF & High-DPI PNG export.
+- **🍱 Two-Column Soft Bento Task Modal & Wide-Screen Right-Side Inspector Panel** (`>= 1220px` auto-docked with top-bar toggle).
+- **🔄 Asana JSON & Microsoft Planner / Todoist CSV Import & Export** with Target Area preselection, **🧭 4-Step Weekly Review (`Ctrl+Shift+R`)**, **📋 Synced Project Templates**, **🗓️ Today Daily Timeline**, **🎙️ Web Speech Voice Dictation**, **📎 IndexedDB File/PDF/Image Attachments**, and **🔒 WebAuthn / PIN App Lock**.
 
----
-
-### 📸 ChromeOS Screenshots
-
-#### Chromebook Light Mode — *Today* Grouped by Project/Area, 25m Focus Timer, Link Chips & *Trash*
-![Thingsbook for ChromeOS Today Power Pack](docs/screenshots/chromeos-today-power.png)
-
-#### Chromebook Dark Mode — Project Progress Ring, Collapsible Headings, Duplicate Project & *Magic Plus* (`Ctrl+N` / `Ctrl+Shift+N`)
-![Thingsbook for ChromeOS Dark Mode Project View](docs/screenshots/chromeos-project-dark.png)
-
-#### Chromebook *Thingsbook Intelligence* — Multilingual Gemini AI Hub
-![Thingsbook for ChromeOS Gemini AI Hub](docs/screenshots/chromeos-gemini-hub.png)
-
----
-
-### ⌨️ Hardware Keyboard Shortcuts (Android Foldables/Tablets, ChromeOS & macOS)
+### ⌨️ Hardware Keyboard Shortcuts (Android Tablets/Googlebook, ChromeOS & macOS)
 
 | Shortcut | Action |
 | :--- | :--- |
-| `Ctrl + N` / `⌘N` | **New To-Do** in the active view (works globally) |
+| `Ctrl + N` / `⌘N` | **New To-Do** in the active view or phase |
 | `Ctrl + Shift + N` / `⇧⌘N` | **New Project** modal (pre-selects active Area) |
 | `Ctrl + Shift + R` / `⇧⌘R` | Open **Guided 4-Step GTD Weekly Review** |
-| `Ctrl + D` / `⌘D` | **Duplicate** expanded To-Do or current Project |
+| `F` / `⌃⌘F` | Toggle **Full-Screen Presentation Mode** in Today or Project Timeline |
+| `Ctrl + D` / `⌘D` | **Duplicate** selected To-Do or current Project |
 | `Ctrl + Z` / `⌘Z` | **Undo** the last task completion or deletion |
-| `Ctrl + S` / `⌘S` | Open **When / Schedule** picker for expanded To-Do |
-| `Ctrl + Shift + D` / `⇧⌘D` | Open **Deadline** picker for expanded To-Do |
+| `Ctrl + S` / `⌘S` | Open **When / Schedule** picker for selected To-Do |
+| `Ctrl + Shift + D` / `⇧⌘D` | Open **Deadline** picker for selected To-Do |
 | `Ctrl + Shift + M` / `⇧⌘M` | Open **Move to Project / Area** picker |
-| `Ctrl + Backspace` / `⌘⌫` | Move expanded or selected To-Do(s) to **Trash** |
-| `Ctrl + F` / `⌘F` or `Ctrl + K` / `⌘K` | Toggle **Quick Find** instant search (with scope & tag/date filters) |
+| `Ctrl + Backspace` / `⌘⌫` | Move selected To-Do(s) to **Trash** |
+| `Ctrl + F` / `⌘F` or `Ctrl + K` / `⌘K` | Toggle **Quick Find** instant search |
 | `Ctrl + G` / `⌘G` | Open **Thingsbook Intelligence (Gemini AI Hub)** |
 | `Ctrl + 1` … `Ctrl + 7` / `⌘1` … `⌘7` | Jump to *Inbox*, *Today*, *Upcoming*, *Anytime*, *Someday*, *Logbook*, or *Trash* |
 | `Ctrl + A` / `⌘A` | Select all visible To-Dos in the current view for batch actions |
-| `Double-Click` / `Enter` | Expand or collapse a To-Do card inline |
-| `Esc` | Close active popover, modal, Quick Find, expanded card, or selection |
+| `Click` / `Cmd+Click` / `Shift+Click` | Select single task (opens in Inspector) / toggle / range multi-select |
+| `Double-Click` / `Enter` | Open To-Do in the **Soft Bento Task Modal** |
+| `Esc` | Close active popover, modal, Quick Find, full-screen timeline, or selection |
 
-### 🛠️ Build & Deploy ChromeOS PWA
+### 🛠️ Build & Verify ChromeOS PWA Locally
 ```bash
 cd chromeos-pwa
 npm ci
@@ -202,64 +173,55 @@ npm run build
 
 ---
 
-# 3. Thingsbook for macOS (Native Universal App — `v2.1.0`)
+# 3. Thingsbook for macOS (Native Universal App — `v3.0.0`)
 
-**Thingsbook for macOS** (`macos/`) is a **100% native Swift + SwiftUI + AppKit desktop application** for **macOS 14+ (Sonoma, Sequoia & Tahoe)** running natively on both **Apple Silicon (`arm64`) and Intel (`x86_64`)** Macs, engineered in strict feature, localization, SQLite FTS5, `.tbbackup`, and Firestore sync parity with Android and ChromeOS (`v2.1.0`, Build `73`).
+**Thingsbook for macOS** (`macos/`) is a **100% native Swift + SwiftUI + AppKit desktop application** for **macOS 14+ (Sonoma, Sequoia & Tahoe)** compiled as a Universal binary for both **Apple Silicon (`arm64`) and Intel (`x86_64`)** Macs—engineered in strict feature, localization (`650` keys), SQLite FTS5, `.tbbackup`, and Firestore sync parity with Android and ChromeOS (`v3.0.0`, Build `111`).
 
-### 📥 Install or Upgrade on macOS (`v1.7.0 / v1.8.x / v2.0.x → v2.1.0`)
-- **Direct Universal DMG Download:** **[Download `Thingsbook-macOS-v2.1.0-Universal.dmg`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.1.0/Thingsbook-macOS-v2.1.0-Universal.dmg)**
+### 📥 Install or Upgrade on macOS (`v3.0.0`, Build `111`)
+- **Direct Universal DMG Download:** **[Download `Thingsbook-macOS-v3.0.0-Universal.dmg`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-macOS-v3.0.0-Universal.dmg)**
 - **In-App 1-Click Updater:** Open **Settings (`⌘,`) → Updates → Install & Relaunch** to download, verify, atomically swap `/Applications/Thingsbook.app`, and relaunch without touching a `.dmg`.
 - **Instant 1-Command Terminal Install / Upgrade (No Gatekeeper Prompts):**
   ```bash
   curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/install.sh | bash
   ```
-  *(Automatically quits a running instance if open, installs `v2.1.0` into `/Applications/Thingsbook.app`, and preserves your SQLite database, attachments, Keychain sync credentials, and preferences.)*
 
-### ✨ Native macOS Highlights (`v2.1.0`, Build `73`)
-1. **🧭 Weekly Review (`⇧⌘R`), 📋 Synced Project Templates & Markdown Importer, and 🗓️ Today Timeblocking Timeline**
-   - Native SwiftUI/AppKit implementations of the 4-step Weekly Review wizard, Template Gallery & Markdown/JSON outline importer, Today List/Timeline toggle, and quiet compact Apple Calendar (`EventKit`) appointment rows.
-2. **🎙️ Native macOS Voice Dictation (`SFSpeechRecognizer` + `AVAudioEngine`) & "✨ Smart Parse with Gemini"**
-   - Dictate tasks live from the toolbar **`🎙️` Voice** button, **Quick Entry (`⌃⇧⌘V`)**, **Magic Plus (`+`)**, **Dock Menu**, **`thingsbook://voice`** URL scheme, or inline on any expanded task card.
-3. **🎯 Menu Bar Extra (`MenuBarExtra`) & Global Quick Entry**
-   - Switch between **Today** and **🎯 Project** right inside the macOS status bar popover with quick task completion, Quick Capture, and Voice Capture.
-4. **📎 Native Task & Project Attachments (`PDFKit` + Zoomable Image Viewer) & 📍 Apple Maps Chips**
-   - Drag and drop files from Finder onto any task card, view multi-page PDFs natively via `PDFKit`, and click detected addresses/coordinates to open them directly in **Apple Maps**.
-5. **🔄 Zero-DMG In-App Auto-Updater, Unified Inline Task Editor & 100% 5-Language Parity**
-   - Unified single-row inline task editor (`v2.1.0`), native AppKit/SwiftUI icon+label Settings window, centered instant warm-handoff top-bar tooltips, 1-click flag language switcher (`EN`, `DE`, `FR`, `IT`, `ES`), Touch ID app lock, and CI parity verification via `macos/scripts/verify-android-parity.py`.
+### ✨ Native macOS Highlights (`v3.0.0`, Build `111`)
+1. **📊 Native SwiftUI/AppKit Project List, Kanban Board & Interactive Gantt Timeline**
+   - Multi-day task & phase bars, 45° Royal-Violet Milestone Diamonds (`◆`), curved dependency connectors, AppKit mouse-hover timeline tooltips, Full-Screen presentation mode (`⌃⌘F`), and native CoreGraphics multi-page Vector PDF & High-DPI PNG export.
+2. **🍱 Two-Column Soft Bento Task Modal & Wide-Screen Right-Side Inspector Panel**
+   - Native macOS sheet & inspector architecture with live Markdown editing, `✨` Magic Breakdown checklists, `Low`/`Medium`/`High` Effort, `5m`–`8h` + multi-day durations, `Waiting On` dependencies, and Asana JSON / Microsoft Planner CSV round-trip import & export.
+3. **🎙️ Live Voice Dictation (`SFSpeechRecognizer` + `AVAudioEngine`), 🎯 `MenuBarExtra`, 📅 Apple Calendar (`EventKit`), 📎 `PDFKit` Attachments, 📍 Apple Maps Chips & 🔒 Touch ID Lock.**
 
 ---
 
-### 🔄 Seamless Cross-Platform Interoperability & `v1.7 / v1.8 / v2.0.x → v2.1.0` Upgrade
+## 🔄 Seamless Cross-Platform Interoperability & Upgrade (`v1.8 / v2.x → v3.0.0`)
 - **100% Zero-Data-Loss In-Place Upgrades:**
-  - **Android:** Signed with the identical X.509 release certificate (`versionCode 41 / 44 / 72 → 73`) and automatic Room migrations (`MIGRATION_2_3`, `MIGRATION_3_4`).
-  - **ChromeOS:** Automatic additive IndexedDB migrations (`DB_VERSION 1 → 3`) and Service Worker `autoUpdate`.
-  - **macOS:** Automatic additive SQLite3 schema migrations, backward-compatible `AppPreferences` & Keychain session preservation, and 1-click in-app updates.
-- **Real-Time Multi-Device Delta Sync:** Sign in with the same Email/Password or Google account on Android, ChromeOS, and macOS to sync *Areas*, *Projects*, *Headings*, *Tasks*, *Checklists*, *Tags*, *Attachments*, and *Project Templates* in real time via Firestore + instant `ntfy` wake notifications.
-- **Identical `.tbbackup` Binary Format:** Export an AES-256-GCM encrypted `.tbbackup` file on Android, ChromeOS, or macOS and restore it on any of the three platforms (`v1.7.x` and `v1.8.x` backups restore cleanly into `v2.1.x`).
+  - **Android:** Signed with the identical persistent release certificate (`versionCode → 111`) and automatic Room migrations (`MIGRATION_2_3` through `MIGRATION_6_7`).
+  - **ChromeOS:** Automatic additive IndexedDB migrations (`DB_VERSION → 5`) and Service Worker `autoUpdate`.
+  - **macOS:** Automatic additive SQLite3 schema migrations (`is_milestone`, `effort_level`, `is_pinned`, `blocked_by_task_ids`, `perspectives`, phase `start_date`/`end_date`) and 1-click in-app updates.
+- **Real-Time Multi-Device Delta Sync & Identical `.tbbackup` Format:** Sync seamlessly across Android, Googlebook, ChromeOS, and macOS via Firestore + `ntfy` wake relay, or transfer encrypted **AES-256-GCM `.tbbackup`** archives offline between any of the three platforms.
 
 ---
 
 ## 🇩🇪 Deutsche Dokumentation
 
-### 1. Thingsbook für Android (Native Android-App — `v2.1.0`, Build `73`)
-Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphones, Tablets & Foldables**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room Database (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup` Komplett-Backup**, optionalem **Firebase Firestore Echtzeit-Delta-Sync**, **4 Gemini-KI-Funktionen** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES`)**. Nahtlos aktualisierbar von `v1.7.0`, `v1.8.x` und `v2.0.x`.
-- **📱 Direkt-Download Android-APK (`v2.1.0`):** **[Thingsbook-v2.1.0-GTD-Full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.1.0/Thingsbook-v2.1.0-GTD-Full.apk)**
+### 1. Thingsbook für Android & Googlebook OS (Native App — `v3.0.0`, Build `111`)
+Eigenständige, native GTD- & Projektplanungs-App für **Android-Smartphones, Tablets, Foldables und Googlebook OS**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room v7 (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup`**, optionalem **Firebase Firestore Echtzeit-Delta-Sync**, **BYOK Gemini-KI** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES` — `650` lokalisierte Schlüssel)**. Nahtlos aktualisierbar von `v1.8.x`, `v2.x` und `v3.0.0-beta.x`.
+- **📱 Direkt-Download Android-APK (`v3.0.0`):** **[Thingsbook-v3.0.0-GTD-Full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-v3.0.0-GTD-Full.apk)**
 
-#### ✨ Highlights in `v2.1.0` / `v2.0`:
-- **🎯 Vereinter einzeiliger Inline-Aufgaben-Editor (`v2.1.0`):** Keine doppelten Aktions-Icons mehr — alle beschrifteten Metadaten-Pills links + Fokus-Timer (`⏲️`), kompaktes **`⋯`-Menü** (*Anhang*, *Foto*, *Spracheingabe*, *Duplizieren*, *Löschen*) & **Fertig (`✓`)** rechts, sowie **`✨ Magische Teilaufgaben`** direkt in der Checklisten-Zeile.
-- **🧭 Geführter 4-Schritte-GTD-Wochenrückblick (`Strg + Umschalt + R`):** Interaktiver Assistent für *Eingang leeren*, *Heute & überfällige Fristen*, *Projekt-Aufmerksamkeitsprüfung (14-Tage-Check mit Geräte-Sync)* und *Irgendwann / Abschluss*.
-- **📋 Wiederverwendbare Projekt-Vorlagen & Markdown-/JSON-Gliederungs-Import:** Beliebige Projekte inkl. Überschriften, Aufgaben, Checklisten & Tags als synchronisierte Vorlage speichern, 4 lokalisierte Starter-Vorlagen nutzen oder `# Projekt` / `## Überschrift` / `- [ ] Aufgabe`-Markdown direkt importieren.
-- **⏱️ Zeitblöcke (`Timeblocking`), Tages-Zeitachse (`📋 Liste ↔ 🗓️ Zeitachse`) & dezente Kalendertermine:** Startzeit & Dauer pro Aufgabe planen, Konflikte erkennen, vergangene Termine automatisch ausblenden und aktive Kalendertermine kompakt und untergeordnet darstellen.
-- **⚡ Sofortiger Echtzeit-Cloud-Sync (`ntfy` UID-Wake-Relay), duplikatfreie wiederkehrende Aufgaben & „Geplant“-Scroll-Fix (`v2.0.1`).**
-- **🎙️ Spracheingabe & „✨ Mit Gemini aufteilen“, 📎 Foto-/PDF-/Datei-Anhänge mit Zoom- & PDF-Viewer, 📍 Google-Maps-Chips, 📱 `4×1`- & `4×2`-Widgets, ⚡ Schnelleinstellungs-Kachel, ⏱️ 25-Min.-Fokus-Timer, 🗑️ Papierkorb & 5s-„Rückgängig“ sowie 🔒 Biometrie-Sperre.**
+#### ✨ Highlights in `v3.0.0`:
+- **📊 Drei Projekt-Ansichten (`📋 Liste` · `🗂️ Kanban-Board` · `📊 Interaktive Gantt-Zeitachse`):** Phasen mit Start-/Enddatum, **Meilensteine (`◆`)**, Abhängigkeiten (*Wartet auf*), Halten-&-Ziehen-Terminverschiebung, Maus-Tooltips in der Zeitachse, Vollbildmodus sowie mehrseitiger **Vektor-PDF- & High-DPI-PNG-Export**.
+- **🍱 Zweispaltiger Soft-Bento-Aufgabendialog & Breitbild-Inspektor-Seitenleiste:** Symmetrischer Aufgaben-Editor (Markdown-Notizen & Checklisten links; Planung, Meilenstein `◆`, Aufwand *Niedrig / Mittel / Hoch*, Dauer `5m`–`8h` + mehrtägig, Zeitblock, Abhängigkeiten, Bereich/Projekt/Phase & Kategorien rechts) sowie rechte **Inspektor-Seitenleiste** auf großen Bildschirmen.
+- **🔄 Asana-JSON- & Microsoft-Planner-/Todoist-CSV-Import & -Export** inkl. Bereichs-Vorauswahl (*Zielbereich*), Meilensteinen, Phasen und Unteraufgaben.
+- **🧭 4-Schritte-GTD-Wochenrückblick (`Strg + Umschalt + R`), 📋 Projekt-Vorlagen, 🗓️ Tages-Zeitachse, 🔍 Optionale Perspektiven, 🎙️ Spracheingabe, 📎 Foto-/PDF-Anhänge & 🔒 Biometrie-Sperre.**
 
-### 2. Thingsbook für ChromeOS (Eigenständige Standalone-PWA — `v2.1.0`)
-`chromeos-pwa/` enthält das eigenständige **ChromeOS-Paket mit voller `v2.1`-Funktionsparität** (*Vereinter Inline-Editor*, *4-Schritte-Wochenrückblick*, *Projekt-Vorlagen & Markdown-Importer*, *Tages-Zeitplanung & kompakte Kalendertermine*, *Spracheingabe & Gemini Smart Parse*, *Drag-&-Drop-Datei-/Foto-/PDF-Anhänge mit Vorschau*, *Google-Maps-Orts-Chips*, *Web Share Target*, *25-Min.-Fokus-Timer*, *Live-Markdown*, *Papierkorb & Rückgängig* sowie *WebAuthn-Fingerabdruck-/PIN-Sperre*) — gehostet auf **Firebase Hosting** und **ohne Linux-Container (Crostini)** direkt im **ChromeOS-Startmenü (Launcher) & Shelf** installierbar:
-- **💻 Live-App für Chromebooks:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)** *(in Chrome öffnen → „Zum ChromeOS-Launcher hinzufügen“ klicken → aktualisiert sich automatisch auf `v2.1.0`, 100 % offline-fähig via IndexedDB + Service Worker).*
+### 2. Thingsbook für ChromeOS & Web (Eigenständige Standalone-PWA — `v3.0.0`)
+`chromeos-pwa/` bietet **100 % `v3.0.0`-Funktionsparität** (*Liste / Kanban-Board / Gantt-Zeitachse mit Meilensteinen & PDF/PNG-Export*, *Soft-Bento-Editor*, *Breitbild-Inspektor*, *Asana- & Planner-Import/Export*, *Wochenrückblick*, *Tages-Zeitachse*, *Spracheingabe*, *IndexedDB-Anhänge* und *WebAuthn-/PIN-Sperre*) — direkt ohne Linux-Container im **ChromeOS-Launcher & Shelf** installierbar:
+- **💻 Live-App starten:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)**
 
-### 3. Thingsbook für macOS (Native Universal-App — `v2.1.0`, Build `73`)
-`macos/` enthält die **100 % native Swift/SwiftUI/AppKit-Desktop-App für macOS 14+ (Apple Silicon & Intel)** mit voller `v2.1`-Parität (*Vereinter Inline-Editor*, *In-App-Auto-Updater ohne DMG-Handling*, *4-Schritte-Wochenrückblick `⇧⌘R`*, *Projekt-Vorlagen*, *Tages-Zeitachse & kompakte Apple-Kalender-Termine*, *Live-Sprachdiktat `⌃⇧⌘V` & Gemini Smart Parse*, *Menüleisten-App mit Heute/Projekt-Modus*, *Drag-&-Drop-Anhänge inkl. nativem `PDFKit`-Viewer*, *Apple-Maps-Orts-Chips*, *Touch ID*, *SQLite FTS5*, *`.tbbackup`* und *Firestore Cloud-Sync*):
-- **🍎 Direkt-Download Universal-DMG (`v2.1.0`):** **[Thingsbook-macOS-v2.1.0-Universal.dmg herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v2.1.0/Thingsbook-macOS-v2.1.0-Universal.dmg)**
+### 3. Thingsbook für macOS (Native Universal-App — `v3.0.0`, Build `111`)
+`macos/` enthält die **100 % native Swift/SwiftUI/AppKit-Desktop-App für macOS 14+ (Apple Silicon & Intel)** mit voller `v3.0.0`-Parität (*Liste, Kanban-Board & Gantt-Zeitachse mit Meilensteinen `◆`, Maus-Tooltips & Vektor-PDF/PNG-Export*, *Soft-Bento-Aufgabendialog*, *Breitbild-Inspektor*, *Asana-/Planner-Import*, *In-App-Auto-Updater*, *Menüleisten-App*, *Live-Sprachdiktat*, *Apple-Kalender (`EventKit`)*, *`PDFKit`-Anhänge*, *Touch ID*, *SQLite FTS5*, *`.tbbackup`* und *Firestore Cloud-Sync*):
+- **🍎 Direkt-Download Universal-DMG (`v3.0.0`):** **[Thingsbook-macOS-v3.0.0-Universal.dmg herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-macOS-v3.0.0-Universal.dmg)**
 - **⚡ 1-Befehl-Installation / Upgrade im Terminal:**
   ```bash
   curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/install.sh | bash
@@ -271,10 +233,10 @@ Eine eigenständige, native Android-Produktivitäts-App für **Android-Smartphon
 
 ```text
 thingsbook-android/
-├── app/                     # 1. Native Android APK (Kotlin, Jetpack Compose, Room + SQLite FTS5)
-├── chromeos-pwa/            # 2. Standalone ChromeOS PWA (TypeScript, React, IndexedDB + Workbox)
+├── app/                     # 1. Native Android & Googlebook APK (Kotlin, Jetpack Compose, Room v7 + SQLite FTS5)
+├── chromeos-pwa/            # 2. Standalone ChromeOS & Web PWA (TypeScript, React, IndexedDB + Workbox)
 ├── macos/                   # 3. Native macOS Universal App (Swift, SwiftUI, AppKit, SQLite3 FTS5 + PDFKit)
-├── docs/screenshots/        # Retina UI screenshots (Android Phone, Android Tablet & ChromeOS)
+├── docs/screenshots/        # High-resolution 2x/3x Retina UI screenshots (v3.0.0)
 ├── releases/                # Release notes & signed release archives
 ├── firebase.json            # Firebase Hosting & Firestore configuration
 ├── firestore.rules          # Per-user Firestore security rules

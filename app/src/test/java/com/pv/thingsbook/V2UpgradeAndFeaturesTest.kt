@@ -46,9 +46,11 @@ import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TemplateHeadingBlueprint
 import com.pv.thingsbook.domain.model.TemplateTaskBlueprint
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import com.pv.thingsbook.data.external.ExternalProjectCodec
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.TodayTimelineEntry
 import com.pv.thingsbook.domain.model.computeTodayCapacitySummary
@@ -770,9 +772,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(110, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0-beta.19", BuildConfig.VERSION_NAME)
-        assertTrue("3.0.0-beta.19 pre-release contains -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(111, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.0", BuildConfig.VERSION_NAME)
+        assertFalse("3.0.0 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2580,6 +2582,200 @@ class V2UpgradeAndFeaturesTest {
         assertTrue(legacyDecoded.tasks.single().omittedV30TaskFields)
         assertTrue(legacyDecoded.headings.single().omittedStartDate)
         assertTrue(legacyDecoded.projects.single().omittedV30ProjectFields)
+    }
+
+    @Test
+    fun `v3_0_0 GA mouse_only timeline hover policy, General phase promote_and_delete UX, and Asana placeholder section skipping`() {
+        // 1. Unpressed Mouse & ChromeOS ARCVM Trackpad Enter/Move hover events are allowed
+        assertTrue(
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Enter,
+                pointerType = PointerType.Mouse,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+        assertTrue(
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Move,
+                pointerType = PointerType.Mouse,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+        // ChromeOS ARCVM trackpad cursor emits unpressed Enter/Move with PointerType.Touch or PointerType.Unknown
+        assertTrue(
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Move,
+                pointerType = PointerType.Touch,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+        assertTrue(
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Enter,
+                pointerType = PointerType.Unknown,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+
+        // 2. Stylus hover, Touch press, pressed mouse drag, just-released pointer, Exit/Press/Scroll, and active touch session are strictly rejected
+        assertFalse(
+            "Stylus hover must not trigger mouse-only timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Move,
+                pointerType = PointerType.Stylus,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+        assertFalse(
+            "Touch finger press/move must not trigger mouse-only timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Move,
+                pointerType = PointerType.Touch,
+                hasChanges = true,
+                anyPressed = true,
+                anyPreviousPressed = false,
+                isTouchSessionActive = true
+            )
+        )
+        assertFalse(
+            "Pressed mouse drag must not trigger timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Move,
+                pointerType = PointerType.Mouse,
+                hasChanges = true,
+                anyPressed = true,
+                anyPreviousPressed = true,
+                isTouchSessionActive = false
+            )
+        )
+        assertFalse(
+            "Just-released pointer event must not trigger timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Move,
+                pointerType = PointerType.Mouse,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = true,
+                isTouchSessionActive = false
+            )
+        )
+        assertFalse(
+            "Active touch session must suppress timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Enter,
+                pointerType = PointerType.Mouse,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = true
+            )
+        )
+        assertFalse(
+            "Exit event must not trigger timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Exit,
+                pointerType = PointerType.Mouse,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+        assertFalse(
+            "Press event must not trigger timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Press,
+                pointerType = PointerType.Mouse,
+                hasChanges = true,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+        assertFalse(
+            "Empty changes list must not trigger timeline tooltip",
+            TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                eventType = PointerEventType.Move,
+                pointerType = PointerType.Mouse,
+                hasChanges = false,
+                anyPressed = false,
+                anyPreviousPressed = false,
+                isTouchSessionActive = false
+            )
+        )
+
+        // 3. Asana default placeholder sections ("Untitled section", "Unnamed section", "(no section)") with 0 tasks never create empty orphan Headings
+        assertTrue(ExternalProjectCodec.isDefaultPlaceholderSectionName("Untitled section"))
+        assertTrue(ExternalProjectCodec.isDefaultPlaceholderSectionName("UNTITLED SECTION"))
+        assertTrue(ExternalProjectCodec.isDefaultPlaceholderSectionName("Unnamed section"))
+        assertTrue(ExternalProjectCodec.isDefaultPlaceholderSectionName("unnamed section"))
+        assertTrue(ExternalProjectCodec.isDefaultPlaceholderSectionName("(no section)"))
+        assertFalse(ExternalProjectCodec.isDefaultPlaceholderSectionName("Allgemein"))
+        assertFalse(ExternalProjectCodec.isDefaultPlaceholderSectionName("Backend Architecture"))
+
+        val asanaJsonWithEmptyPlaceholders = """
+            {
+              "project": { "name": "Clean Import Project" },
+              "sections": [
+                { "gid": "s-empty-1", "name": "Untitled section", "tasks": [] },
+                { "gid": "s-empty-2", "name": "Unnamed section", "tasks": [] },
+                { "gid": "s-empty-3", "name": "(no section)", "tasks": [] },
+                {
+                  "gid": "s-real",
+                  "name": "Phase 1: Launch",
+                  "tasks": [{ "name": "Ship v3.0.0 GA", "completed": false }]
+                }
+              ],
+              "tasks": []
+            }
+        """.trimIndent()
+        val importedAsana = ExternalProjectCodec.importAsanaJson(asanaJsonWithEmptyPlaceholders, "Fallback")
+        assertEquals(listOf("Phase 1: Launch"), importedAsana.phases.map { it.title })
+        assertTrue(importedAsana.ungroupedTasks.isEmpty())
+
+        val asanaCsvWithEmptyUnnamedHeader = """
+            Task ID,Created At,Completed At,Last Modified,Name,Section/Column,Assignee,Start Date,Due Date,Tags,Notes,Projects,Parent task
+            hdr-1,2026-05-01T10:00:00Z,,2026-05-01T10:00:00Z,Unnamed section:,,,,,,,Clean CSV,
+            hdr-2,2026-05-01T10:00:00Z,,2026-05-01T10:00:00Z,Untitled section:,,,,,,,Clean CSV,
+            hdr-3,2026-05-01T10:00:00Z,,2026-05-01T10:00:00Z,Design Phase:,,,,,,,Clean CSV,
+            t-1,2026-05-01T10:00:00Z,,2026-05-01T10:00:00Z,Create wireframes,Design Phase,,,,,,Clean CSV,
+        """.trimIndent()
+        val importedCsv = ExternalProjectCodec.importAsanaCsv(asanaCsvWithEmptyUnnamedHeader, "Fallback")
+        assertEquals(listOf("Design Phase"), importedCsv.phases.map { it.title })
+        assertTrue(importedCsv.ungroupedTasks.isEmpty())
+
+        // 4. Verify Timeline hover modifier & General phase promote/delete wiring across UI & ViewModel
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val viewModelKt = File(appSrcMain, "java/com/pv/thingsbook/ui/viewmodel/ThingsbookViewModel.kt").readText()
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        val workspaceKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ProjectWorkspaceViews.kt").readText()
+        val modalsKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsV2FeaturesModals.kt").readText()
+        val inspectorKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/WorkspaceInspectorPanel.kt").readText()
+
+        assertTrue(viewModelKt.contains("fun promoteUngroupedTasksToHeading(projectId: String, title: String)"))
+        assertTrue(viewModelKt.contains("fun deleteTasks(taskIds: Set<String>)"))
+        assertTrue(smartViewKt.contains("ProjectUngroupedGeneralHeader("))
+        assertTrue(smartViewKt.contains("viewModel.promoteUngroupedTasksToHeading(currentProject.id"))
+        assertTrue(workspaceKt.contains("onPromoteUngroupedToPhase"))
+        assertTrue(workspaceKt.contains("onDeleteUngroupedTasks"))
+        assertTrue(workspaceKt.contains(".thingsTimelineMouseHoverTooltip("))
+        assertTrue(modalsKt.contains(".thingsTimelineMouseHoverTooltip("))
+        assertTrue(inspectorKt.contains(".thingsTimelineMouseHoverTooltip("))
     }
 }
 

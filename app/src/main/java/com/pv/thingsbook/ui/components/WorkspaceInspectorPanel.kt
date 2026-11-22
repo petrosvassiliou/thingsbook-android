@@ -1519,9 +1519,25 @@ private fun WorkspaceOverviewInspectorContent(
                         is TodayTimelineEntry.TaskBlock -> {
                             var lastTapMs by remember(entry.task.id) { mutableLongStateOf(0L) }
                             val startStr = TimeblockScheduleUtils.formatMinutesAsHm(entry.startMinutes)
+                            val endStr = TimeblockScheduleUtils.formatMinutesAsHm(entry.endMinutes)
+                            val durStr = formatDurationCompact(entry.durationMinutes)
+                            val defaultTodoTitle = stringResource(R.string.placeholder_todo_title)
+                            val taskTooltip = remember(
+                                entry.task.title,
+                                entry.task.isMilestone,
+                                startStr,
+                                endStr,
+                                durStr,
+                                defaultTodoTitle
+                            ) {
+                                val cleanTitle = entry.task.title.ifBlank { defaultTodoTitle }
+                                val titled = if (entry.task.isMilestone) "◆ $cleanTitle" else cleanTitle
+                                "$titled · $startStr – $endStr · $durStr"
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .thingsTimelineMouseHoverTooltip(text = taskTooltip)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(
                                         if (entry.hasConflict) colors.deadlineSoftBg else colors.thingsBlueSoft.copy(alpha = 0.55f)

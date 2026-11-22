@@ -153,6 +153,27 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
 
             const tk = item.task!;
             const containerLabel = getContainerSubtitle(tk);
+            const taskTitle = tk.title.trim() || t.placeholderTodoTitle;
+            const timeSpanLabel = `${formatMinutesAsClock(item.startMinutes)} – ${formatMinutesAsClock(item.endMinutes)}`;
+            const durLabel = formatStandaloneDuration(
+              tk.durationMinutes ?? item.durationMinutes
+            );
+            const scheduledTipParts: string[] = [
+              `${tk.isMilestone ? '◆ ' : ''}${taskTitle}`,
+              timeSpanLabel,
+              durLabel
+            ];
+            if (tk.effortLevel === 'QUICK_WIN') {
+              scheduledTipParts.push(t.effortQuickWin);
+            } else if (tk.effortLevel === 'MEDIUM') {
+              scheduledTipParts.push(t.effortMedium);
+            } else if (tk.effortLevel === 'DEEP_FOCUS') {
+              scheduledTipParts.push(t.effortDeepFocus);
+            }
+            if (containerLabel) {
+              scheduledTipParts.push(containerLabel);
+            }
+            const scheduledMouseTip = scheduledTipParts.join(' · ');
 
             return (
               <div
@@ -167,6 +188,7 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
 
                 <div
                   className={`v2-timeline-card task ${tk.isMilestone ? 'milestone-item' : ''}`}
+                  data-timeline-mouse-tip={scheduledMouseTip}
                 >
                   <button
                     type="button"
@@ -323,10 +345,32 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
           <div className="v2-unscheduled-list">
             {timeline.unscheduledTasks.map((tk) => {
               const containerLabel = getContainerSubtitle(tk);
+              const unscheduledParts: string[] = [
+                `${tk.isMilestone ? '◆ ' : ''}${tk.title.trim() || t.placeholderTodoTitle}`
+              ];
+              if (tk.durationMinutes != null && tk.durationMinutes > 0) {
+                unscheduledParts.push(formatStandaloneDuration(tk.durationMinutes));
+              }
+              if (tk.effortLevel === 'QUICK_WIN') {
+                unscheduledParts.push(t.effortQuickWin);
+              } else if (tk.effortLevel === 'MEDIUM') {
+                unscheduledParts.push(t.effortMedium);
+              } else if (tk.effortLevel === 'DEEP_FOCUS') {
+                unscheduledParts.push(t.effortDeepFocus);
+              }
+              if (containerLabel) {
+                unscheduledParts.push(containerLabel);
+              }
+              if (unscheduledParts.length === 1) {
+                unscheduledParts.push(t.timelineUnscheduledTitle);
+              }
+              const unscheduledMouseTip = unscheduledParts.join(' · ');
+
               return (
                 <div
                   key={tk.id}
                   className={`v2-unscheduled-row ${tk.isMilestone ? 'milestone-item' : ''}`}
+                  data-timeline-mouse-tip={unscheduledMouseTip}
                 >
                   <button
                     type="button"

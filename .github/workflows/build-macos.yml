@@ -163,6 +163,7 @@ jobs:
   build-macos:
     name: Parity Gate, Swift Tests & Universal DMG (macOS 26 Intel)
     runs-on: macos-26-intel
+    timeout-minutes: 15
     continue-on-error: true
     outputs:
       built: ${{ steps.mark_built.outputs.built }}

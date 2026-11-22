@@ -1100,6 +1100,42 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun deleteTasks(taskIds: Set<String>) {
+        val cleanIds = taskIds.filter { it.isNotBlank() }.toSet()
+        if (cleanIds.isEmpty()) return
+        if (cleanIds.size == 1) {
+            deleteTask(cleanIds.first())
+            return
+        }
+        safeVmScope.launch {
+            val prevEntities = cleanIds.mapNotNull { repository.getTaskEntityById(it) }.filter { !it.isDeleted }
+            if (_expandedTaskId.value in cleanIds) {
+                _expandedTaskId.value = null
+            }
+            val remainingSelected = _selectedTaskIds.value - cleanIds
+            if (remainingSelected.size != _selectedTaskIds.value.size) {
+                _selectedTaskIds.value = remainingSelected
+                if (remainingSelected.isEmpty()) _isMultiSelectMode.value = false
+            }
+            if (_focusTimerState.value?.taskId in cleanIds) {
+                stopFocusTimer()
+            }
+            cleanIds.forEach { id ->
+                repository.softDeleteTask(id)
+            }
+            if (prevEntities.isNotEmpty()) {
+                val countLabel = getLocalizedString(R.string.v30_drag_multi_count, prevEntities.size)
+                registerUndoAction(
+                    message = getLocalizedString(R.string.undo_task_deleted, countLabel)
+                ) {
+                    prevEntities.forEach { entity ->
+                        repository.restoreDeletedTask(entity.id)
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Magic Plus Drop Logic: Inserts a new To-Do at exact `dropIndex` using LexoRank midpoint `sortOrder`
      * and immediately expands the newly created card inline!
@@ -1568,6 +1604,19 @@ class ThingsbookViewModel @Inject constructor(
     fun deleteHeading(headingId: String) {
         safeVmScope.launch {
             repository.softDeleteHeading(headingId)
+        }
+    }
+
+    fun promoteUngroupedTasksToHeading(projectId: String, title: String) {
+        val cleanTitle = title.trim()
+        if (projectId.isBlank() || cleanTitle.isEmpty()) return
+        safeVmScope.launch {
+            val promoted = repository.promoteUngroupedTasksToHeading(projectId, cleanTitle) ?: return@launch
+            val (newHeadingId, previousTaskHeadings) = promoted
+            expandHeading(newHeadingId)
+            registerUndoAction(message = cleanTitle) {
+                repository.restorePromotedHeadingUndo(newHeadingId, previousTaskHeadings)
+            }
         }
     }
 

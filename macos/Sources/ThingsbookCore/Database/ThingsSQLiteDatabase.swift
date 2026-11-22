@@ -3792,6 +3792,81 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     @discardableResult
+    public func promoteUngroupedTasksToHeading(
+        projectId: String,
+        title: String
+    ) throws -> Heading? {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return nil }
+
+        var createdHeading: Heading? = nil
+        try queue.sync {
+            let now = nowMillis()
+            try inTransactionLocked {
+                let activeHeadings = try fetchAllActiveHeadingsLocked()
+                    .filter { $0.projectId == projectId && !$0.isArchived }
+                    .sorted {
+                        if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                        return $0.id < $1.id
+                    }
+                let validHeadingIds = Set(activeHeadings.map(\.id))
+                let prependedSortOrder = (activeHeadings.first?.sortOrder ?? 0.0) - 1000.0
+
+                let heading = Heading(
+                    id: UUID().uuidString,
+                    projectId: projectId,
+                    title: cleanTitle,
+                    sortOrder: prependedSortOrder,
+                    isArchived: false,
+                    startDate: nil,
+                    endDate: nil,
+                    createdAt: now,
+                    updatedAt: now
+                )
+                try upsertHeadingLocked(heading, isDirty: true)
+
+                var targetTaskIds: [String] = []
+                let qStmt = try prepareLocked("""
+                    SELECT id, heading_id FROM tasks
+                    WHERE project_id = ? AND is_deleted = 0 AND status = 'OPEN';
+                """)
+                defer { sqlite3_finalize(qStmt) }
+                bindText(qStmt, 1, projectId)
+                while sqlite3_step(qStmt) == SQLITE_ROW {
+                    guard let tid = colString(qStmt, 0) else { continue }
+                    let hid = colString(qStmt, 1)
+                    if hid == nil || !validHeadingIds.contains(hid!) {
+                        targetTaskIds.append(tid)
+                    }
+                }
+
+                if !targetTaskIds.isEmpty {
+                    let uStmt = try prepareLocked("""
+                        UPDATE tasks
+                        SET heading_id = ?, updated_at = ?, is_dirty = 1
+                        WHERE id = ?;
+                    """)
+                    defer { sqlite3_finalize(uStmt) }
+                    for tid in targetTaskIds {
+                        sqlite3_reset(uStmt)
+                        sqlite3_clear_bindings(uStmt)
+                        bindText(uStmt, 1, heading.id)
+                        bindInt64(uStmt, 2, now)
+                        bindText(uStmt, 3, tid)
+                        _ = sqlite3_step(uStmt)
+                    }
+                }
+
+                createdHeading = heading
+            }
+        }
+        if createdHeading != nil {
+            notifyMutation()
+        }
+        return createdHeading
+    }
+
+    @discardableResult
     public func createOrUpdateTag(id: String? = nil, title: String, parentTagId: String? = nil, shortcut: String? = nil) throws -> Tag {
         var didMutate = false
         let tag = try queue.sync { () -> Tag in
@@ -4448,7 +4523,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
                 for (idx, phase) in parsed.phases.enumerated() {
                     let cleanPhaseTitle = phase.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if cleanPhaseTitle.isEmpty {
+                    let isPlaceholderPhase = ExternalProjectCodec.isUngroupedSectionName(cleanPhaseTitle)
+                    if cleanPhaseTitle.isEmpty || isPlaceholderPhase {
                         for spec in phase.tasks {
                             try insertImportedTask(spec, headingId: nil)
                         }

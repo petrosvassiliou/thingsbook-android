@@ -7,9 +7,15 @@ import {
   DEFAULT_TOUCH_SLOP_PX,
   TooltipTimingMachine,
   computeTooltipPosition,
+  isTimelineMouseTooltipAllowed,
   isTopBarIconTooltipAllowed,
   type AnchorRectLike
 } from '../domain/tooltipTiming';
+
+export interface TooltipPointerContext {
+  pointerType: string;
+  buttons: number;
+}
 
 interface VisibleTooltipState {
   anchorId: string;
@@ -38,6 +44,37 @@ function isDisabledControl(el: HTMLElement): boolean {
     return true;
   }
   return el.getAttribute('aria-disabled') === 'true';
+}
+
+function isInteractiveChildControl(el: HTMLElement): boolean {
+  return (
+    el.tagName === 'BUTTON' ||
+    el.tagName === 'INPUT' ||
+    el.tagName === 'SELECT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.tagName === 'A'
+  );
+}
+
+function isTimelineDraggingElement(el: HTMLElement): boolean {
+  return (
+    el.getAttribute('data-timeline-dragging') === 'true' ||
+    el.closest('[data-timeline-dragging="true"]') !== null
+  );
+}
+
+function getTimelineMouseTooltipText(
+  el: HTMLElement,
+  pointerContext?: TooltipPointerContext
+): string {
+  const raw = (el.getAttribute('data-timeline-mouse-tip') ?? '').trim();
+  const allowed = isTimelineMouseTooltipAllowed({
+    hasTimelineTipAttr: raw.length > 0,
+    pointerType: pointerContext?.pointerType ?? '',
+    buttons: pointerContext?.buttons ?? 0,
+    isDraggingTimelineBar: isTimelineDraggingElement(el)
+  });
+  return allowed ? raw : '';
 }
 
 function hasVisibleResponsiveTextLabel(el: HTMLElement): boolean {
@@ -126,6 +163,19 @@ function syncElementTooltipAttribute(el: HTMLElement): string {
   return (el.getAttribute('data-topbar-tip') ?? '').trim();
 }
 
+function getElementTooltipText(
+  el: HTMLElement,
+  pointerContext?: TooltipPointerContext
+): string {
+  if (isTopBarIconButton(el)) {
+    return syncElementTooltipAttribute(el);
+  }
+  if (el.hasAttribute('data-timeline-mouse-tip')) {
+    return getTimelineMouseTooltipText(el, pointerContext);
+  }
+  return '';
+}
+
 function sanitizeSubtreeTitles(root: ParentNode): void {
   if (root instanceof HTMLElement && (root.hasAttribute('title') || root.hasAttribute('data-tooltip'))) {
     syncElementTooltipAttribute(root);
@@ -137,7 +187,12 @@ function sanitizeSubtreeTitles(root: ParentNode): void {
 }
 
 function upgradeNativeTitlesInLineage(target: EventTarget | null): void {
-  let cur: Element | null = target instanceof Element ? target : null;
+  let cur: Element | null =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null;
   while (cur) {
     if (isTooltipEligibleElement(cur) && (cur.hasAttribute('title') || cur.hasAttribute('data-tooltip'))) {
       syncElementTooltipAttribute(cur);
@@ -146,13 +201,22 @@ function upgradeNativeTitlesInLineage(target: EventTarget | null): void {
   }
 }
 
-function resolveTooltipAnchor(
-  target: EventTarget | null
+export function resolveTooltipAnchor(
+  target: EventTarget | null,
+  pointerContext?: TooltipPointerContext
 ): { element: HTMLElement; text: string; rect: AnchorRectLike } | null {
   upgradeNativeTitlesInLineage(target);
-  let cur: Element | null = target instanceof Element ? target : null;
+  let cur: Element | null =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null;
   while (cur) {
-    if (isTooltipEligibleElement(cur) && cur.isConnected && !isDisabledControl(cur)) {
+    if (isTooltipEligibleElement(cur)) {
+      if (!cur.isConnected || isDisabledControl(cur)) {
+        return null;
+      }
       if (isTopBarIconButton(cur)) {
         const text = syncElementTooltipAttribute(cur);
         if (text) {
@@ -170,6 +234,31 @@ function resolveTooltipAnchor(
             };
           }
         }
+        return null;
+      }
+      if (cur.hasAttribute('data-timeline-mouse-tip')) {
+        const text = getTimelineMouseTooltipText(cur, pointerContext);
+        if (text) {
+          const domRect = cur.getBoundingClientRect();
+          if (domRect.width > 0 && domRect.height > 0) {
+            return {
+              element: cur,
+              text,
+              rect: {
+                left: domRect.left,
+                top: domRect.top,
+                width: domRect.width,
+                height: domRect.height
+              }
+            };
+          }
+        }
+        return null;
+      }
+      // Inner interactive buttons/inputs inside a timeline bar or card (e.g. -1d / +1d / +15m)
+      // do not inherit their ancestor's task tooltip.
+      if (isInteractiveChildControl(cur)) {
+        return null;
       }
     }
     cur = cur.parentElement;
@@ -199,6 +288,10 @@ export const ThingsTooltipHost: React.FC = () => {
     let suppressTouchClickUntilMs = 0;
     let touchStartX = 0;
     let touchStartY = 0;
+    let lastHoverPointerContext: TooltipPointerContext = {
+      pointerType: '',
+      buttons: 0
+    };
     let mutationObserver: MutationObserver | null = null;
 
     // Globally strip native HTML `title` attributes so browser OS black tooltips never appear anywhere
@@ -265,13 +358,23 @@ export const ThingsTooltipHost: React.FC = () => {
     const observeActiveElement = (el: HTMLElement, anchorId: string) => {
       disconnectObserver();
       mutationObserver = new MutationObserver(() => {
-        if (!el.isConnected || isDisabledControl(el) || !isTopBarIconButton(el)) {
+        const isTopBar = isTopBarIconButton(el);
+        const hasTimelineAttr = el.hasAttribute('data-timeline-mouse-tip');
+        if (!el.isConnected || isDisabledControl(el) || (!isTopBar && !hasTimelineAttr)) {
           if (activeAnchorId === anchorId) {
             dismissImmediately(true);
           }
           return;
         }
-        const nextText = syncElementTooltipAttribute(el);
+        const nextText = isTopBar
+          ? syncElementTooltipAttribute(el)
+          : getTimelineMouseTooltipText(el, lastHoverPointerContext);
+        if (!nextText && hasTimelineAttr && isTimelineDraggingElement(el)) {
+          if (activeAnchorId === anchorId) {
+            dismissImmediately(false);
+          }
+          return;
+        }
         const res = machine.updateActiveText(anchorId, nextText, performance.now());
         if (!res.activeText) {
           if (activeAnchorId === anchorId) {
@@ -304,12 +407,30 @@ export const ThingsTooltipHost: React.FC = () => {
       });
       mutationObserver.observe(el, {
         attributes: true,
-        attributeFilter: ['title', 'data-tooltip', 'data-topbar-tip', 'disabled', 'aria-disabled']
+        attributeFilter: [
+          'title',
+          'data-tooltip',
+          'data-topbar-tip',
+          'data-timeline-mouse-tip',
+          'data-timeline-dragging',
+          'disabled',
+          'aria-disabled'
+        ]
       });
     };
 
-    const activateHoverTarget = (target: EventTarget | null) => {
-      const resolved = resolveTooltipAnchor(target);
+    const activateHoverTarget = (
+      target: EventTarget | null,
+      pointerContext: TooltipPointerContext
+    ) => {
+      if (pointerContext.buttons !== 0) {
+        if (activeAnchorId !== null) {
+          dismissImmediately(false);
+        }
+        return;
+      }
+
+      const resolved = resolveTooltipAnchor(target, pointerContext);
       const now = performance.now();
 
       if (!resolved) {
@@ -361,7 +482,7 @@ export const ThingsTooltipHost: React.FC = () => {
             machine.pointerLeave(nextId, performance.now());
             return;
           }
-          const latestText = syncElementTooltipAttribute(scheduledEl);
+          const latestText = getElementTooltipText(scheduledEl, lastHoverPointerContext);
           machine.updateActiveText(nextId, latestText, performance.now());
           if (!machine.commitPendingShow(nextId)) {
             return;
@@ -386,14 +507,16 @@ export const ThingsTooltipHost: React.FC = () => {
     };
 
     const handlePointerOver = (e: PointerEvent) => {
+      lastHoverPointerContext = { pointerType: e.pointerType, buttons: e.buttons };
       if (e.pointerType === 'touch') {
         upgradeNativeTitlesInLineage(e.target);
         return;
       }
-      activateHoverTarget(e.target);
+      activateHoverTarget(e.target, lastHoverPointerContext);
     };
 
     const handlePointerMove = (e: PointerEvent) => {
+      lastHoverPointerContext = { pointerType: e.pointerType, buttons: e.buttons };
       if (e.pointerType === 'touch') {
         if (activeTouchPointerId === e.pointerId && touchPressTimerId !== null) {
           const dx = e.clientX - touchStartX;
@@ -408,37 +531,49 @@ export const ThingsTooltipHost: React.FC = () => {
 
       if (activeElement && !activeElement.isConnected) {
         const hit = document.elementFromPoint(e.clientX, e.clientY);
-        activateHoverTarget(hit);
+        activateHoverTarget(hit, lastHoverPointerContext);
         return;
       }
-      activateHoverTarget(e.target);
+      activateHoverTarget(e.target, lastHoverPointerContext);
     };
 
     const handlePointerOut = (e: PointerEvent) => {
+      lastHoverPointerContext = { pointerType: e.pointerType, buttons: e.buttons };
       if (e.pointerType === 'touch') return;
       if (!activeElement || !activeAnchorId) return;
 
       const related = e.relatedTarget;
       if (related instanceof Node && activeElement.contains(related)) {
-        // Moved into a child inside activeElement; check if child has its own inner tooltip
-        const inner = resolveTooltipAnchor(related);
-        if (inner && inner.element !== activeElement) {
-          activateHoverTarget(inner.element);
+        // Moved into a child inside activeElement; check if child resolves to a different anchor or interactive barrier
+        const inner = resolveTooltipAnchor(related, lastHoverPointerContext);
+        if (!inner) {
+          activateHoverTarget(null, lastHoverPointerContext);
+        } else if (inner.element !== activeElement) {
+          activateHoverTarget(inner.element, lastHoverPointerContext);
         }
         return;
       }
 
       // Leaving activeElement — check if relatedTarget is an outer tooltipped ancestor or neighbor
-      activateHoverTarget(related);
+      activateHoverTarget(related, lastHoverPointerContext);
     };
 
     const handlePointerDown = (e: PointerEvent) => {
       upgradeNativeTitlesInLineage(e.target);
+      lastHoverPointerContext = {
+        pointerType: e.pointerType,
+        buttons: e.buttons || 1
+      };
 
       if (e.pointerType === 'touch') {
         dismissImmediately(false);
-        const resolved = resolveTooltipAnchor(e.target);
-        if (!resolved) return;
+        const resolved = resolveTooltipAnchor(e.target, {
+          pointerType: 'touch',
+          buttons: e.buttons || 1
+        });
+        if (!resolved || resolved.element.hasAttribute('data-timeline-mouse-tip')) {
+          return;
+        }
         // Skip checkboxes that handle long-press / context status menu directly
         if (resolved.element.classList.contains('things-checkbox')) {
           return;
@@ -453,6 +588,7 @@ export const ThingsTooltipHost: React.FC = () => {
         touchPressTimerId = window.setTimeout(() => {
           touchPressTimerId = null;
           if (!pressedEl.isConnected || isDisabledControl(pressedEl)) return;
+          if (pressedEl.hasAttribute('data-timeline-mouse-tip')) return;
           const text = syncElementTooltipAttribute(pressedEl);
           if (!text) return;
           const liveRect = pressedEl.getBoundingClientRect();

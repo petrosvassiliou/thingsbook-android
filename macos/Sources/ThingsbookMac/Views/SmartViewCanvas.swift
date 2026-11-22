@@ -5,6 +5,8 @@ public struct SmartViewCanvas: View {
     @ObservedObject var store: ThingsbookStore
     public var isInspectorOpen: Bool = false
 
+    private static let generalSectionRenameSentinel = "__general__"
+
     @State private var newHeadingTitle = ""
     @State private var isAddingHeading = false
     @State private var renamingHeadingId: String? = nil
@@ -950,7 +952,9 @@ public struct SmartViewCanvas: View {
                         emptyPlaceholder(icon: "checkmark.circle", text: store.tr("empty_view"))
                     } else {
                         if !headings.isEmpty {
-                            projectGeneralDropSection(project: project, unheadedTasks: unheaded)
+                            if !unheaded.isEmpty {
+                                projectGeneralDropSection(project: project, unheadedTasks: unheaded)
+                            }
                         } else if !unheaded.isEmpty {
                             reorderableTaskStack(
                                 unheaded,
@@ -1034,26 +1038,47 @@ public struct SmartViewCanvas: View {
         project: Project,
         unheadedTasks: [TaskItem]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let isRenamingGeneral = renamingHeadingId == Self.generalSectionRenameSentinel
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Capsule(style: .continuous)
                     .fill(ThingsMacPalette.inboxBlue)
                     .frame(width: 3.5, height: 16)
 
-                Text(store.tr("v30_board_ungrouped_column"))
-                    .font(.system(size: 13.5, weight: .bold))
-                    .foregroundStyle(.secondary)
-
-                if !unheadedTasks.isEmpty {
-                    Text("\(unheadedTasks.count)")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                if isRenamingGeneral {
+                    TextField(store.tr("entity_new_heading"), text: $renameHeadingText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                        .focused($isRenameHeadingFocused)
+                        .onSubmit {
+                            commitGeneralSectionRename(projectId: project.id)
+                        }
+                    Button(store.tr("action_save")) {
+                        commitGeneralSectionRename(projectId: project.id)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    Button(store.tr("action_cancel")) {
+                        renamingHeadingId = nil
+                    }
+                    .controlSize(.small)
+                } else {
+                    Text(store.tr("v30_board_ungrouped_column"))
+                        .font(.system(size: 13.5, weight: .bold))
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6.5)
-                        .padding(.vertical, 1.5)
-                        .background(Capsule().fill(Color.primary.opacity(0.055)))
+
+                    if !unheadedTasks.isEmpty {
+                        Text("\(unheadedTasks.count)")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(Color.primary.opacity(0.055)))
+                    }
                 }
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 Button {
                     store.createNewTaskInCurrentContext(preferredHeadingId: nil)
@@ -1064,6 +1089,35 @@ public struct SmartViewCanvas: View {
                 }
                 .buttonStyle(.plain)
                 .thingsTooltip(store.tr("entity_new_todo"))
+
+                if !unheadedTasks.isEmpty {
+                    Button {
+                        renameHeadingText = store.tr("v30_board_ungrouped_column")
+                        renamingHeadingId = Self.generalSectionRenameSentinel
+                        DispatchQueue.main.async {
+                            isRenameHeadingFocused = true
+                        }
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("macos_rename_heading"))
+
+                    Button {
+                        if renamingHeadingId == Self.generalSectionRenameSentinel {
+                            renamingHeadingId = nil
+                        }
+                        store.deleteTasks(Set(unheadedTasks.map(\.id)))
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(ThingsMacPalette.deadlineCrimson.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("action_delete"))
+                }
             }
 
             if !unheadedTasks.isEmpty {
@@ -1304,6 +1358,13 @@ public struct SmartViewCanvas: View {
         var copy = heading
         copy.title = clean
         try? store.database.updateHeading(copy)
+    }
+
+    private func commitGeneralSectionRename(projectId: String) {
+        let clean = renameHeadingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { renamingHeadingId = nil }
+        guard !clean.isEmpty else { return }
+        _ = store.promoteUngroupedTasksToHeading(projectId: projectId, title: clean)
     }
 
     // MARK: - Area View
@@ -2532,6 +2593,10 @@ private struct TodayDailyTimelineView: View {
                 )
         )
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .thingsTimelineMouseTooltip(
+            todayTimelineTaskTooltipText(task, startMinutes: startMinutes, endMinutes: endMinutes),
+            isSuppressed: activePopoverTaskId == task.id
+        )
     }
 
     private func unscheduledTaskRow(_ task: TaskItem) -> some View {
@@ -2613,6 +2678,10 @@ private struct TodayDailyTimelineView: View {
                 )
         )
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .thingsTimelineMouseTooltip(
+            todayTimelineTaskTooltipText(task),
+            isSuppressed: activePopoverTaskId == "unsched_\(task.id)"
+        )
         .thingsInstantTaskTap(
             onSingleClick: { modifiers in
                 store.handleRowClick(taskId: task.id, modifiers: modifiers)
@@ -2647,6 +2716,21 @@ private struct TodayDailyTimelineView: View {
             }
         }
         .thingsTaskDraggable(store: store, task: task)
+    }
+
+    private func todayTimelineTaskTooltipText(
+        _ task: TaskItem,
+        startMinutes: Int? = nil,
+        endMinutes: Int? = nil
+    ) -> String {
+        TimelineTaskTooltipFormatter.formatTodayTimelineTask(
+            task: task,
+            startMinutes: startMinutes,
+            endMinutes: endMinutes,
+            projectTitle: store.project(byId: task.projectId)?.title,
+            isBlocked: store.isTaskActivelyBlocked(task),
+            language: store.preferences.language
+        )
     }
 
     private var milestoneTimelinePill: some View {

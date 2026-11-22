@@ -293,13 +293,16 @@ function findColumnIndex(headers: readonly string[], aliases: readonly string[])
   return -1;
 }
 
-function isUngroupedSectionName(raw: string): boolean {
+export function isUngroupedSectionName(raw: string): boolean {
   const norm = raw.trim().toLowerCase();
   return (
     norm.length === 0 ||
     norm === '(no section)' ||
     norm === 'no section' ||
     norm === 'untitled section' ||
+    norm === '(untitled section)' ||
+    norm === 'unnamed section' ||
+    norm === '(unnamed section)' ||
     norm === 'unbenannter abschnitt' ||
     norm === 'kein abschnitt' ||
     norm === '(kein abschnitt)' ||
@@ -900,6 +903,8 @@ export function importAsanaJson(
   const phaseList: ExternalImportedPhase[] = [];
   const phaseByKey = new Map<string, ExternalImportedPhase>();
   const sectionGidToPhase = new Map<string, ExternalImportedPhase>();
+  const ungroupedSectionGids = new Set<string>();
+  const ungroupedTasks: ExternalImportedTask[] = [];
 
   const ensurePhase = (
     title: string,
@@ -908,7 +913,10 @@ export function importAsanaJson(
     gid?: string
   ): ExternalImportedPhase | null => {
     const trimmed = title.trim();
-    if (isUngroupedSectionName(trimmed)) return null;
+    if (isUngroupedSectionName(trimmed)) {
+      if (gid) ungroupedSectionGids.add(gid);
+      return null;
+    }
     const key = trimmed.toLowerCase();
     let existing = phaseByKey.get(key);
     if (!existing) {
@@ -994,6 +1002,7 @@ export function importAsanaJson(
               );
               if (parsedNested) {
                 if (phase) phase.tasks.push(parsedNested.task);
+                else ungroupedTasks.push(parsedNested.task);
               }
             }
           }
@@ -1008,7 +1017,6 @@ export function importAsanaJson(
     }
   }
 
-  const ungroupedTasks: ExternalImportedTask[] = [];
   const topTaskByGid = new Map<string, ExternalImportedTask>();
   const topTaskByTitle = new Map<string, ExternalImportedTask>();
   const deferredSubtasks: Array<{
@@ -1043,7 +1051,7 @@ export function importAsanaJson(
       topTaskByTitle.set(parsedItem.task.title.toLowerCase(), parsedItem.task);
     }
 
-    if (parsedItem.sectionHint) {
+    if (parsedItem.sectionHint && !ungroupedSectionGids.has(parsedItem.sectionHint)) {
       const targetPhase =
         sectionGidToPhase.get(parsedItem.sectionHint) ??
         ensurePhase(parsedItem.sectionHint);
@@ -1066,7 +1074,7 @@ export function importAsanaJson(
         title: sub.task.title,
         isCompleted: sub.task.status === 'COMPLETED'
       });
-    } else if (sub.sectionHint) {
+    } else if (sub.sectionHint && !ungroupedSectionGids.has(sub.sectionHint)) {
       const targetPhase =
         sectionGidToPhase.get(sub.sectionHint) ?? ensurePhase(sub.sectionHint);
       if (targetPhase) targetPhase.tasks.push(sub.task);
@@ -1524,7 +1532,7 @@ function importPlannerTabularRows(
       assigneeId: assigneeRaw || null
     };
 
-    if (!bucketName) {
+    if (isUngroupedSectionName(bucketName)) {
       ungroupedTasks.push(task);
     } else {
       const key = bucketName.toLowerCase();

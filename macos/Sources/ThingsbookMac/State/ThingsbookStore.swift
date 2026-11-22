@@ -1080,6 +1080,19 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    @discardableResult
+    public func promoteUngroupedTasksToHeading(projectId: String, title: String) -> Heading? {
+        flushModalDraftsIfNeeded()
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty,
+              let created = try? database.promoteUngroupedTasksToHeading(projectId: projectId, title: clean) else {
+            return nil
+        }
+        collapsedHeadingIds.remove(created.id)
+        reloadSnapshot()
+        return created
+    }
+
     public func setProjectViewMode(_ projectId: String, mode: ProjectViewMode) {
         if mode != .roadmap, isTimelineFullScreen {
             isTimelineFullScreen = false
@@ -1671,15 +1684,9 @@ public final class ThingsbookStore: ObservableObject {
         )
     }
 
-    public func deleteSelectedTasks() {
+    public func deleteTasks(_ ids: Set<String>) {
         flushModalDraftsIfNeeded()
-        let ids = selectedTaskIds
-        guard !ids.isEmpty else {
-            if let exp = expandedTaskId, let t = (allOpenTasks + logbookTasks).first(where: { $0.id == exp }) {
-                deleteTask(t)
-            }
-            return
-        }
+        guard !ids.isEmpty else { return }
         let candidates = allOpenTasks + logbookTasks
         var deletedTasks: [TaskItem] = []
         for id in ids {
@@ -1692,10 +1699,11 @@ public final class ThingsbookStore: ObservableObject {
                 deletedTasks.append(t)
             }
         }
-        selectedTaskIds.removeAll()
+        selectedTaskIds.subtract(ids)
         if let exp = expandedTaskId, ids.contains(exp) {
             expandedTaskId = nil
         }
+        reloadSnapshot()
         if deletedTasks.count == 1, let single = deletedTasks.first {
             let displayTitle = single.title.isEmpty ? tr("macos_untitled_todo") : single.title
             presentUndo(
@@ -1708,6 +1716,18 @@ public final class ThingsbookStore: ObservableObject {
                 action: .tasksDeleted(deletedTasks.map(\.id))
             )
         }
+    }
+
+    public func deleteSelectedTasks() {
+        flushModalDraftsIfNeeded()
+        let ids = selectedTaskIds
+        guard !ids.isEmpty else {
+            if let exp = expandedTaskId, let t = (allOpenTasks + logbookTasks).first(where: { $0.id == exp }) {
+                deleteTask(t)
+            }
+            return
+        }
+        deleteTasks(ids)
     }
 
     public func setTasksPinned(_ taskIds: [String], isPinned: Bool) {

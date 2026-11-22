@@ -1616,11 +1616,26 @@ export const App: React.FC = () => {
     }
   }, [isTimelineFullScreen, activeNav, todayViewMode, activeProjectViewMode]);
 
+  // Always reset dragOverHeadingId on global dragend / drop so '__ungrouped__' never gets stuck visible
+  useEffect(() => {
+    const clearHeadingDragState = () => {
+      setDragOverHeadingId(null);
+    };
+    window.addEventListener('dragend', clearHeadingDragState, true);
+    window.addEventListener('drop', clearHeadingDragState, true);
+    return () => {
+      window.removeEventListener('dragend', clearHeadingDragState, true);
+      window.removeEventListener('drop', clearHeadingDragState, true);
+    };
+  }, []);
+
   const handleSelectNav = useCallback(
     (nav: ActiveNavigation, highlightTaskId?: string) => {
       setActiveNav(nav);
       setMobileDrawerOpen(false);
       setEditingAreaHeader(false);
+      setEditingHeadingId(null);
+      setDragOverHeadingId(null);
       setProjectAreaDropdownOpen(false);
       setProjectHeaderMenuOpen(false);
       setViewSortDropdownOpen(false);
@@ -4794,6 +4809,7 @@ export const App: React.FC = () => {
                         }
                       }}
                       layout={activeProjectRoadmapLayout}
+                      checklistItems={snapshot.checklistItems}
                       selectedTaskIds={selectedTaskIds}
                       isMultiSelectMode={isExplicitMultiSelect}
                       orderedVisibleTaskIds={orderedVisibleTaskIds}
@@ -4825,64 +4841,169 @@ export const App: React.FC = () => {
                   {currentProjectMode === 'list' && (
                     <>
                       {/* Ungrouped (General) Tasks at Top + Drop Target when Phases exist */}
-                      {(ungroupedTasks.length > 0 || projHeadings.length > 0) && (
+                      {(ungroupedTasks.length > 0 ||
+                        (projHeadings.length > 0 &&
+                          (dragOverHeadingId === '__ungrouped__' ||
+                            editingHeadingId === '__ungrouped__'))) && (
                         <div className="group-section">
                           {projHeadings.length > 0 &&
-                            (ungroupedTasks.length > 0 || dragOverHeadingId === '__ungrouped__') && (
-                              <div
-                                className={`project-heading-header ungrouped-drop-header ${
-                                  dragOverHeadingId === '__ungrouped__' ? 'drag-over' : ''
-                                }`}
-                                data-testid="project-ungrouped-drop-header"
-                                onClick={(e) => e.stopPropagation()}
-                                onDragOver={(e) => {
-                                  if (hasDraggedTaskMime(e.dataTransfer)) {
-                                    e.preventDefault();
-                                    e.dataTransfer.dropEffect = 'move';
-                                    setDragOverHeadingId('__ungrouped__');
-                                  }
-                                }}
-                                onDragLeave={() => {
-                                  if (dragOverHeadingId === '__ungrouped__') {
-                                    setDragOverHeadingId(null);
-                                  }
-                                }}
-                                onDrop={async (e) => {
-                                  e.preventDefault();
-                                  setDragOverHeadingId(null);
-                                  const draggedIds = extractDraggedTaskIds(
-                                    e.dataTransfer,
-                                    selectedTaskIds,
-                                    orderedVisibleTaskIds
+                            (ungroupedTasks.length > 0 ||
+                              dragOverHeadingId === '__ungrouped__' ||
+                              editingHeadingId === '__ungrouped__') && (() => {
+                              const isEditingUngrouped =
+                                editingHeadingId === '__ungrouped__';
+                              const commitUngroupedPromote = async () => {
+                                if (cancelingHeadingEditRef.current) {
+                                  cancelingHeadingEditRef.current = false;
+                                  return;
+                                }
+                                const clean = editingHeadingTitle.trim();
+                                setEditingHeadingId(null);
+                                if (clean) {
+                                  await localDb.promoteUngroupedTasksToHeading(
+                                    project.id,
+                                    clean
                                   );
-                                  if (draggedIds.length === 0) return;
-                                  await localDb.batchMoveOrReorderTasksInContainer(draggedIds, {
-                                    projectId: project.id,
-                                    headingId: null,
-                                    areaId: null
-                                  });
-                                  if (draggedIds.length > 1) {
-                                    showToast(t.dropMovedFeedback(draggedIds.length));
-                                  }
-                                }}
-                              >
-                                <span className="project-heading-title-btn" style={{ cursor: 'default' }}>
-                                  <span className="project-phase-accent general" />
-                                  <span className="project-heading-title-text">{t.projectUngroupedColumn}</span>
-                                </span>
-                                <div className="project-heading-actions">
-                                  <button
-                                    type="button"
-                                    className="icon-btn"
-                                    style={{ height: 26, minWidth: 26, padding: 0 }}
-                                    title={t.entityNewTodo}
-                                    onClick={() => void createNewTodoInCurrentContext(null)}
-                                  >
-                                    <Plus size={14.5} />
-                                  </button>
+                                }
+                              };
+
+                              return (
+                                <div
+                                  className={`project-heading-header ungrouped-drop-header ${
+                                    dragOverHeadingId === '__ungrouped__' ? 'drag-over' : ''
+                                  }`}
+                                  data-testid="project-ungrouped-drop-header"
+                                  onClick={(e) => e.stopPropagation()}
+                                  onDragOver={(e) => {
+                                    if (hasDraggedTaskMime(e.dataTransfer)) {
+                                      e.preventDefault();
+                                      e.dataTransfer.dropEffect = 'move';
+                                      setDragOverHeadingId('__ungrouped__');
+                                    }
+                                  }}
+                                  onDragLeave={() => {
+                                    if (dragOverHeadingId === '__ungrouped__') {
+                                      setDragOverHeadingId(null);
+                                    }
+                                  }}
+                                  onDrop={async (e) => {
+                                    e.preventDefault();
+                                    setDragOverHeadingId(null);
+                                    const draggedIds = extractDraggedTaskIds(
+                                      e.dataTransfer,
+                                      selectedTaskIds,
+                                      orderedVisibleTaskIds
+                                    );
+                                    if (draggedIds.length === 0) return;
+                                    await localDb.batchMoveOrReorderTasksInContainer(
+                                      draggedIds,
+                                      {
+                                        projectId: project.id,
+                                        headingId: null,
+                                        areaId: null
+                                      }
+                                    );
+                                    if (draggedIds.length > 1) {
+                                      showToast(t.dropMovedFeedback(draggedIds.length));
+                                    }
+                                  }}
+                                >
+                                  {isEditingUngrouped ? (
+                                    <input
+                                      type="text"
+                                      className="text-field"
+                                      style={{ padding: '4px 8px', flex: 1, fontWeight: 700 }}
+                                      autoFocus
+                                      data-testid="project-ungrouped-rename-input"
+                                      value={editingHeadingTitle}
+                                      placeholder={t.entityNewHeading}
+                                      onChange={(e) =>
+                                        setEditingHeadingTitle(e.target.value)
+                                      }
+                                      onBlur={() => void commitUngroupedPromote()}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          void commitUngroupedPromote();
+                                        } else if (e.key === 'Escape') {
+                                          e.stopPropagation();
+                                          cancelingHeadingEditRef.current = true;
+                                          window.setTimeout(() => {
+                                            cancelingHeadingEditRef.current = false;
+                                          }, 0);
+                                          setEditingHeadingId(null);
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <span
+                                      className="project-heading-title-btn"
+                                      style={{ cursor: 'default' }}
+                                      onDoubleClick={() => {
+                                        setEditingHeadingId('__ungrouped__');
+                                        setEditingHeadingTitle(t.projectUngroupedColumn);
+                                      }}
+                                    >
+                                      <span className="project-phase-accent general" />
+                                      <span className="project-heading-title-text">
+                                        {t.projectUngroupedColumn}
+                                      </span>
+                                    </span>
+                                  )}
+
+                                  <div className="project-heading-actions">
+                                    <button
+                                      type="button"
+                                      className="icon-btn"
+                                      style={{ height: 26, minWidth: 26, padding: 0 }}
+                                      title={t.entityNewTodo}
+                                      onClick={() => void createNewTodoInCurrentContext(null)}
+                                    >
+                                      <Plus size={14.5} />
+                                    </button>
+                                    {ungroupedTasks.length > 0 && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="icon-btn"
+                                          data-testid="project-ungrouped-rename-btn"
+                                          style={{ height: 26, minWidth: 26, padding: 0 }}
+                                          title={t.actionRename}
+                                          onClick={() => {
+                                            setEditingHeadingId('__ungrouped__');
+                                            setEditingHeadingTitle(t.projectUngroupedColumn);
+                                          }}
+                                        >
+                                          <Edit3 size={13.5} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="icon-btn"
+                                          data-testid="project-ungrouped-delete-btn"
+                                          style={{
+                                            height: 26,
+                                            minWidth: 26,
+                                            padding: 0,
+                                            color: 'var(--deadline-red)'
+                                          }}
+                                          title={t.actionDelete}
+                                          onClick={async () => {
+                                            const ids = ungroupedTasks.map((tk) => tk.id);
+                                            if (ids.length === 0) return;
+                                            await localDb.softDeleteTasks(ids);
+                                            showToast(
+                                              t.undoTaskDeleted(t.projectUngroupedColumn)
+                                            );
+                                          }}
+                                        >
+                                          <Trash2 size={13.5} />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
 
                           {ungroupedTasks.length > 0 && (
                             <div className="task-list">

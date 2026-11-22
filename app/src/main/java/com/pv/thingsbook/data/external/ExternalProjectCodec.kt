@@ -140,13 +140,24 @@ object ExternalProjectCodec {
 
     private val IGNORED_ASANA_SECTIONS = setOf(
         "untitled section",
+        "(untitled section)",
+        "unnamed section",
+        "(unnamed section)",
         "(no section)",
         "no section",
         "unbenannter abschnitt",
         "section sans titre",
+        "section sans nom",
         "sezione senza titolo",
-        "sección sin título"
+        "sezione senza nome",
+        "sección sin título",
+        "sección sin nombre"
     )
+
+    fun isDefaultPlaceholderSectionName(raw: String?): Boolean {
+        val trimmed = raw?.trim().orEmpty()
+        return trimmed.isEmpty() || trimmed.lowercase(Locale.ROOT) in IGNORED_ASANA_SECTIONS
+    }
 
     private val GENERIC_WORKBOOK_SHEET_NAMES = setOf(
         "tasks",
@@ -722,8 +733,7 @@ object ExternalProjectCodec {
 
     private fun normalizeAsanaSectionName(raw: String?): String? {
         val trimmed = raw?.trim().orEmpty()
-        if (trimmed.isEmpty()) return null
-        if (trimmed.lowercase(Locale.ROOT) in IGNORED_ASANA_SECTIONS) return null
+        if (isDefaultPlaceholderSectionName(trimmed)) return null
         return trimmed
     }
 

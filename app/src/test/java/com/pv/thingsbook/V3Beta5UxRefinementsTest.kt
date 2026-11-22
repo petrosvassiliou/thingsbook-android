@@ -157,7 +157,8 @@ class V3Beta5UxRefinementsTest {
                 assertTrue("Blank $key in $folder/strings.xml", keys[key]!!.isNotBlank())
             }
         }
-        assertTrue(BuildConfig.VERSION_CODE >= 98)
-        assertTrue(BuildConfig.VERSION_NAME.startsWith("3.0.0-beta."))
+        assertTrue(BuildConfig.VERSION_CODE >= 111)
+        assertTrue(BuildConfig.VERSION_NAME.startsWith("3.0.0"))
+        assertFalse("3.0.0 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
     }
 }

@@ -283,10 +283,13 @@ public struct ProjectBoardWorkspaceView: View {
     public let openTasks: [TaskItem]
     public let headings: [Heading]
 
+    private static let generalColumnRenameSentinel = "__general__"
+
     @State private var isCreatingPhase = false
     @State private var newPhaseTitle = ""
     @State private var renamingHeadingId: String? = nil
     @State private var renameText = ""
+    @FocusState private var isBoardRenameFocused: Bool
 
     public init(
         store: ThingsbookStore,
@@ -383,7 +386,8 @@ public struct ProjectBoardWorkspaceView: View {
         }()
         let totalCount = rawOpenCount + doneCount
         let progress = totalCount > 0 ? Double(doneCount) / Double(totalCount) : 0.0
-        let isRenaming = heading != nil && renamingHeadingId == heading?.id
+        let targetRenameId = heading?.id ?? Self.generalColumnRenameSentinel
+        let isRenaming = renamingHeadingId == targetRenameId
 
         return VStack(alignment: .leading, spacing: 10) {
             // Column Header
@@ -400,18 +404,31 @@ public struct ProjectBoardWorkspaceView: View {
                         .frame(width: 4, height: 18)
                         .padding(.top, 1)
 
-                    if let heading, isRenaming {
+                    if isRenaming {
                         TextField(store.tr("entity_new_heading"), text: $renameText)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 13, weight: .semibold))
+                            .focused($isBoardRenameFocused)
                             .onSubmit {
-                                commitRename(heading)
+                                if let heading {
+                                    commitRename(heading)
+                                } else {
+                                    commitGeneralRename()
+                                }
                             }
                         Button(store.tr("action_save")) {
-                            commitRename(heading)
+                            if let heading {
+                                commitRename(heading)
+                            } else {
+                                commitGeneralRename()
+                            }
                         }
                         .controlSize(.mini)
                         .buttonStyle(.borderedProminent)
+                        Button(store.tr("action_cancel")) {
+                            renamingHeadingId = nil
+                        }
+                        .controlSize(.mini)
                     } else {
                         Text(title)
                             .font(.system(size: 14, weight: .bold))
@@ -463,10 +480,40 @@ public struct ProjectBoardWorkspaceView: View {
                                 Button(store.tr("macos_rename_heading")) {
                                     renameText = heading.title
                                     renamingHeadingId = heading.id
+                                    DispatchQueue.main.async {
+                                        isBoardRenameFocused = true
+                                    }
                                 }
                                 Divider()
                                 Button(role: .destructive) {
                                     try? store.database.deleteHeading(heading.id)
+                                } label: {
+                                    Text(store.tr("action_delete"))
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 20, height: 22)
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                        } else if !tasks.isEmpty {
+                            Menu {
+                                Button(store.tr("macos_rename_heading")) {
+                                    renameText = store.tr("v30_board_ungrouped_column")
+                                    renamingHeadingId = Self.generalColumnRenameSentinel
+                                    DispatchQueue.main.async {
+                                        isBoardRenameFocused = true
+                                    }
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    if renamingHeadingId == Self.generalColumnRenameSentinel {
+                                        renamingHeadingId = nil
+                                    }
+                                    store.deleteTasks(Set(tasks.map(\.id)))
                                 } label: {
                                     Text(store.tr("action_delete"))
                                 }
@@ -632,6 +679,13 @@ public struct ProjectBoardWorkspaceView: View {
         var copy = heading
         copy.title = clean
         try? store.database.updateHeading(copy)
+    }
+
+    private func commitGeneralRename() {
+        let clean = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { renamingHeadingId = nil }
+        guard !clean.isEmpty else { return }
+        _ = store.promoteUngroupedTasksToHeading(projectId: project.id, title: clean)
     }
 }
 
@@ -1049,6 +1103,36 @@ private struct KanbanTaskCardView: View {
                     }
                 }
             }
+            let projectHeadings = (store.headingsByProject[project.id] ?? []).filter { !$0.isDeleted && !$0.isArchived }
+            if !projectHeadings.isEmpty {
+                Menu(store.tr("entity_heading")) {
+                    Button {
+                        var copy = latestTask
+                        copy.headingId = nil
+                        store.updateTask(copy)
+                    } label: {
+                        if latestTask.headingId == nil {
+                            Label(store.tr("v30_board_ungrouped_column"), systemImage: "checkmark")
+                        } else {
+                            Text(store.tr("v30_board_ungrouped_column"))
+                        }
+                    }
+                    Divider()
+                    ForEach(projectHeadings) { heading in
+                        Button {
+                            var copy = latestTask
+                            copy.headingId = heading.id
+                            store.updateTask(copy)
+                        } label: {
+                            if latestTask.headingId == heading.id {
+                                Label(heading.title, systemImage: "checkmark")
+                            } else {
+                                Text(heading.title)
+                            }
+                        }
+                    }
+                }
+            }
             Button(store.tr("v30_blocked_by_action")) {
                 isDependenciesPopoverOpen = true
             }
@@ -1200,7 +1284,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                     } else {
                         HStack(alignment: .top, spacing: 0) {
                             // Left Pinned Label Column
-                            roadmapLeftLabelColumn(rows: rows)
+                            roadmapLeftLabelColumn(rows: rows, layout: layout)
 
                             Divider()
 
@@ -1510,7 +1594,7 @@ public struct ProjectRoadmapWorkspaceView: View {
 
     // MARK: - Left Label Column
 
-    private func roadmapLeftLabelColumn(rows: [RoadmapTimelineRow]) -> some View {
+    private func roadmapLeftLabelColumn(rows: [RoadmapTimelineRow], layout: ProjectRoadmapLayout) -> some View {
         let totalHeight = totalTimelineHeight(for: rows)
 
         return VStack(alignment: .leading, spacing: rowSpacing) {
@@ -1535,7 +1619,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                     roadmapLeftPhaseHeaderRow(heading: heading, height: rHeight)
 
                 case .task(let bar):
-                    roadmapLeftTaskLabelRow(bar: bar, height: rHeight)
+                    roadmapLeftTaskLabelRow(bar: bar, layout: layout, height: rHeight)
                 }
             }
         }
@@ -1616,10 +1700,15 @@ public struct ProjectRoadmapWorkspaceView: View {
     }
 
     @ViewBuilder
-    private func roadmapLeftTaskLabelRow(bar: RoadmapTaskBar, height: CGFloat) -> some View {
+    private func roadmapLeftTaskLabelRow(
+        bar: RoadmapTaskBar,
+        layout: ProjectRoadmapLayout,
+        height: CGFloat
+    ) -> some View {
         let isFullScreen = store.isTimelineFullScreen
         let isSelected = !isFullScreen && store.selectedTaskIds.contains(bar.id)
         let isMilestone = bar.isMilestone || bar.task.isMilestone
+        let isRowSuppressed = !isFullScreen && (armedTaskDragId == bar.id || activeTaskDrag?.id == bar.id)
         let rowContent = HStack(spacing: 7) {
             ThingsCheckboxButton(
                 status: bar.task.status,
@@ -1660,6 +1749,10 @@ public struct ProjectRoadmapWorkspaceView: View {
                 )
         )
         .contentShape(Rectangle())
+        .thingsTimelineMouseTooltip(
+            roadmapTaskTooltipText(for: bar, layout: layout),
+            isSuppressed: isRowSuppressed
+        )
 
         if isFullScreen {
             rowContent
@@ -2149,6 +2242,10 @@ public struct ProjectRoadmapWorkspaceView: View {
             }
             .fixedSize(horizontal: true, vertical: false)
             .contentShape(Rectangle())
+            .thingsTimelineMouseTooltip(
+                roadmapTaskTooltipText(for: taskBar, layout: layout),
+                isSuppressed: isArmedThis || isDraggingThis
+            )
             .scaleEffect(isArmedThis ? 1.03 : 1.0)
             .offset(x: colCenterX - 12 + dragX)
         } else {
@@ -2204,9 +2301,25 @@ public struct ProjectRoadmapWorkspaceView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(borderTint, lineWidth: (isArmedThis || isSelected) ? 1.55 : 1.05)
             )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .thingsTimelineMouseTooltip(
+                roadmapTaskTooltipText(for: taskBar, layout: layout),
+                isSuppressed: isArmedThis || isDraggingThis
+            )
             .scaleEffect(isArmedThis ? 1.02 : 1.0)
             .offset(x: baseX + dragX)
         }
+    }
+
+    private func roadmapTaskTooltipText(
+        for taskBar: RoadmapTaskBar,
+        layout: ProjectRoadmapLayout
+    ) -> String {
+        TimelineTaskTooltipFormatter.formatRoadmapTask(
+            taskBar: taskBar,
+            isBlocked: store.isTaskActivelyBlocked(taskBar.task),
+            language: store.preferences.language
+        )
     }
 
     @ViewBuilder
@@ -2493,6 +2606,14 @@ public struct ProjectRoadmapWorkspaceView: View {
         .padding(.vertical, 8)
         .thingsCardSurface(cornerRadius: 10, isSelected: store.selectedTaskIds.contains(task.id))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .thingsTimelineMouseTooltip(
+            TimelineTaskTooltipFormatter.formatTodayTimelineTask(
+                task: task,
+                isBlocked: store.isTaskActivelyBlocked(task),
+                language: store.preferences.language
+            ),
+            isSuppressed: unscheduledStartPopoverTaskId == task.id
+        )
         .thingsInstantTaskTap(
             onSingleClick: { modifiers in
                 store.handleRowClick(taskId: task.id, modifiers: modifiers)

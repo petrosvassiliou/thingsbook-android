@@ -2927,6 +2927,13 @@ private fun ThingsMainTaskLazyList(
                 onDeleteHeading = { headingId ->
                     viewModel.deleteHeading(headingId)
                 },
+                onPromoteUngroupedToPhase = { title ->
+                    viewModel.promoteUngroupedTasksToHeading(currentProject.id, title)
+                },
+                onDeleteUngroupedTasks = {
+                    val ungroupedIds = projectSections[null].orEmpty().map { it.id }.toSet()
+                    viewModel.deleteTasks(ungroupedIds)
+                },
                 onUpdateTaskStatus = { taskId, status ->
                     viewModel.updateTaskStatus(taskId, status)
                 },
@@ -3318,64 +3325,23 @@ private fun ThingsMainTaskLazyList(
                     val isGeneralHighlighted = activeSession?.kind == ProjectDragKind.MOVE_TASK &&
                         (activeSession.hoveredZoneKey == "proj_section_general" ||
                             activeSession.hoveredZoneKey == "proj_ungrouped_drop_${currentProject.id}")
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 5.dp)
-                            .workspaceDropTarget(
-                                controller = projectDragController,
-                                key = "proj_ungrouped_drop_${currentProject.id}",
-                                destination = WorkspaceDragDropDestination.BoardColumn(
-                                    projectId = currentProject.id,
-                                    headingId = null,
-                                    headingTitle = generalTitle,
-                                    indexInColumn = ungroupedTasks.size
-                                ),
-                                cornerRadius = 12.dp,
-                                priority = 15
-                            ),
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isGeneralHighlighted) {
-                            colors.thingsBlueSoft.copy(alpha = 0.65f)
-                        } else {
-                            colors.tagPillBg.copy(alpha = 0.42f)
+                    ProjectUngroupedGeneralHeader(
+                        projectId = currentProject.id,
+                        generalTitle = generalTitle,
+                        ungroupedTaskCount = ungroupedTasks.size,
+                        hasInteractiveActions = ungroupedTasks.isNotEmpty(),
+                        isDropHighlighted = isGeneralHighlighted,
+                        dragController = projectDragController,
+                        onAddTaskInUngrouped = {
+                            viewModel.createTaskInProjectSection(null, ungroupedTasks, ungroupedTasks.size)
                         },
-                        border = BorderStroke(
-                            width = if (isGeneralHighlighted) 1.5.dp else 0.75.dp,
-                            color = if (isGeneralHighlighted) colors.thingsBlue else colors.hairlineDivider
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(7.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(3.5.dp)
-                                        .height(15.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(colors.thingsBlue.copy(alpha = 0.75f))
-                                )
-                                Text(
-                                    text = generalTitle,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                    color = if (isGeneralHighlighted) colors.thingsBlue else colors.secondaryText
-                                )
-                            }
-                            Text(
-                                text = ungroupedTasks.size.toString(),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (isGeneralHighlighted) colors.thingsBlue else colors.secondaryText
-                            )
+                        onPromoteToHeading = { newTitle ->
+                            viewModel.promoteUngroupedTasksToHeading(currentProject.id, newTitle)
+                        },
+                        onDeleteUngroupedTasks = {
+                            viewModel.deleteTasks(ungroupedTasks.map { it.id }.toSet())
                         }
-                    }
+                    )
                 }
             }
 
@@ -6806,6 +6772,250 @@ private fun ViewTitleHeader(
                     },
                     onDismiss = { showProjectDeadlineDialog = false }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectUngroupedGeneralHeader(
+    projectId: String,
+    generalTitle: String,
+    ungroupedTaskCount: Int,
+    hasInteractiveActions: Boolean,
+    isDropHighlighted: Boolean,
+    dragController: ProjectDragDropController,
+    onAddTaskInUngrouped: () -> Unit,
+    onPromoteToHeading: (String) -> Unit,
+    onDeleteUngroupedTasks: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    var isEditing by remember(projectId) { mutableStateOf(false) }
+    var editedTitleField by remember(projectId, generalTitle) {
+        mutableStateOf(
+            TextFieldValue(
+                text = generalTitle,
+                selection = TextRange(0, generalTitle.length)
+            )
+        )
+    }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isEditing) {
+        if (isEditing) {
+            delay(50)
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+
+    LaunchedEffect(hasInteractiveActions) {
+        if (!hasInteractiveActions) {
+            isEditing = false
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = if (hasInteractiveActions) 7.dp else 5.dp)
+            .workspaceDropTarget(
+                controller = dragController,
+                key = "proj_ungrouped_drop_$projectId",
+                destination = WorkspaceDragDropDestination.BoardColumn(
+                    projectId = projectId,
+                    headingId = null,
+                    headingTitle = generalTitle,
+                    indexInColumn = ungroupedTaskCount
+                ),
+                cornerRadius = 14.dp,
+                priority = 15
+            ),
+        shape = RoundedCornerShape(if (hasInteractiveActions) 14.dp else 12.dp),
+        color = if (isDropHighlighted) {
+            colors.thingsBlueSoft.copy(alpha = 0.65f)
+        } else if (hasInteractiveActions) {
+            colors.tagPillBg.copy(alpha = 0.55f)
+        } else {
+            colors.tagPillBg.copy(alpha = 0.42f)
+        },
+        border = BorderStroke(
+            width = if (isDropHighlighted) 1.6.dp else 0.75.dp,
+            color = if (isDropHighlighted) {
+                colors.thingsBlue
+            } else if (hasInteractiveActions) {
+                colors.thingsBlue.copy(alpha = 0.20f)
+            } else {
+                colors.hairlineDivider
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = if (hasInteractiveActions) 9.dp else 7.dp)
+        ) {
+            if (isEditing && hasInteractiveActions) {
+                val commitPromote = {
+                    val trimmed = editedTitleField.text.trim()
+                    if (trimmed.isNotEmpty()) {
+                        onPromoteToHeading(trimmed)
+                        isEditing = false
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = editedTitleField,
+                        onValueChange = { editedTitleField = it },
+                        placeholder = {
+                            Text(
+                                text = stringResource(R.string.entity_new_heading),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { commitPromote() }),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type == KeyEventType.KeyDown &&
+                                    (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                ) {
+                                    commitPromote()
+                                    true
+                                } else if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Escape) {
+                                    isEditing = false
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    val txt = editedTitleField.text
+                                    editedTitleField = editedTitleField.copy(
+                                        selection = if (txt.isEmpty()) TextRange(0) else TextRange(0, txt.length)
+                                    )
+                                }
+                            }
+                    )
+                    IconButton(onClick = commitPromote) {
+                        Icon(
+                            imageVector = Icons.Outlined.Check,
+                            contentDescription = stringResource(R.string.action_save),
+                            tint = colors.thingsBlue
+                        )
+                    }
+                    IconButton(onClick = { isEditing = false }) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = stringResource(R.string.action_cancel),
+                            tint = colors.secondaryText
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(3.5.dp)
+                                .height(if (hasInteractiveActions) 18.dp else 15.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.thingsBlue.copy(alpha = if (hasInteractiveActions) 1f else 0.75f))
+                        )
+                        Text(
+                            text = generalTitle,
+                            style = if (hasInteractiveActions) {
+                                MaterialTheme.typography.titleMedium.copy(
+                                    color = colors.primaryText,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else {
+                                MaterialTheme.typography.labelLarge.copy(
+                                    color = if (isDropHighlighted) colors.thingsBlue else colors.secondaryText,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            },
+                            maxLines = Int.MAX_VALUE,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = colors.cardSurface
+                        ) {
+                            Text(
+                                text = ungroupedTaskCount.toString(),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = if (isDropHighlighted) colors.thingsBlue else colors.secondaryText,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.5.dp)
+                            )
+                        }
+                    }
+
+                    if (hasInteractiveActions) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            ThingsHoverTooltip(text = stringResource(R.string.heading_add_task)) {
+                                IconButton(
+                                    onClick = onAddTaskInUngrouped,
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = stringResource(R.string.heading_add_task),
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    editedTitleField = TextFieldValue(
+                                        text = generalTitle,
+                                        selection = TextRange(0, generalTitle.length)
+                                    )
+                                    isEditing = true
+                                },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = stringResource(R.string.areas_rename_label),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = onDeleteUngroupedTasks,
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.DeleteOutline,
+                                    contentDescription = stringResource(R.string.action_delete),
+                                    tint = colors.secondaryText,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

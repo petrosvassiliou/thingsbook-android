@@ -181,7 +181,8 @@ class V3Beta6TimelineFullScreenTest {
             Regex("""readOnly\s*=\s*readOnly""").findAll(lanesChunk).count()
         )
 
-        assertTrue(BuildConfig.VERSION_NAME.startsWith("3.0.0-beta."))
-        assertTrue(BuildConfig.VERSION_CODE >= 98)
+        assertTrue(BuildConfig.VERSION_NAME.startsWith("3.0.0"))
+        assertFalse("3.0.0 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertTrue(BuildConfig.VERSION_CODE >= 111)
     }
 }

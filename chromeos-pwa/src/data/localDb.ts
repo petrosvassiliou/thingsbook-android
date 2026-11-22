@@ -53,6 +53,7 @@ import {
 import { parseCsvTaskImport, serializeEntitiesToCsv } from './csvCodec.ts';
 import {
   exportExternalProjectBytes,
+  isUngroupedSectionName,
   type ExternalExportFormat,
   type ExternalImportedProject,
   type ExternalImportedTask
@@ -3134,6 +3135,77 @@ export class ThingsLocalDb {
     });
   }
 
+  /**
+   * Atomically creates a real Phase (Heading) at the top of `projectId` (before the first existing heading)
+   * and assigns all open ungrouped tasks in that project into the newly created Heading.
+   */
+  async promoteUngroupedTasksToHeading(
+    projectId: string,
+    title: string
+  ): Promise<HeadingRecord | null> {
+    const cleanTitle = title.trim();
+    if (!projectId || !cleanTitle) return null;
+
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(['headings', 'tasks'], 'readwrite');
+      const headingStore = tx.objectStore('headings');
+      const taskStore = tx.objectStore('tasks');
+
+      const allHeadings = (await headingStore.getAll()) as HeadingRecord[];
+      const projectActiveHeadings = allHeadings.filter(
+        (h) => h.projectId === projectId && !h.isDeleted && !h.isArchived
+      );
+      const validHeadingIds = new Set(projectActiveHeadings.map((h) => h.id));
+      const minOrder =
+        projectActiveHeadings.length > 0
+          ? projectActiveHeadings.reduce((m, h) => Math.min(m, h.sortOrder), Infinity)
+          : null;
+      const sortOrder = computeMidpointSortOrder(
+        null,
+        minOrder != null && Number.isFinite(minOrder) ? minOrder : null
+      );
+
+      const newHeading: HeadingRecord = {
+        id: crypto.randomUUID(),
+        projectId,
+        title: cleanTitle,
+        startDate: null,
+        endDate: null,
+        sortOrder,
+        isArchived: false,
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      };
+      await headingStore.put(newHeading);
+
+      const allTasks = (await taskStore.getAll()) as TaskRecord[];
+      for (const t of allTasks) {
+        if (
+          t.projectId === projectId &&
+          !t.isDeleted &&
+          t.status === 'OPEN' &&
+          (t.headingId == null || !validHeadingIds.has(t.headingId))
+        ) {
+          await taskStore.put({
+            ...t,
+            headingId: newHeading.id,
+            updatedAt: Math.max(now, t.updatedAt + 1),
+            isDirty: true
+          });
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return newHeading;
+    });
+  }
+
   async upsertArea(params: { id?: string; title: string; sortOrder?: number; tagIds?: string[] }): Promise<AreaRecord | null> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
@@ -4869,16 +4941,21 @@ export class ThingsLocalDb {
         await persistImportedTask(parsed.ungroupedTasks[tIdx], null, (tIdx + 1) * 100);
       }
 
+      let persistedHeadingIdx = 0;
       for (let hIdx = 0; hIdx < parsed.phases.length; hIdx++) {
         const phase = parsed.phases[hIdx];
+        if (isUngroupedSectionName(phase.title) && phase.tasks.length === 0) {
+          continue;
+        }
+        persistedHeadingIdx++;
         const headingId = crypto.randomUUID();
         await tx.objectStore('headings').put({
           id: headingId,
           projectId,
-          title: phase.title.trim() || `Phase ${hIdx + 1}`,
+          title: phase.title.trim() || `Phase ${persistedHeadingIdx}`,
           startDate: phase.startDate ?? null,
           endDate: phase.endDate ?? null,
-          sortOrder: (hIdx + 1) * 1000,
+          sortOrder: persistedHeadingIdx * 1000,
           isArchived: false,
           createdAt: now,
           updatedAt: now,
@@ -4890,7 +4967,7 @@ export class ThingsLocalDb {
           await persistImportedTask(
             phase.tasks[tIdx],
             headingId,
-            (hIdx + 1) * 1000 + (tIdx + 1) * 100
+            persistedHeadingIdx * 1000 + (tIdx + 1) * 100
           );
         }
       }

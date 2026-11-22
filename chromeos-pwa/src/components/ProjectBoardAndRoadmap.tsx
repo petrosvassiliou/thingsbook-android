@@ -168,6 +168,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
 }) => {
   const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
   const [editingPhaseTitle, setEditingPhaseTitle] = useState('');
+  const cancelingBoardPhaseEditRef = useRef(false);
   const [dragOverColumnKey, setDragOverColumnKey] = useState<string | null>(null);
   const [dragOverCardInfo, setDragOverCardInfo] = useState<{
     taskId: string;
@@ -176,6 +177,19 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
   const [statusMenuTaskId, setStatusMenuTaskId] = useState<string | null>(null);
   const [cardCtxMenu, setCardCtxMenu] = useState<BoardCardContextMenuState | null>(null);
   const lastBoardPointerTypeRef = useRef<string>('mouse');
+
+  useEffect(() => {
+    const clearBoardDragState = () => {
+      setDragOverColumnKey(null);
+      setDragOverCardInfo(null);
+    };
+    window.addEventListener('dragend', clearBoardDragState, true);
+    window.addEventListener('drop', clearBoardDragState, true);
+    return () => {
+      window.removeEventListener('dragend', clearBoardDragState, true);
+      window.removeEventListener('drop', clearBoardDragState, true);
+    };
+  }, []);
 
   const validHeadingIdSet = useMemo(() => new Set(headings.map((h) => h.id)), [headings]);
 
@@ -203,6 +217,10 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
   const showGeneralColumn = ungroupedTasks.length > 0 || headings.length === 0;
 
   const commitPhaseRename = async (hd: HeadingRecord) => {
+    if (cancelingBoardPhaseEditRef.current) {
+      cancelingBoardPhaseEditRef.current = false;
+      return;
+    }
     const clean = editingPhaseTitle.trim();
     if (clean && clean !== hd.title) {
       await localDb.upsertHeading({
@@ -214,6 +232,18 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
       await localDb.deleteHeading(hd.id);
     }
     setEditingPhaseId(null);
+  };
+
+  const commitGeneralPromote = async () => {
+    if (cancelingBoardPhaseEditRef.current) {
+      cancelingBoardPhaseEditRef.current = false;
+      return;
+    }
+    const clean = editingPhaseTitle.trim();
+    setEditingPhaseId(null);
+    if (clean) {
+      await localDb.promoteUngroupedTasksToHeading(project.id, clean);
+    }
   };
 
   const commitTaskStatus = async (tk: TaskRecord, status: TaskStatus) => {
@@ -671,7 +701,10 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
       : allProjectTasks.filter((tItem) => tItem.headingId === heading.id);
     const doneColCount = allColTasks.filter((tItem) => tItem.status === 'COMPLETED').length;
 
-    const isEditing = heading != null && editingPhaseId === heading.id;
+    const isEditing =
+      heading != null
+        ? editingPhaseId === heading.id
+        : editingPhaseId === '__general__';
     const formattedStart =
       heading?.startDate != null ? formatShortMonthDay(heading.startDate, lang) : null;
     const formattedEnd =
@@ -708,21 +741,38 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
               <span
                 className={`board-column-accent ${isGeneral ? 'general' : ''}`}
               />
-              {isEditing && heading ? (
+              {isEditing ? (
                 <input
                   type="text"
                   className="text-field board-phase-rename-input"
+                  data-testid={
+                    isGeneral
+                      ? 'board-general-rename-input'
+                      : `board-phase-rename-input-${heading.id}`
+                  }
                   autoFocus
                   value={editingPhaseTitle}
                   placeholder={t.boardAddPhase}
                   onChange={(e) => setEditingPhaseTitle(e.target.value)}
-                  onBlur={() => void commitPhaseRename(heading)}
+                  onBlur={() =>
+                    heading
+                      ? void commitPhaseRename(heading)
+                      : void commitGeneralPromote()
+                  }
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      void commitPhaseRename(heading);
+                      if (heading) {
+                        void commitPhaseRename(heading);
+                      } else {
+                        void commitGeneralPromote();
+                      }
                     } else if (e.key === 'Escape') {
                       e.stopPropagation();
+                      cancelingBoardPhaseEditRef.current = true;
+                      window.setTimeout(() => {
+                        cancelingBoardPhaseEditRef.current = false;
+                      }, 0);
                       setEditingPhaseId(null);
                     }
                   }}
@@ -734,6 +784,9 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                     if (heading) {
                       setEditingPhaseId(heading.id);
                       setEditingPhaseTitle(heading.title);
+                    } else {
+                      setEditingPhaseId('__general__');
+                      setEditingPhaseTitle(t.projectUngroupedColumn);
                     }
                   }}
                 >
@@ -762,7 +815,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
               >
                 <Plus size={14} />
               </button>
-              {heading && (
+              {heading ? (
                 <>
                   <button
                     type="button"
@@ -790,6 +843,44 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                   >
                     <Trash2 size={12.5} />
                   </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    data-testid="board-general-rename-btn"
+                    style={{ height: 25, minWidth: 25, padding: 0 }}
+                    title={t.actionRename}
+                    onClick={() => {
+                      setEditingPhaseId('__general__');
+                      setEditingPhaseTitle(t.projectUngroupedColumn);
+                    }}
+                  >
+                    <Edit3 size={12.5} />
+                  </button>
+                  {colTasks.length > 0 && (
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      data-testid="board-general-delete-btn"
+                      style={{
+                        height: 25,
+                        minWidth: 25,
+                        padding: 0,
+                        color: 'var(--deadline-red)'
+                      }}
+                      title={t.actionDelete}
+                      onClick={async () => {
+                        const ids = colTasks.map((tk) => tk.id);
+                        if (ids.length === 0) return;
+                        await localDb.softDeleteTasks(ids);
+                        onToast(t.undoTaskDeleted(t.projectUngroupedColumn));
+                      }}
+                    >
+                      <Trash2 size={12.5} />
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -1190,6 +1281,7 @@ export interface ProjectRoadmapWorkspaceProps {
   isFullScreen?: boolean;
   onToggleFullScreen?: () => void;
   layout: ProjectRoadmapLayout;
+  checklistItems?: readonly ChecklistItemRecord[];
   selectedTaskIds: string[];
   isMultiSelectMode?: boolean;
   orderedVisibleTaskIds: string[];
@@ -1212,6 +1304,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   isFullScreen = false,
   onToggleFullScreen,
   layout,
+  checklistItems = [],
   selectedTaskIds,
   isMultiSelectMode = false,
   orderedVisibleTaskIds,
@@ -1244,6 +1337,31 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   const [dragOverLaneId, setDragOverLaneId] = useState<string | null>(null);
   const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
   const [editingPhaseTitle, setEditingPhaseTitle] = useState('');
+  const cancelingRoadmapPhaseEditRef = useRef(false);
+
+  const checklistByTaskId = useMemo(() => {
+    const map = new Map<string, { done: number; total: number }>();
+    for (const ci of checklistItems) {
+      if (ci.isDeleted) continue;
+      const cur = map.get(ci.taskId) ?? { done: 0, total: 0 };
+      cur.total += 1;
+      if (ci.isCompleted) cur.done += 1;
+      map.set(ci.taskId, cur);
+    }
+    return map;
+  }, [checklistItems]);
+
+  useEffect(() => {
+    const clearLaneDrag = () => {
+      setDragOverLaneId(null);
+    };
+    window.addEventListener('dragend', clearLaneDrag, true);
+    window.addEventListener('drop', clearLaneDrag, true);
+    return () => {
+      window.removeEventListener('dragend', clearLaneDrag, true);
+      window.removeEventListener('drop', clearLaneDrag, true);
+    };
+  }, []);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastRoadmapPointerTypeRef = useRef<string>('mouse');
@@ -1812,6 +1930,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   };
 
   const commitPhaseRename = async (hd: HeadingRecord) => {
+    if (cancelingRoadmapPhaseEditRef.current) {
+      cancelingRoadmapPhaseEditRef.current = false;
+      return;
+    }
     const clean = editingPhaseTitle.trim();
     if (clean && clean !== hd.title) {
       await localDb.upsertHeading({
@@ -1821,6 +1943,57 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       });
     }
     setEditingPhaseId(null);
+  };
+
+  const commitRoadmapGeneralPromote = async () => {
+    if (cancelingRoadmapPhaseEditRef.current) {
+      cancelingRoadmapPhaseEditRef.current = false;
+      return;
+    }
+    const clean = editingPhaseTitle.trim();
+    setEditingPhaseId(null);
+    if (clean) {
+      await localDb.promoteUngroupedTasksToHeading(project.id, clean);
+    }
+  };
+
+  const formatRoadmapTaskTooltip = (
+    tk: TaskRecord,
+    isMilestoneTask: boolean,
+    startEpoch: number,
+    endEpoch: number,
+    isActivelyBlocked: boolean
+  ): string => {
+    const title = tk.title.trim() || t.placeholderTodoTitle;
+    const dateRangeStr =
+      isMilestoneTask || startEpoch === endEpoch
+        ? formatShortMonthDay(startEpoch, lang)
+        : `${formatShortMonthDay(startEpoch, lang)} – ${formatShortMonthDay(endEpoch, lang)}`;
+    const parts: string[] = [
+      `${isMilestoneTask ? '◆ ' : ''}${title}`,
+      dateRangeStr
+    ];
+    if (tk.deadline != null) {
+      parts.push(`⚑ ${formatShortMonthDay(tk.deadline, lang)}`);
+    }
+    if (tk.durationMinutes != null && tk.durationMinutes > 0) {
+      parts.push(formatStandaloneDuration(tk.durationMinutes));
+    }
+    if (tk.effortLevel === 'QUICK_WIN') {
+      parts.push(t.effortQuickWin);
+    } else if (tk.effortLevel === 'MEDIUM') {
+      parts.push(t.effortMedium);
+    } else if (tk.effortLevel === 'DEEP_FOCUS') {
+      parts.push(t.effortDeepFocus);
+    }
+    const chk = checklistByTaskId.get(tk.id);
+    if (chk && chk.total > 0) {
+      parts.push(`${chk.done}/${chk.total}`);
+    }
+    if (isActivelyBlocked) {
+      parts.push(`⏳ ${t.waitingOnLabel}`);
+    }
+    return parts.join(' · ');
   };
 
   return (
@@ -2098,7 +2271,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                 barDrag.armed
                   ? barDrag.deltaDays
                   : 0;
-              const isEditing = !isFullScreen && hd != null && editingPhaseId === hd.id;
+              const isEditing =
+                !isFullScreen &&
+                (hd != null
+                  ? editingPhaseId === hd.id
+                  : editingPhaseId === '__general__');
               const phaseTitle = isGeneral
                 ? t.projectUngroupedColumn
                 : hd.title || t.entityHeading;
@@ -2205,19 +2382,32 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                           <span
                             className={`board-column-accent ${isGeneral ? 'general' : ''}`}
                           />
-                          {isEditing && hd ? (
+                          {isEditing ? (
                             <input
                               type="text"
                               className="text-field board-phase-rename-input"
                               autoFocus
                               value={editingPhaseTitle}
                               onChange={(e) => setEditingPhaseTitle(e.target.value)}
-                              onBlur={() => void commitPhaseRename(hd)}
+                              onBlur={() =>
+                                hd
+                                  ? void commitPhaseRename(hd)
+                                  : void commitRoadmapGeneralPromote()
+                              }
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
                                   e.preventDefault();
-                                  void commitPhaseRename(hd);
+                                  if (hd) {
+                                    void commitPhaseRename(hd);
+                                  } else {
+                                    void commitRoadmapGeneralPromote();
+                                  }
                                 } else if (e.key === 'Escape') {
+                                  e.stopPropagation();
+                                  cancelingRoadmapPhaseEditRef.current = true;
+                                  window.setTimeout(() => {
+                                    cancelingRoadmapPhaseEditRef.current = false;
+                                  }, 0);
                                   setEditingPhaseId(null);
                                 }
                               }}
@@ -2226,9 +2416,14 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             <span
                               className="roadmap-lane-title"
                               onDoubleClick={() => {
-                                if (isFullScreen || !hd) return;
-                                setEditingPhaseId(hd.id);
-                                setEditingPhaseTitle(hd.title);
+                                if (isFullScreen) return;
+                                if (hd) {
+                                  setEditingPhaseId(hd.id);
+                                  setEditingPhaseTitle(hd.title);
+                                } else {
+                                  setEditingPhaseId('__general__');
+                                  setEditingPhaseTitle(t.projectUngroupedColumn);
+                                }
                               }}
                             >
                               {phaseTitle}
@@ -2247,7 +2442,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
 
                           {!isFullScreen && (
                             <div className="roadmap-cell-quick-btns">
-                              {hd && (
+                              {hd ? (
                                 <button
                                   type="button"
                                   className="roadmap-step-btn"
@@ -2259,6 +2454,43 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                                 >
                                   <Edit3 size={11.5} />
                                 </button>
+                              ) : (
+                                lane.totalCount > 0 && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="roadmap-step-btn"
+                                      title={t.actionRename}
+                                      onClick={() => {
+                                        setEditingPhaseId('__general__');
+                                        setEditingPhaseTitle(t.projectUngroupedColumn);
+                                      }}
+                                    >
+                                      <Edit3 size={11.5} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="roadmap-step-btn"
+                                      style={{ color: 'var(--deadline-red)' }}
+                                      title={t.actionDelete}
+                                      onClick={async () => {
+                                        const openUngroupedIds = [
+                                          ...lane.plottedTasks.map((p) => p.task),
+                                          ...lane.unscheduledTasks
+                                        ]
+                                          .filter((tk) => tk.status === 'OPEN')
+                                          .map((tk) => tk.id);
+                                        if (openUngroupedIds.length === 0) return;
+                                        await localDb.softDeleteTasks(openUngroupedIds);
+                                        onToast(
+                                          t.undoTaskDeleted(t.projectUngroupedColumn)
+                                        );
+                                      }}
+                                    >
+                                      <Trash2 size={11.5} />
+                                    </button>
+                                  </>
+                                )
                               )}
                               <button
                                 type="button"
@@ -2524,6 +2756,22 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       tk.durationMinutes != null && tk.durationMinutes > 0
                         ? formatStandaloneDuration(tk.durationMinutes)
                         : null;
+                    const tooltipStartEpoch =
+                      taskDragDelta !== 0
+                        ? addDaysLocal(pt.startEpoch, taskDragDelta)
+                        : pt.startEpoch;
+                    const tooltipEndEpoch =
+                      taskDragDelta !== 0
+                        ? addDaysLocal(pt.endEpoch, taskDragDelta)
+                        : pt.endEpoch;
+                    const taskMouseTooltip = formatRoadmapTaskTooltip(
+                      tk,
+                      isMilestoneTask,
+                      tooltipStartEpoch,
+                      tooltipEndEpoch,
+                      pt.isActivelyBlocked
+                    );
+                    const isAnyTimelineBarDragging = barDrag != null ? 'true' : undefined;
                     const dragIdsForRow =
                       isSelected && selectedTaskIds.length > 1
                         ? orderTaskIdsByVisualOrder(
@@ -2618,6 +2866,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             className={`roadmap-task-label ${
                               tk.status === 'COMPLETED' ? 'done' : ''
                             }`}
+                            data-timeline-mouse-tip={taskMouseTooltip}
+                            data-timeline-dragging={isAnyTimelineBarDragging}
                             style={
                               isMilestoneTask && tk.status !== 'COMPLETED'
                                 ? { color: 'var(--milestone-violet)', fontWeight: 620 }
@@ -2699,6 +2949,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             } ${taskDragDelta !== 0 ? 'dragging' : ''}`}
                             data-testid={`roadmap-task-bar-${tk.id}`}
                             data-milestone={isMilestoneTask ? 'true' : undefined}
+                            data-timeline-mouse-tip={taskMouseTooltip}
+                            data-timeline-dragging={isAnyTimelineBarDragging}
                             style={
                               isMilestoneTask
                                 ? {
@@ -2934,6 +3186,26 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                   isSelected && selectedTaskIds.length > 1
                     ? orderTaskIdsByVisualOrder(selectedTaskIds, orderedVisibleTaskIds)
                     : [tk.id];
+                const unscheduledParts: string[] = [
+                  `${tk.isMilestone ? '◆ ' : ''}${tk.title.trim() || t.placeholderTodoTitle}`,
+                  t.roadmapUnscheduledSection
+                ];
+                if (tk.durationMinutes != null && tk.durationMinutes > 0) {
+                  unscheduledParts.push(formatStandaloneDuration(tk.durationMinutes));
+                }
+                if (tk.effortLevel === 'QUICK_WIN') {
+                  unscheduledParts.push(t.effortQuickWin);
+                } else if (tk.effortLevel === 'MEDIUM') {
+                  unscheduledParts.push(t.effortMedium);
+                } else if (tk.effortLevel === 'DEEP_FOCUS') {
+                  unscheduledParts.push(t.effortDeepFocus);
+                }
+                const chk = checklistByTaskId.get(tk.id);
+                if (chk && chk.total > 0) {
+                  unscheduledParts.push(`${chk.done}/${chk.total}`);
+                }
+                const unscheduledTip = unscheduledParts.join(' · ');
+
                 return (
                   <div
                     key={`unsch-task-${tk.id}`}
@@ -2960,6 +3232,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       <button
                         type="button"
                         className="roadmap-unscheduled-task-btn"
+                        data-timeline-mouse-tip={unscheduledTip}
+                        data-timeline-dragging={barDrag != null ? 'true' : undefined}
                         onClick={() => onOpenTaskEditor(tk.id)}
                       >
                         {tk.title || t.placeholderTodoTitle}

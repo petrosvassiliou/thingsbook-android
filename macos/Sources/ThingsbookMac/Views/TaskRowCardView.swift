@@ -660,6 +660,38 @@ public struct TaskRowCardView: View {
                     }
                 }
             }
+            if let pid = latestTask.projectId {
+                let projectHeadings = (store.headingsByProject[pid] ?? []).filter { !$0.isDeleted && !$0.isArchived }
+                if !projectHeadings.isEmpty {
+                    Menu(store.tr("entity_heading")) {
+                        Button {
+                            var copy = latestTask
+                            copy.headingId = nil
+                            store.updateTask(copy)
+                        } label: {
+                            if latestTask.headingId == nil {
+                                Label(store.tr("v30_board_ungrouped_column"), systemImage: "checkmark")
+                            } else {
+                                Text(store.tr("v30_board_ungrouped_column"))
+                            }
+                        }
+                        Divider()
+                        ForEach(projectHeadings) { heading in
+                            Button {
+                                var copy = latestTask
+                                copy.headingId = heading.id
+                                store.updateTask(copy)
+                            } label: {
+                                if latestTask.headingId == heading.id {
+                                    Label(heading.title, systemImage: "checkmark")
+                                } else {
+                                    Text(heading.title)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Divider()
             Button(store.tr("action_attach_file")) {
                 store.pickAndAttachFiles(taskId: task.id)

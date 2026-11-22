@@ -529,6 +529,8 @@ fun ProjectBoardWorkspace(
     onUpdateHeadingStartDate: (headingId: String, startDate: Long?) -> Unit,
     onUpdateHeadingEndDate: (headingId: String, endDate: Long?) -> Unit,
     onDeleteHeading: (headingId: String) -> Unit,
+    onPromoteUngroupedToPhase: (title: String) -> Unit = {},
+    onDeleteUngroupedTasks: () -> Unit = {},
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
     onToggleTaskPin: (taskId: String) -> Unit,
     onToggleTaskMilestone: (taskId: String) -> Unit = {},
@@ -627,10 +629,18 @@ fun ProjectBoardWorkspace(
                     locale = locale,
                     onAddTopTask = { onCreateTaskInSection(null, ungroupedTasks, 0) },
                     onAddBottomTask = { onCreateTaskInSection(null, ungroupedTasks, ungroupedTasks.size) },
-                    onRenameHeading = null,
+                    onRenameHeading = if (ungroupedTasks.isNotEmpty() || projectHeadings.isEmpty()) {
+                        { newName -> onPromoteUngroupedToPhase(newName) }
+                    } else {
+                        null
+                    },
                     onUpdateStartDate = null,
                     onUpdateEndDate = null,
-                    onDeleteHeading = null,
+                    onDeleteHeading = if (ungroupedTasks.isNotEmpty()) {
+                        { onDeleteUngroupedTasks() }
+                    } else {
+                        null
+                    },
                     onUpdateTaskStatus = onUpdateTaskStatus,
                     onToggleTaskPin = onToggleTaskPin,
                     onToggleTaskMilestone = onToggleTaskMilestone,
@@ -841,9 +851,17 @@ private fun ProjectBoardPhaseColumn(
     var showStartPicker by remember(headingKey) { mutableStateOf(false) }
     var showEndPicker by remember(headingKey) { mutableStateOf(false) }
     var isEditingTitle by remember(headingKey) { mutableStateOf(heading != null && heading.title.isEmpty()) }
-    var editedTitle by remember(headingKey, heading?.title) {
-        val init = heading?.title.orEmpty()
-        mutableStateOf(TextFieldValue(text = init, selection = TextRange(0, init.length)))
+    val initialEditableTitle = heading?.title ?: columnTitle
+    var editedTitle by remember(headingKey, initialEditableTitle) {
+        mutableStateOf(TextFieldValue(text = initialEditableTitle, selection = TextRange(0, initialEditableTitle.length)))
+    }
+    val renameFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isEditingTitle) {
+        if (isEditingTitle) {
+            delay(50)
+            runCatching { renameFocusRequester.requestFocus() }
+        }
     }
 
     DisposableEffect(controller, headingKey) {
@@ -936,11 +954,19 @@ private fun ProjectBoardPhaseColumn(
                                 keyboardActions = KeyboardActions(onDone = { commitRename() }),
                                 modifier = Modifier
                                     .weight(1f)
+                                    .focusRequester(renameFocusRequester)
                                     .onPreviewKeyEvent { ev ->
                                         if (ev.type == KeyEventType.KeyDown &&
                                             (ev.key == Key.Enter || ev.key == Key.NumPadEnter)
                                         ) {
                                             commitRename()
+                                            true
+                                        } else if (ev.type == KeyEventType.KeyDown && ev.key == Key.Escape) {
+                                            if (heading != null && heading.title.isEmpty() && editedTitle.text.isBlank()) {
+                                                onDeleteHeading?.invoke()
+                                            } else {
+                                                isEditingTitle = false
+                                            }
                                             true
                                         } else {
                                             false
@@ -957,7 +983,7 @@ private fun ProjectBoardPhaseColumn(
                             }
                             IconButton(
                                 onClick = {
-                                    if (heading?.title.isNullOrEmpty() && editedTitle.text.isBlank()) {
+                                    if (heading != null && heading.title.isEmpty() && editedTitle.text.isBlank()) {
                                         onDeleteHeading?.invoke()
                                     } else {
                                         isEditingTitle = false
@@ -1038,8 +1064,8 @@ private fun ProjectBoardPhaseColumn(
                                     IconButton(
                                         onClick = {
                                             editedTitle = TextFieldValue(
-                                                text = heading?.title.orEmpty(),
-                                                selection = TextRange(0, heading?.title?.length ?: 0)
+                                                text = initialEditableTitle,
+                                                selection = TextRange(0, initialEditableTitle.length)
                                             )
                                             isEditingTitle = true
                                         },
@@ -1047,7 +1073,7 @@ private fun ProjectBoardPhaseColumn(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.Edit,
-                                            contentDescription = stringResource(R.string.entity_heading),
+                                            contentDescription = stringResource(R.string.areas_rename_label),
                                             tint = colors.secondaryText,
                                             modifier = Modifier.size(13.5.dp)
                                         )
@@ -2979,6 +3005,7 @@ private fun RoadmapSynchronizedLanesBody(
                                 previewDelta = livePreviewDeltaDays["task_${tb.taskId}"] ?: 0L,
                                 isSelected = tb.taskId in selectedTaskIds,
                                 isSelectionModeActive = isSelectionModeActive,
+                                locale = locale,
                                 onPreviewDeltaChanged = { delta ->
                                     if (delta == 0L) livePreviewDeltaDays.remove("task_${tb.taskId}")
                                     else livePreviewDeltaDays["task_${tb.taskId}"] = delta
@@ -3281,6 +3308,7 @@ private fun RoadmapDraggableTaskBar(
     previewDelta: Long,
     isSelected: Boolean = false,
     isSelectionModeActive: Boolean = false,
+    locale: Locale = Locale.getDefault(),
     onPreviewDeltaChanged: (Long) -> Unit,
     onCommitShift: (Long) -> Unit,
     onSelectSingleTask: (() -> Unit)? = null,
@@ -3401,6 +3429,57 @@ private fun RoadmapDraggableTaskBar(
     }
 
     val defaultTodoLabel = stringResource(R.string.entity_todo)
+    val localizedEffort = when (EffortLevel.normalize(taskBar.task.effortLevel)) {
+        EffortLevel.QUICK_WIN -> stringResource(R.string.v30_effort_quick_win)
+        EffortLevel.MEDIUM -> stringResource(R.string.v30_effort_medium)
+        EffortLevel.DEEP_FOCUS -> stringResource(R.string.v30_effort_deep_focus)
+        else -> null
+    }
+    val blockedLabel = stringResource(R.string.v30_blocked_by_label)
+    val zone = ZoneId.systemDefault()
+    val tooltipDateFmt = remember(locale) {
+        DateTimeFormatter.ofPattern(if (locale.language == "de") "d. MMM" else "MMM d", locale)
+    }
+    val tooltipText = remember(
+        taskBar.title,
+        taskBar.isMilestone,
+        taskBar.isActivelyBlocked,
+        taskBar.task.deadline,
+        taskBar.task.durationMinutes,
+        effectiveStartDay,
+        effectiveEndDay,
+        localizedEffort,
+        blockedLabel,
+        defaultTodoLabel,
+        tooltipDateFmt,
+        zone
+    ) {
+        val cleanTitle = taskBar.title.ifBlank { defaultTodoLabel }
+        val startFormatted = LocalDate.ofEpochDay(effectiveStartDay).format(tooltipDateFmt)
+        val endFormatted = LocalDate.ofEpochDay(effectiveEndDay).format(tooltipDateFmt)
+        val dateRangeStr = if (effectiveStartDay == effectiveEndDay) {
+            startFormatted
+        } else {
+            "$startFormatted – $endFormatted"
+        }
+        val distinctDeadlineStr = taskBar.task.deadline?.let { dlMillis ->
+            val dlDay = ProjectRoadmapEngine.epochMillisToEpochDay(dlMillis, zone) + previewDelta
+            if (dlDay != effectiveStartDay || effectiveStartDay != effectiveEndDay) {
+                "⚑ ${LocalDate.ofEpochDay(dlDay).format(tooltipDateFmt)}"
+            } else {
+                null
+            }
+        }
+        val durationStr = formatDurationCompact(taskBar.task.durationMinutes)
+        buildList {
+            add(if (taskBar.isMilestone) "◆ $cleanTitle" else cleanTitle)
+            add(dateRangeStr)
+            if (distinctDeadlineStr != null) add(distinctDeadlineStr)
+            if (!durationStr.isNullOrBlank()) add(durationStr)
+            if (!localizedEffort.isNullOrBlank()) add(localizedEffort)
+            if (taskBar.isActivelyBlocked) add("⏳ $blockedLabel")
+        }.joinToString(" · ")
+    }
 
     if (taskBar.isMilestone) {
         val diamondFill = when {
@@ -3444,6 +3523,10 @@ private fun RoadmapDraggableTaskBar(
                 }
                 .width(dayWidthDp)
                 .height(TASK_ROW_HEIGHT)
+                .thingsTimelineMouseHoverTooltip(
+                    text = tooltipText,
+                    enabled = !isArmedForDrag && previewDelta == 0L
+                )
                 .then(interactiveGestureModifier),
             contentAlignment = Alignment.Center
         ) {
@@ -3527,6 +3610,10 @@ private fun RoadmapDraggableTaskBar(
                         translationX = xOffsetPx - baseXOffsetPx
                     }
                     .height(TASK_ROW_HEIGHT - 12.dp)
+                    .thingsTimelineMouseHoverTooltip(
+                        text = tooltipText,
+                        enabled = !isArmedForDrag && previewDelta == 0L
+                    )
                     .then(interactiveGestureModifier),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -3584,6 +3671,10 @@ private fun RoadmapDraggableTaskBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
+                            .thingsTimelineMouseHoverTooltip(
+                                text = tooltipText,
+                                enabled = !isArmedForDrag && previewDelta == 0L
+                            )
                             .clip(RoundedCornerShape(7.dp))
                             .background(
                                 if (isSelected) colors.thingsBlueSoft else colors.milestoneVioletSoft.copy(alpha = 0.94f)
@@ -3634,6 +3725,10 @@ private fun RoadmapDraggableTaskBar(
             .width(barWidthDp)
             .height(TASK_ROW_HEIGHT - 12.dp)
             .padding(horizontal = 3.dp)
+            .thingsTimelineMouseHoverTooltip(
+                text = tooltipText,
+                enabled = !isArmedForDrag && previewDelta == 0L
+            )
             .shadow(if (isArmedForDrag || previewDelta != 0L || isSelected) 5.dp else 1.dp, RoundedCornerShape(8.dp))
             .clip(RoundedCornerShape(8.dp))
             .background(barFill)

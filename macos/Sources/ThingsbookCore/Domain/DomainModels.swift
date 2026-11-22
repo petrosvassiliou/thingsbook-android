@@ -2532,6 +2532,14 @@ public struct TooltipTimingCoordinator: Sendable, Equatable {
         return hadState ? .hideImmediately : .none
     }
 
+    public static func isEligibleMouseHover(
+        isMousePointer: Bool,
+        pressedMouseButtons: UInt,
+        isSuppressed: Bool
+    ) -> Bool {
+        isMousePointer && pressedMouseButtons == 0 && !isSuppressed
+    }
+
     private func isWarmAt(nowMs: Int64) -> Bool {
         if visibleAnchorId != nil {
             return true
@@ -3954,7 +3962,152 @@ public enum ProjectRoadmapEngine {
     }
 }
 
+// MARK: - v3.0 Timeline Task Mouse Hover Tooltip Formatter
 
+public enum TimelineTaskTooltipFormatter {
+    public static func formatRoadmapTask(
+        taskBar: RoadmapTaskBar,
+        isBlocked: Bool,
+        language: AppLanguage
+    ) -> String {
+        let task = taskBar.task
+        let strings = ThingsStrings.shared
+        let isMilestone = taskBar.isMilestone || task.isMilestone
+        let isCompleted = task.status == .completed
+        let rawTitle = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = rawTitle.isEmpty ? strings.text("macos_untitled_todo", lang: language) : rawTitle
 
+        var header = isMilestone ? "◆ \(resolvedTitle)" : resolvedTitle
+        if isCompleted {
+            header += " ✓"
+        } else if isBlocked {
+            header += " ⏳"
+        }
 
+        let df = DateFormatter()
+        df.locale = language.locale
+        df.setLocalizedDateFormatFromTemplate("dMMM")
 
+        var details: [String] = []
+        let startStr = df.string(from: DateEpochConverter.date(fromEpochDay: taskBar.startEpochDay))
+        let endStr = df.string(from: DateEpochConverter.date(fromEpochDay: taskBar.endEpochDay))
+
+        if taskBar.startEpochDay == taskBar.endEpochDay {
+            if !isMilestone && task.whenDate == nil && task.deadline != nil {
+                details.append("⚑ \(startStr)")
+            } else {
+                details.append(startStr)
+                if let dlMs = task.deadline {
+                    let dlDay = DateEpochConverter.epochDay(forMillis: dlMs)
+                    if dlDay != taskBar.startEpochDay {
+                        let dlStr = df.string(from: DateEpochConverter.date(fromEpochDay: dlDay))
+                        details.append("⚑ \(dlStr)")
+                    }
+                }
+            }
+        } else {
+            details.append("\(startStr) – \(endStr)")
+            if let dlMs = task.deadline {
+                let dlDay = DateEpochConverter.epochDay(forMillis: dlMs)
+                let dlStr = df.string(from: DateEpochConverter.date(fromEpochDay: dlDay))
+                details.append("⚑ \(dlStr)")
+            }
+        }
+
+        if let dur = task.durationMinutes, dur > 0 {
+            details.append(TaskItem.formatCompactDuration(dur))
+        }
+
+        if let effort = task.resolvedEffort {
+            details.append(localizedEffortTitle(effort, strings: strings, language: language))
+        }
+
+        let activeChecklists = task.checklistItems.filter { !$0.isDeleted }
+        if !activeChecklists.isEmpty {
+            let done = activeChecklists.filter(\.isCompleted).count
+            details.append("\(done)/\(activeChecklists.count)")
+        }
+
+        if details.isEmpty {
+            return header
+        }
+        return "\(header)\n\(details.joined(separator: " · "))"
+    }
+
+    public static func formatTodayTimelineTask(
+        task: TaskItem,
+        startMinutes: Int? = nil,
+        endMinutes: Int? = nil,
+        projectTitle: String? = nil,
+        isBlocked: Bool,
+        language: AppLanguage
+    ) -> String {
+        let strings = ThingsStrings.shared
+        let isCompleted = task.status == .completed
+        let rawTitle = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = rawTitle.isEmpty ? strings.text("macos_untitled_todo", lang: language) : rawTitle
+
+        var header = task.isMilestone ? "◆ \(resolvedTitle)" : resolvedTitle
+        if isCompleted {
+            header += " ✓"
+        } else if isBlocked {
+            header += " ⏳"
+        }
+
+        let df = DateFormatter()
+        df.locale = language.locale
+        df.setLocalizedDateFormatFromTemplate("dMMM")
+
+        var details: [String] = []
+        if let startMinutes, let endMinutes {
+            let endLabel = endMinutes >= 1440 ? "24:00" : TaskItem.formatMinutesOfDay(endMinutes)
+            details.append("\(TaskItem.formatMinutesOfDay(startMinutes))–\(endLabel)")
+            details.append(TaskItem.formatCompactDuration(task.effectiveDurationMinutes))
+        } else {
+            if let wMs = task.whenDate {
+                details.append(df.string(from: DateEpochConverter.date(fromMillis: wMs)))
+            }
+            if let dur = task.durationMinutes, dur > 0 {
+                details.append(TaskItem.formatCompactDuration(dur))
+            }
+        }
+
+        if let dlMs = task.deadline {
+            details.append("⚑ \(df.string(from: DateEpochConverter.date(fromMillis: dlMs)))")
+        }
+
+        if let effort = task.resolvedEffort {
+            details.append(localizedEffortTitle(effort, strings: strings, language: language))
+        }
+
+        let activeChecklists = task.checklistItems.filter { !$0.isDeleted }
+        if !activeChecklists.isEmpty {
+            let done = activeChecklists.filter(\.isCompleted).count
+            details.append("\(done)/\(activeChecklists.count)")
+        }
+
+        if let proj = projectTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !proj.isEmpty {
+            details.append(proj)
+        }
+
+        if details.isEmpty {
+            return header
+        }
+        return "\(header)\n\(details.joined(separator: " · "))"
+    }
+
+    private static func localizedEffortTitle(
+        _ effort: TaskEffortLevel,
+        strings: ThingsStrings,
+        language: AppLanguage
+    ) -> String {
+        switch effort {
+        case .quickWin:
+            return strings.text("v30_effort_quick_win", lang: language)
+        case .medium:
+            return strings.text("v30_effort_medium", lang: language)
+        case .deepFocus:
+            return strings.text("v30_effort_deep_focus", lang: language)
+        }
+    }
+}

@@ -2044,10 +2044,14 @@ public enum ExternalProjectCodec {
         return semicolons > commas ? ";" : ","
     }
 
-    private static func isUngroupedSectionName(_ raw: String) -> Bool {
-        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    public static func isUngroupedSectionName(_ raw: String) -> Bool {
+        var clean = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if clean.hasSuffix(":") {
+            clean.removeLast()
+            clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         if clean.isEmpty { return true }
-        return ["untitled section", "(no section)", "no section", "unassigned"].contains(clean)
+        return ["untitled section", "unnamed section", "(no section)", "no section", "unassigned"].contains(clean)
     }
 
     private static func splitDeduplicatedTags(_ raw: String) -> [String] {

@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { IDBPDatabase } from 'idb';
 import {
   DEFAULT_INITIAL_DELAY_MS,
   DEFAULT_WARM_HANDOFF_WINDOW_MS,
   TooltipTimingMachine,
   computeTooltipPosition,
+  isTimelineMouseTooltipAllowed,
   isTopBarIconTooltipAllowed
 } from '../src/domain/tooltipTiming.ts';
+import { ThingsLocalDb } from '../src/data/localDb.ts';
+import { importAsanaJson } from '../src/data/externalProjectCodec.ts';
+import type { HeadingRecord, ProjectRecord, TaskRecord } from '../src/domain/types.ts';
 
 test('TooltipTimingMachine enforces 160ms cold delay and 0ms warm handoff across adjacent controls', () => {
   const machine = new TooltipTimingMachine();
@@ -271,4 +276,275 @@ test('v3.0.0-alpha.4 sidebar Bento and Micro-Bento cards use 2-row layout and ne
   assert.ok(reviewLabelBlock.length > 0, 'Missing .v2-review-step-label rule');
   assert.ok(!reviewLabelBlock.includes('ellipsis'), '.v2-review-step-label must never truncate with ellipsis');
   assert.ok(!reviewLabelBlock.includes('nowrap'), '.v2-review-step-label must allow full-width wrapping');
+});
+
+test('v3.0.0 isTimelineMouseTooltipAllowed strictly allows unpressed mouse hover and rejects touch, pen, pressed buttons, and active drags', () => {
+  // Mouse with buttons === 0 and not dragging -> allowed
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: 'mouse',
+      buttons: 0
+    }),
+    true
+  );
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: 'mouse',
+      buttons: 0,
+      isDraggingTimelineBar: false
+    }),
+    true
+  );
+
+  // Missing attribute -> blocked
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: false,
+      pointerType: 'mouse',
+      buttons: 0
+    }),
+    false
+  );
+
+  // Touch, pen, and unknown pointer types -> strictly blocked
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: 'touch',
+      buttons: 0
+    }),
+    false
+  );
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: 'pen',
+      buttons: 0
+    }),
+    false
+  );
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: '',
+      buttons: 0
+    }),
+    false
+  );
+
+  // Pressed mouse buttons -> strictly blocked
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: 'mouse',
+      buttons: 1
+    }),
+    false
+  );
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: 'mouse',
+      buttons: 2
+    }),
+    false
+  );
+
+  // Active timeline bar drag -> strictly blocked
+  assert.equal(
+    isTimelineMouseTooltipAllowed({
+      hasTimelineTipAttr: true,
+      pointerType: 'mouse',
+      buttons: 0,
+      isDraggingTimelineBar: true
+    }),
+    false
+  );
+});
+
+test('v3.0.0 promoteUngroupedTasksToHeading creates a top-of-project Heading and moves open ungrouped tasks atomically while Asana skips empty placeholder sections', async () => {
+  type StoreMap = Map<string, unknown>;
+  const stores = new Map<string, StoreMap>([
+    ['areas', new Map()],
+    ['projects', new Map()],
+    ['headings', new Map()],
+    ['tasks', new Map()],
+    ['checklist_items', new Map()],
+    ['tags', new Map()],
+    ['attachments', new Map()],
+    ['meta', new Map([['initial_seeded', true]])],
+    ['projectTemplates', new Map()]
+  ]);
+
+  const makeObjectStore = (name: string) => {
+    const map = stores.get(name)!;
+    return {
+      async get(key: string) {
+        const val = map.get(key);
+        return val === undefined ? undefined : structuredClone(val);
+      },
+      async getAll() {
+        return Array.from(map.values()).map((v) => structuredClone(v));
+      },
+      async put(value: unknown, explicitKey?: string) {
+        const k =
+          explicitKey ??
+          (typeof value === 'object' && value !== null && 'id' in value
+            ? String((value as { id: string }).id)
+            : '');
+        map.set(k, structuredClone(value));
+        return k;
+      },
+      async delete(key: string) {
+        map.delete(key);
+      },
+      async clear() {
+        map.clear();
+      },
+      async count() {
+        return map.size;
+      }
+    };
+  };
+
+  const dbFake = {
+    async get(storeName: string, key: string) {
+      return makeObjectStore(storeName).get(key);
+    },
+    async getAll(storeName: string) {
+      return makeObjectStore(storeName).getAll();
+    },
+    async put(storeName: string, value: unknown, key?: string) {
+      return makeObjectStore(storeName).put(value, key);
+    },
+    async count(storeName: string) {
+      return makeObjectStore(storeName).count();
+    },
+    transaction(storeNames: string | string[]) {
+      const allowed = new Set(Array.isArray(storeNames) ? storeNames : [storeNames]);
+      return {
+        objectStore(name: string) {
+          assert.ok(allowed.has(name), `Store "${name}" not included in transaction`);
+          return makeObjectStore(name);
+        },
+        get store() {
+          const single = Array.isArray(storeNames) ? storeNames[0] : storeNames;
+          return makeObjectStore(single);
+        },
+        done: Promise.resolve()
+      };
+    }
+  } as unknown as IDBPDatabase;
+
+  const db = new ThingsLocalDb(async () => dbFake);
+  const now = 1_765_000_000_000;
+
+  const proj: ProjectRecord = {
+    id: 'proj-general',
+    areaId: null,
+    title: 'Q4 Launch',
+    notes: '',
+    status: 'ACTIVE',
+    scheduleState: 'ANYTIME',
+    whenDate: null,
+    deadline: null,
+    completedAt: null,
+    sortOrder: 1000,
+    tagIds: [],
+    createdAt: now,
+    updatedAt: now,
+    isDeleted: false,
+    isDirty: false
+  };
+  const existingPhase: HeadingRecord = {
+    id: 'hd-existing',
+    projectId: proj.id,
+    title: 'Execution',
+    startDate: null,
+    endDate: null,
+    sortOrder: 1000,
+    isArchived: false,
+    createdAt: now,
+    updatedAt: now,
+    isDeleted: false,
+    isDirty: false
+  };
+  const makeTask = (overrides: Partial<TaskRecord> & Pick<TaskRecord, 'id' | 'title'>): TaskRecord => ({
+    id: overrides.id,
+    title: overrides.title,
+    notes: '',
+    status: overrides.status ?? 'OPEN',
+    scheduleState: 'ANYTIME',
+    whenDate: null,
+    deadline: null,
+    reminderTime: null,
+    completedAt: overrides.completedAt ?? null,
+    projectId: overrides.projectId !== undefined ? overrides.projectId : proj.id,
+    headingId: overrides.headingId !== undefined ? overrides.headingId : null,
+    areaId: null,
+    recurrenceRule: null,
+    sortOrder: overrides.sortOrder ?? 1000,
+    tagIds: [],
+    createdAt: now,
+    updatedAt: now,
+    isDeleted: overrides.isDeleted ?? false,
+    isDirty: false
+  });
+
+  stores.get('projects')!.set(proj.id, proj);
+  stores.get('headings')!.set(existingPhase.id, existingPhase);
+  stores.get('tasks')!.set('tk-open-ungrouped-1', makeTask({ id: 'tk-open-ungrouped-1', title: 'Draft brief' }));
+  stores.get('tasks')!.set('tk-open-ungrouped-2', makeTask({ id: 'tk-open-ungrouped-2', title: 'Kickoff deck' }));
+  stores.get('tasks')!.set(
+    'tk-done-ungrouped',
+    makeTask({ id: 'tk-done-ungrouped', title: 'Old done task', status: 'COMPLETED', completedAt: now })
+  );
+  stores.get('tasks')!.set(
+    'tk-in-phase',
+    makeTask({ id: 'tk-in-phase', title: 'Build prototype', headingId: existingPhase.id })
+  );
+
+  await db.initialize('en');
+
+  // Empty title returns null and performs no mutation
+  assert.equal(await db.promoteUngroupedTasksToHeading(proj.id, '   '), null);
+
+  const promoted = await db.promoteUngroupedTasksToHeading(proj.id, 'Preparation');
+  assert.ok(promoted != null);
+  assert.equal(promoted.title, 'Preparation');
+  assert.equal(promoted.projectId, proj.id);
+  assert.ok(promoted.sortOrder < existingPhase.sortOrder, 'Promoted phase must sort before first existing heading');
+
+  const updated1 = (await dbFake.get('tasks', 'tk-open-ungrouped-1')) as TaskRecord;
+  const updated2 = (await dbFake.get('tasks', 'tk-open-ungrouped-2')) as TaskRecord;
+  const doneTask = (await dbFake.get('tasks', 'tk-done-ungrouped')) as TaskRecord;
+  const phaseTask = (await dbFake.get('tasks', 'tk-in-phase')) as TaskRecord;
+
+  assert.equal(updated1.headingId, promoted.id);
+  assert.equal(updated2.headingId, promoted.id);
+  assert.equal(doneTask.headingId, null, 'Completed logbook tasks are untouched');
+  assert.equal(phaseTask.headingId, existingPhase.id, 'Tasks in existing phases remain in their phase');
+
+  // Verify Asana JSON import skips empty "Untitled section", "Unnamed section", "(no section)" sections
+  const asanaImported = importAsanaJson(
+    JSON.stringify({
+      project: { name: 'Clean Import' },
+      sections: [
+        { gid: 's-empty-1', name: 'Untitled section' },
+        { gid: 's-empty-2', name: 'Unnamed section' },
+        { gid: 's-empty-3', name: '(no section)' },
+        { gid: 's-real', name: 'Launch' }
+      ],
+      data: [
+        { gid: 't-1', name: 'Ship GA', memberships: [{ section: { gid: 's-real', name: 'Launch' } }] }
+      ]
+    })
+  );
+  assert.equal(asanaImported.ungroupedTasks.length, 0);
+  assert.deepEqual(
+    asanaImported.phases.map((p) => p.title),
+    ['Launch']
+  );
 });

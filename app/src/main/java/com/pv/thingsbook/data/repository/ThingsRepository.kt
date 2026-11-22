@@ -2399,6 +2399,94 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    suspend fun promoteUngroupedTasksToHeading(
+        projectId: String,
+        title: String
+    ): Pair<String, List<Pair<String, String?>>>? {
+        val cleanTitle = title.trim()
+        if (projectId.isBlank() || cleanTitle.isEmpty()) return null
+        val now = System.currentTimeMillis()
+        val newHeadingId = UUID.randomUUID().toString()
+        val previousTaskHeadings = mutableListOf<Pair<String, String?>>()
+
+        database.withTransaction {
+            val existingHeadings = database.headingDao().getHeadingsForProjectList(projectId)
+            val firstSortOrder = existingHeadings.firstOrNull()?.sortOrder
+            val topSortOrder = computeMidpointSortOrder(null, firstSortOrder)
+
+            database.headingDao().upsert(
+                HeadingEntity(
+                    id = newHeadingId,
+                    projectId = projectId,
+                    title = cleanTitle,
+                    startDate = null,
+                    endDate = null,
+                    sortOrder = if (topSortOrder.isFinite()) topSortOrder else 500.0,
+                    isArchived = false,
+                    createdAt = now,
+                    updatedAt = now,
+                    isDeleted = false,
+                    isDirty = true
+                )
+            )
+
+            val validHeadingIds = existingHeadings.mapTo(HashSet()) { it.id }
+            val openUngroupedTasks = database.taskDao().getOpenTasksByProject(projectId)
+                .filter { task ->
+                    !task.isDeleted &&
+                        task.status == TaskStatus.OPEN &&
+                        (task.headingId == null || task.headingId !in validHeadingIds)
+                }
+
+            if (openUngroupedTasks.isNotEmpty()) {
+                openUngroupedTasks.forEach { task ->
+                    previousTaskHeadings.add(task.id to task.headingId)
+                }
+                database.taskDao().upsertAll(
+                    openUngroupedTasks.map { task ->
+                        task.copy(
+                            headingId = newHeadingId,
+                            updatedAt = maxOf(now, task.updatedAt + 1L),
+                            isDirty = true
+                        )
+                    }
+                )
+            }
+        }
+        syncRepository.triggerBackgroundSync()
+        return newHeadingId to previousTaskHeadings
+    }
+
+    suspend fun restorePromotedHeadingUndo(
+        headingId: String,
+        previousTaskHeadings: List<Pair<String, String?>>
+    ) {
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            database.headingDao().getById(headingId)?.let { existingHeading ->
+                database.headingDao().upsert(
+                    existingHeading.copy(
+                        isDeleted = true,
+                        updatedAt = maxOf(now, existingHeading.updatedAt + 1L),
+                        isDirty = true
+                    )
+                )
+            }
+            val updatedTasks = previousTaskHeadings.mapNotNull { (taskId, prevHeadingId) ->
+                val task = database.taskDao().getById(taskId) ?: return@mapNotNull null
+                task.copy(
+                    headingId = prevHeadingId,
+                    updatedAt = maxOf(now, task.updatedAt + 1L),
+                    isDirty = true
+                )
+            }
+            if (updatedTasks.isNotEmpty()) {
+                database.taskDao().upsertAll(updatedTasks)
+            }
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
     suspend fun addChecklistItem(
         taskId: String,
         title: String,
@@ -3984,6 +4072,9 @@ class ThingsRepository @Inject constructor(
             }
 
             parsed.phases.forEachIndexed { idx, phase ->
+                if (phase.tasks.isEmpty() && com.pv.thingsbook.data.external.ExternalProjectCodec.isDefaultPlaceholderSectionName(phase.title)) {
+                    return@forEachIndexed
+                }
                 val headingId = UUID.randomUUID().toString()
                 val hSort = (idx + 1) * 1000.0
                 val clampedEnd = if (phase.startDate != null && phase.endDate != null && phase.endDate < phase.startDate) {

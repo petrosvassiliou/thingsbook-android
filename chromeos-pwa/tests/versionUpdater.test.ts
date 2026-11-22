@@ -32,19 +32,19 @@ import {
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v3.0.0-beta.19 build metadata constants are set to 3.0.0-beta.19 (Build 110, pre-release isolated from stable)', () => {
-  assert.equal(APP_VERSION, '3.0.0-beta.19');
-  assert.equal(APP_BUILD_CODE, 110);
-  assert.equal(versionFromUtils, '3.0.0-beta.19');
-  assert.equal(buildFromUtils, 110);
-  assert.equal(isPrereleaseVersion(APP_VERSION), true);
+test('v3.0.0 GA build metadata constants are set to 3.0.0 (Build 111, stable GA release)', () => {
+  assert.equal(APP_VERSION, '3.0.0');
+  assert.equal(APP_BUILD_CODE, 111);
+  assert.equal(versionFromUtils, '3.0.0');
+  assert.equal(buildFromUtils, 111);
+  assert.equal(isPrereleaseVersion(APP_VERSION), false);
   assert.equal(isPrereleaseVersion('2.5.0'), false);
   assert.equal(isPrereleaseVersion('2.1.4'), false);
   assert.equal(isPrereleaseVersion('2.0.0'), false);
   assert.equal(isPrereleaseVersion('3.0.0-beta.19'), true);
   assert.equal(compareSemver('3.0.0-beta.19', '2.5.0'), 1);
   assert.equal(compareSemver('3.0.0-beta.19', '3.0.0-beta.18'), 1);
-  assert.equal(compareSemver('3.0.0', '3.0.0-beta.19'), 1);
+  assert.equal(compareSemver(APP_VERSION, '3.0.0-beta.19'), 1);
   assert.equal(compareSemver, compareFromUtils);
   assert.equal(isEligibleReleasePayload, isEligibleFromUtils);
   assert.equal(selectLatestEligibleRelease, selectFromUtils);

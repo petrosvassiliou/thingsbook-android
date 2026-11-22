@@ -409,15 +409,18 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.19")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.19")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 110)
-        XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 111)
+        XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
+        XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
+        XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: true))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "3.0.0-beta.18"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.19"))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.19"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "3.0.0", includeBeta: true))
         XCTAssertTrue(TaskItem.standaloneDurationPresets.contains(480))
         XCTAssertEqual(TaskItem.formatCompactDuration(240), "4h")
         XCTAssertEqual(TaskItem.formatCompactDuration(480), "8h")
@@ -5678,6 +5681,271 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(matched4h.map(\.id), ["t-2h", "t-4h"])
         XCTAssertEqual(matched8h.map(\.id), ["t-2h", "t-4h", "t-8h"])
     }
+
+    // MARK: - v3.0.0 GA: Promote Ungrouped ("Allgemein" / "General") Tasks, Orphan Placeholder Import & Timeline Mouse Tooltips
+
+    func testV300PromoteUngroupedTasksToHeadingAndSkipEmptyPlaceholderSections() throws {
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let project = try db.createProject(title: "Website Relaunch")
+        let otherProject = try db.createProject(title: "Other Project")
+
+        let phaseA = try db.createHeading(projectId: project.id, title: "Design", sortOrder: 1000.0)
+        let phaseB = try db.createHeading(projectId: project.id, title: "Engineering", sortOrder: 2000.0)
+
+        let ungrouped1 = try db.createTask(
+            title: "Kickoff Brief",
+            scheduleState: .anytime,
+            projectId: project.id,
+            headingId: nil
+        )
+        let ungrouped2 = try db.createTask(
+            title: "Stakeholder Interview",
+            scheduleState: .today,
+            projectId: project.id,
+            headingId: nil
+        )
+        let completedUngrouped = try db.createTask(
+            title: "Old Completed Note",
+            scheduleState: .anytime,
+            projectId: project.id,
+            headingId: nil
+        )
+        _ = try db.setTaskStatus(taskId: completedUngrouped.id, status: .completed)
+
+        let deletedUngrouped = try db.createTask(
+            title: "Trashed Draft",
+            scheduleState: .anytime,
+            projectId: project.id,
+            headingId: nil
+        )
+        try db.softDeleteTask(deletedUngrouped.id)
+
+        let headedTask = try db.createTask(
+            title: "Figma Tokens",
+            scheduleState: .anytime,
+            projectId: project.id,
+            headingId: phaseA.id
+        )
+        let otherProjTask = try db.createTask(
+            title: "Unrelated Ungrouped",
+            scheduleState: .anytime,
+            projectId: otherProject.id,
+            headingId: nil
+        )
+
+        // Blank / whitespace title is a safe no-op
+        XCTAssertNil(try db.promoteUngroupedTasksToHeading(projectId: project.id, title: "   "))
+
+        // Promoting ungrouped tasks creates a top-ordered Heading and moves only open ungrouped tasks in that project
+        let promoted = try XCTUnwrap(
+            db.promoteUngroupedTasksToHeading(projectId: project.id, title: "  Vorbereitung  ")
+        )
+        XCTAssertEqual(promoted.title, "Vorbereitung")
+        XCTAssertEqual(promoted.projectId, project.id)
+        XCTAssertEqual(promoted.sortOrder, phaseA.sortOrder - 1000.0)
+
+        let snap = try db.loadWorkspaceSnapshot()
+        let orderedHeadings = try XCTUnwrap(snap.headingsByProject[project.id])
+        XCTAssertEqual(orderedHeadings.map(\.id), [promoted.id, phaseA.id, phaseB.id])
+
+        let openInProject = snap.allOpenTasks.filter { $0.projectId == project.id }
+        let remainingUngrouped = openInProject.filter { $0.headingId == nil }
+        XCTAssertTrue(remainingUngrouped.isEmpty, "No open ungrouped tasks should remain after promotion")
+
+        let promotedTasks = openInProject.filter { $0.headingId == promoted.id }
+        XCTAssertEqual(Set(promotedTasks.map(\.id)), Set([ungrouped1.id, ungrouped2.id]))
+
+        let untouchedHeaded = try XCTUnwrap(openInProject.first { $0.id == headedTask.id })
+        XCTAssertEqual(untouchedHeaded.headingId, phaseA.id)
+
+        let untouchedOtherProj = try XCTUnwrap(snap.allOpenTasks.first { $0.id == otherProjTask.id })
+        XCTAssertNil(untouchedOtherProj.headingId)
+
+        let loggedItem = try XCTUnwrap(snap.logbookTasks.first { $0.id == completedUngrouped.id })
+        XCTAssertNil(loggedItem.headingId)
+
+        // Verify Asana/Planner placeholder section filtering ("Untitled section", "Unnamed section", "(no section)")
+        XCTAssertTrue(ExternalProjectCodec.isUngroupedSectionName("Untitled section"))
+        XCTAssertTrue(ExternalProjectCodec.isUngroupedSectionName("UNNAMED SECTION"))
+        XCTAssertTrue(ExternalProjectCodec.isUngroupedSectionName("Unnamed section:"))
+        XCTAssertTrue(ExternalProjectCodec.isUngroupedSectionName("(no section)"))
+        XCTAssertFalse(ExternalProjectCodec.isUngroupedSectionName("Phase 1"))
+
+        let asanaJsonWithEmptyPlaceholders = """
+        {
+          "project": { "name": "Clean Asana Import" },
+          "sections": [
+            { "name": "Untitled section", "tasks": [] },
+            { "name": "Unnamed section", "tasks": [] },
+            { "name": "(no section)", "tasks": [] },
+            {
+              "name": "Delivery",
+              "tasks": [
+                { "name": "Ship v3.0", "completed": false }
+              ]
+            }
+          ]
+        }
+        """
+        let parsedAsana = try ExternalProjectCodec.importAsanaJson(Data(asanaJsonWithEmptyPlaceholders.utf8))
+        XCTAssertEqual(parsedAsana.phases.map(\.title), ["Delivery"])
+        XCTAssertTrue(parsedAsana.ungroupedTasks.isEmpty)
+
+        // Also verify ThingsSQLiteDatabase.importExternalProject skips empty placeholder phases directly
+        let syntheticImported = ExternalImportedProject(
+            title: "Direct Import Check",
+            ungroupedTasks: [],
+            phases: [
+                ExternalImportedPhase(title: "Unnamed section", tasks: []),
+                ExternalImportedPhase(title: "Untitled section", tasks: []),
+                ExternalImportedPhase(title: "(no section)", tasks: []),
+                ExternalImportedPhase(
+                    title: "Launch",
+                    tasks: [ExternalImportedTask(title: "Publish Release Notes")]
+                )
+            ]
+        )
+        let persistedImport = try db.importExternalProject(syntheticImported)
+        let snapAfterImport = try db.loadWorkspaceSnapshot()
+        let importedHeadings = snapAfterImport.headingsByProject[persistedImport.project.id] ?? []
+        XCTAssertEqual(importedHeadings.map(\.title), ["Launch"])
+    }
+
+    func testV300TimelineTaskTooltipFormatterAndMouseOnlyEligibility() {
+        // Mouse-only & drag/button suppression guard
+        XCTAssertTrue(
+            TooltipTimingCoordinator.isEligibleMouseHover(
+                isMousePointer: true,
+                pressedMouseButtons: 0,
+                isSuppressed: false
+            )
+        )
+        XCTAssertFalse(
+            TooltipTimingCoordinator.isEligibleMouseHover(
+                isMousePointer: false,
+                pressedMouseButtons: 0,
+                isSuppressed: false
+            ),
+            "Touch / non-mouse pointer events must not trigger timeline hover tooltips"
+        )
+        XCTAssertFalse(
+            TooltipTimingCoordinator.isEligibleMouseHover(
+                isMousePointer: true,
+                pressedMouseButtons: 1,
+                isSuppressed: false
+            ),
+            "Pressed mouse buttons during click or drag must suppress tooltips"
+        )
+        XCTAssertFalse(
+            TooltipTimingCoordinator.isEligibleMouseHover(
+                isMousePointer: true,
+                pressedMouseButtons: 0,
+                isSuppressed: true
+            ),
+            "Explicit drag/popover suppression must suppress tooltips"
+        )
+
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day10 = DateEpochConverter.epochDay(
+            for: cal.date(from: DateComponents(year: 2026, month: 6, day: 10))!,
+            calendar: cal
+        )
+        let day15 = DateEpochConverter.epochDay(
+            for: cal.date(from: DateComponents(year: 2026, month: 6, day: 15))!,
+            calendar: cal
+        )
+        let day10Ms = DateEpochConverter.startOfDayMillis(
+            for: DateEpochConverter.date(fromEpochDay: day10, calendar: cal),
+            calendar: cal
+        )
+        let day15Ms = DateEpochConverter.startOfDayMillis(
+            for: DateEpochConverter.date(fromEpochDay: day15, calendar: cal),
+            calendar: cal
+        )
+
+        let multiDayTask = TaskItem(
+            id: "t-roadmap-1",
+            title: "API Contract Freeze",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: day10Ms,
+            deadline: day15Ms,
+            durationMinutes: 480,
+            isMilestone: false,
+            effortLevel: TaskEffortLevel.deepFocus.rawValue,
+            blockedByTaskIds: ["blocker-1"],
+            checklistItems: [
+                ChecklistItem(id: "c1", taskId: "t-roadmap-1", title: "Spec", isCompleted: true, createdAt: 1, updatedAt: 1),
+                ChecklistItem(id: "c2", taskId: "t-roadmap-1", title: "Review", isCompleted: false, createdAt: 1, updatedAt: 1)
+            ],
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let bar = RoadmapTaskBar(
+            task: multiDayTask,
+            headingId: nil,
+            startEpochDay: day10,
+            endEpochDay: day15,
+            isMilestone: false
+        )
+        let roadmapTipEn = TimelineTaskTooltipFormatter.formatRoadmapTask(
+            taskBar: bar,
+            isBlocked: true,
+            language: .en
+        )
+        XCTAssertTrue(roadmapTipEn.hasPrefix("API Contract Freeze ⏳\n"))
+        XCTAssertTrue(roadmapTipEn.contains("⚑"))
+        XCTAssertTrue(roadmapTipEn.contains("8h"))
+        XCTAssertTrue(roadmapTipEn.contains(ThingsStrings.shared.text("v30_effort_deep_focus", lang: .en)))
+        XCTAssertTrue(roadmapTipEn.contains("1/2"))
+
+        let milestoneTask = TaskItem(
+            id: "t-ms-1",
+            title: "GA Release",
+            status: .completed,
+            scheduleState: .today,
+            deadline: day15Ms,
+            isMilestone: true,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let msBar = RoadmapTaskBar(
+            task: milestoneTask,
+            headingId: nil,
+            startEpochDay: day15,
+            endEpochDay: day15,
+            isMilestone: true
+        )
+        let msTipDe = TimelineTaskTooltipFormatter.formatRoadmapTask(
+            taskBar: msBar,
+            isBlocked: false,
+            language: .de
+        )
+        XCTAssertTrue(msTipDe.hasPrefix("◆ GA Release ✓\n"))
+
+        let todayTip = TimelineTaskTooltipFormatter.formatTodayTimelineTask(
+            task: TaskItem(
+                id: "t-today-1",
+                title: "Deep Architecture Session",
+                status: .open,
+                scheduleState: .today,
+                whenDate: day10Ms,
+                scheduledStartMinutes: 9 * 60,
+                durationMinutes: 240,
+                effortLevel: TaskEffortLevel.medium.rawValue,
+                createdAt: 1,
+                updatedAt: 1
+            ),
+            startMinutes: 9 * 60,
+            endMinutes: 13 * 60,
+            projectTitle: "Platform 3.0",
+            isBlocked: false,
+            language: .en
+        )
+        XCTAssertTrue(todayTip.contains("Deep Architecture Session"))
+        XCTAssertTrue(todayTip.contains("09:00–13:00"))
+        XCTAssertTrue(todayTip.contains("4h"))
+        XCTAssertTrue(todayTip.contains("Platform 3.0"))
+    }
 }
-
-

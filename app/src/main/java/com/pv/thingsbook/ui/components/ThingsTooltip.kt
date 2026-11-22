@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -59,6 +60,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -191,6 +193,29 @@ object TooltipTimingPolicy {
         hasHost: Boolean,
         text: String
     ): Boolean = isTopBarIconScope && enabled && hasHost && text.isNotBlank()
+
+    /**
+     * Strict mouse/trackpad hover filter for Timeline task bars:
+     * Returns true ONLY for unpressed cursor `Enter`/`Move` events when no touch session is active
+     * and the pointer is NOT a stylus. Touch finger gestures always have `pressed == true` or
+     * `Press`/`Release` and never emit unpressed `Enter`/`Move`, whereas physical mice & Chromebook
+     * ARCVM trackpad cursors emit unpressed `Enter`/`Move`.
+     */
+    fun isMouseOnlyTimelineHoverEvent(
+        eventType: PointerEventType,
+        pointerType: PointerType?,
+        hasChanges: Boolean,
+        anyPressed: Boolean,
+        anyPreviousPressed: Boolean,
+        isTouchSessionActive: Boolean
+    ): Boolean {
+        return hasChanges &&
+            !anyPressed &&
+            !anyPreviousPressed &&
+            !isTouchSessionActive &&
+            (eventType == PointerEventType.Enter || eventType == PointerEventType.Move) &&
+            pointerType != PointerType.Stylus
+    }
 }
 
 /**
@@ -501,7 +526,8 @@ private fun BoxScope.ThingsTooltipOverlayLayer(
                         platformStyle = PlatformTextStyle(includeFontPadding = false)
                     ),
                     color = bubbleStyle.textColor,
-                    maxLines = 2
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -767,6 +793,135 @@ fun ThingsHoverTooltip(
     ) {
         content()
     }
+}
+
+/**
+ * Mouse-only hover tooltip modifier for Timeline task bars & Milestone pills:
+ * - Registers directly with [LocalThingsTooltipHostState] without requiring [LocalThingsTopBarTooltipScope].
+ * - Zero wrapper `Box` — preserves exact `.offset(...)` / `.width(...)` / `.height(...)` geometry and reports exact `boundsInRoot()`.
+ * - NEVER triggers on touch tap or touch long-press (zero touch long-press timer — touch hold stays strictly for timeline drag).
+ * - Observes `PointerEventPass.Initial` WITHOUT consuming any pointer events so tap, double-click, and long-press-drag work identically.
+ */
+fun Modifier.thingsTimelineMouseHoverTooltip(
+    text: String,
+    enabled: Boolean = true,
+    delayMillis: Long = TooltipTimingPolicy.DEFAULT_INITIAL_DELAY_MS
+): Modifier = composed {
+    val hostState = LocalThingsTooltipHostState.current ?: return@composed Modifier
+    val ownerId = remember { Any() }
+    val boundsRef = remember { BoundsRef() }
+    val latestText by rememberUpdatedState(text)
+    val latestEnabled by rememberUpdatedState(enabled)
+
+    var isMouseHovered by remember { mutableStateOf(false) }
+    var isTouchSessionActive by remember { mutableStateOf(false) }
+
+    DisposableEffect(ownerId, hostState) {
+        onDispose {
+            hostState.hide(ownerId, allowWarmHandoff = false)
+        }
+    }
+
+    LaunchedEffect(text, enabled, hostState) {
+        if (!enabled || text.isBlank()) {
+            isMouseHovered = false
+            hostState.hide(ownerId, allowWarmHandoff = false)
+        } else {
+            hostState.updateIfActive(ownerId, text, boundsRef.rect)
+        }
+    }
+
+    LaunchedEffect(isMouseHovered, isTouchSessionActive, enabled, hostState) {
+        if (!enabled || !isMouseHovered || isTouchSessionActive || latestText.isBlank()) {
+            hostState.hide(ownerId, allowWarmHandoff = true)
+        } else {
+            val waitMs = hostState.resolveHoverDelayMs(delayMillis)
+            if (waitMs > 0L) {
+                delay(waitMs)
+            }
+            val resolved = latestText
+            if (latestEnabled && isMouseHovered && !isTouchSessionActive && resolved.isNotBlank()) {
+                hostState.show(ownerId, resolved, boundsRef.rect, isTouchPreview = false)
+            }
+        }
+    }
+
+    this
+        .onGloballyPositioned { coords ->
+            if (coords.isAttached) {
+                val updated = coords.boundsInRoot().roundToIntRect()
+                boundsRef.rect = updated
+                if (latestEnabled) {
+                    hostState.updateIfActive(ownerId, latestText, updated)
+                }
+            }
+        }
+        .pointerInput(enabled, hostState) {
+            if (!enabled) return@pointerInput
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val changes = event.changes
+                    val primary = changes.firstOrNull()
+                    val pointerType = primary?.type
+                    val anyPressed = changes.any { it.pressed }
+                    val anyPreviousPressed = changes.any { it.previousPressed }
+
+                    if (event.type == PointerEventType.Exit || event.type == PointerEventType.Scroll) {
+                        if (isMouseHovered) {
+                            isMouseHovered = false
+                        }
+                        if (!anyPressed) {
+                            isTouchSessionActive = false
+                        }
+                        hostState.hide(
+                            ownerId,
+                            allowWarmHandoff = event.type == PointerEventType.Exit
+                        )
+                        continue
+                    }
+
+                    if (anyPressed || event.type == PointerEventType.Press) {
+                        if (pointerType == PointerType.Touch || pointerType == PointerType.Stylus) {
+                            isTouchSessionActive = true
+                        }
+                        if (isMouseHovered) {
+                            isMouseHovered = false
+                        }
+                        hostState.hide(ownerId, allowWarmHandoff = false)
+                        continue
+                    }
+
+                    if (!anyPressed && anyPreviousPressed) {
+                        isTouchSessionActive = false
+                        if (isMouseHovered) {
+                            isMouseHovered = false
+                        }
+                        hostState.hide(ownerId, allowWarmHandoff = false)
+                        continue
+                    }
+
+                    if (TooltipTimingPolicy.isMouseOnlyTimelineHoverEvent(
+                            eventType = event.type,
+                            pointerType = pointerType,
+                            hasChanges = changes.isNotEmpty(),
+                            anyPressed = anyPressed,
+                            anyPreviousPressed = anyPreviousPressed,
+                            isTouchSessionActive = isTouchSessionActive
+                        )
+                    ) {
+                        if (!isMouseHovered) {
+                            isMouseHovered = true
+                        }
+                    } else if (pointerType == PointerType.Stylus) {
+                        if (isMouseHovered) {
+                            isMouseHovered = false
+                        }
+                        hostState.hide(ownerId, allowWarmHandoff = false)
+                    }
+                }
+            }
+        }
 }
 
 /**

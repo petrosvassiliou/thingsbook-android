@@ -2457,6 +2457,21 @@ fun ThingsTodayTimelineSection(
                 is TodayTimelineEntry.TaskBlock -> {
                     val task = entry.task
                     val startLabel = TimeblockScheduleUtils.formatMinutesAsHm(entry.startMinutes)
+                    val endLabel = TimeblockScheduleUtils.formatMinutesAsHm(entry.endMinutes)
+                    val durLabel = formatDurationCompact(entry.durationMinutes)
+                    val defaultTodoTitle = stringResource(R.string.placeholder_todo_title)
+                    val tooltipText = remember(
+                        task.title,
+                        task.isMilestone,
+                        startLabel,
+                        endLabel,
+                        durLabel,
+                        defaultTodoTitle
+                    ) {
+                        val cleanTitle = task.title.ifBlank { defaultTodoTitle }
+                        val titled = if (task.isMilestone) "◆ $cleanTitle" else cleanTitle
+                        "$titled · $startLabel – $endLabel · $durLabel"
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2478,6 +2493,7 @@ fun ThingsTodayTimelineSection(
                             tonalElevation = 2.dp,
                             modifier = Modifier
                                 .weight(1f)
+                                .thingsTimelineMouseHoverTooltip(text = tooltipText)
                                 .border(
                                     width = if (!entry.hasConflict && task.isMilestone) 1.35.dp else 1.dp,
                                     color = when {

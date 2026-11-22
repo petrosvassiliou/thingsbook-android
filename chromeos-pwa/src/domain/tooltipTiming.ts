@@ -239,3 +239,22 @@ export function isTopBarIconTooltipAllowed(
   }
   return false;
 }
+
+/**
+ * Restricts timeline task hover tooltips strictly to unpressed Mouse input
+ * (`pointerType === 'mouse' && buttons === 0`) when no timeline bar drag is active.
+ * Rejects touch, pen/stylus, empty pointerType, pressed mouse buttons, and active drags.
+ */
+export function isTimelineMouseTooltipAllowed(params: {
+  hasTimelineTipAttr: boolean;
+  pointerType: string;
+  buttons: number;
+  isDraggingTimelineBar?: boolean;
+}): boolean {
+  return (
+    Boolean(params.hasTimelineTipAttr) &&
+    params.pointerType === 'mouse' &&
+    params.buttons === 0 &&
+    !params.isDraggingTimelineBar
+  );
+}

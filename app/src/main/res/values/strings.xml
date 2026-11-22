@@ -507,10 +507,10 @@
     <string name="v30_duration_label">Duration</string>
     <string name="v30_duration_clear">Clear Duration</string>
     <string name="v30_effort_label">Effort</string>
-    <string name="v30_effort_none">No Effort</string>
-    <string name="v30_effort_quick_win">Quick Win</string>
+    <string name="v30_effort_none">Not set</string>
+    <string name="v30_effort_quick_win">Low</string>
     <string name="v30_effort_medium">Medium</string>
-    <string name="v30_effort_deep_focus">Deep Focus</string>
+    <string name="v30_effort_deep_focus">High</string>
     <string name="v30_view_sort_effort">By Effort</string>
     <string name="v30_today_capacity_summary">%1$s planned · %2$s free</string>
     <string name="v30_today_planned_only">%1$s planned</string>

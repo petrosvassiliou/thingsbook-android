@@ -507,10 +507,10 @@
     <string name="v30_duration_label">Durata</string>
     <string name="v30_duration_clear">Rimuovi durata</string>
     <string name="v30_effort_label">Impegno</string>
-    <string name="v30_effort_none">Nessun impegno</string>
-    <string name="v30_effort_quick_win">Veloce</string>
+    <string name="v30_effort_none">Non impostato</string>
+    <string name="v30_effort_quick_win">Basso</string>
     <string name="v30_effort_medium">Medio</string>
-    <string name="v30_effort_deep_focus">Focus profondo</string>
+    <string name="v30_effort_deep_focus">Alto</string>
     <string name="v30_view_sort_effort">Per impegno</string>
     <string name="v30_today_capacity_summary">%1$s pianificati · %2$s liberi</string>
     <string name="v30_today_planned_only">%1$s pianificati</string>

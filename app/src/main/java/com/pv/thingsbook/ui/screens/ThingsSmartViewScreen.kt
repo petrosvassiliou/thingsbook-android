@@ -4674,8 +4674,7 @@ private fun ThingsMultiSelectionBar(
                 FlowRow(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     SelectionCountAndSelectAllCluster()
                     BatchPropertyPillsContent()
@@ -4699,8 +4698,7 @@ private fun ThingsMultiSelectionBar(
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        itemVerticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         BatchPropertyPillsContent()
                     }

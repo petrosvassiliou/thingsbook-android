@@ -2534,7 +2534,7 @@ public struct TooltipTimingCoordinator: Sendable, Equatable {
 
     public static func isEligibleMouseHover(
         isMousePointer: Bool,
-        pressedMouseButtons: UInt,
+        pressedMouseButtons: Int,
         isSuppressed: Bool
     ) -> Bool {
         isMousePointer && pressedMouseButtons == 0 && !isSuppressed

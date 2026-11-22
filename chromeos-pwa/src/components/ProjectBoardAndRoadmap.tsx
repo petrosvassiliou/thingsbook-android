@@ -27,10 +27,8 @@ import {
   Pin,
   PinOff,
   Plus,
-  Repeat,
   RotateCcw,
   Sun,
-  Timer,
   Trash2,
   X,
   XCircle
@@ -156,13 +154,10 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
   onCreatePhase,
   onOpenWhenModal,
   onOpenDeadlineModal,
-  onOpenRepeatModal,
   onOpenMoveModal,
   onOpenTagsModal,
-  onOpenDependenciesModal,
   onOpenHeadingStartModal,
   onOpenHeadingEndModal,
-  onStartFocusTimer,
   onDuplicateTask,
   onToast
 }) => {
@@ -1022,36 +1017,22 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
               </div>
               <div className="context-menu-divider" />
 
+              {/* 1. Open Details */}
               <button
                 type="button"
                 className="context-menu-item"
+                data-testid="task-ctx-edit-btn"
                 onClick={() => {
                   const id = cardCtxMenu.task.id;
                   setCardCtxMenu(null);
                   onOpenTaskEditor(id);
                 }}
               >
-                <Edit3 size={14} />
-                <span>{t.actionEdit}</span>
+                <Maximize2 size={14} />
+                <span>{t.openDetailsAction}</span>
               </button>
 
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => {
-                  const id = cardCtxMenu.task.id;
-                  setCardCtxMenu(null);
-                  onSelectTask(id, true, false);
-                }}
-              >
-                <CheckSquare size={14} />
-                <span>
-                  {selectedTaskIds.includes(cardCtxMenu.task.id)
-                    ? t.ctxDeselect
-                    : t.ctxSelect}
-                </span>
-              </button>
-
+              {/* 2. Complete / Reopen */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1064,7 +1045,11 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                   );
                 }}
               >
-                <CheckCircle2 size={14} />
+                {cardCtxMenu.task.status === 'OPEN' ? (
+                  <CheckCircle2 size={14} />
+                ) : (
+                  <RotateCcw size={14} />
+                )}
                 <span>
                   {cardCtxMenu.task.status === 'OPEN'
                     ? t.actionComplete
@@ -1072,6 +1057,9 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 </span>
               </button>
 
+              <div className="context-menu-divider" />
+
+              {/* 3. When? (Date & Reminder) */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1085,6 +1073,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 <span>{t.ctxWhenReminder}</span>
               </button>
 
+              {/* 4. Deadline */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1098,19 +1087,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 <span>{t.actionDeadline}</span>
               </button>
 
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => {
-                  const id = cardCtxMenu.task.id;
-                  setCardCtxMenu(null);
-                  onOpenRepeatModal(id);
-                }}
-              >
-                <Repeat size={14} />
-                <span>{t.actionRepeat}</span>
-              </button>
-
+              {/* 5. Move (Project / Area) */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1124,6 +1101,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 <span>{t.ctxMoveContainer}</span>
               </button>
 
+              {/* 6. Assign Categories */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1137,19 +1115,23 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 <span>{t.ctxAssignTags}</span>
               </button>
 
+              <div className="context-menu-divider" />
+
+              {/* 7. Pin to Top / Unpin */}
               <button
                 type="button"
                 className="context-menu-item"
                 onClick={() => {
-                  const id = cardCtxMenu.task.id;
+                  const tk = cardCtxMenu.task;
                   setCardCtxMenu(null);
-                  onOpenDependenciesModal(id);
+                  void localDb.upsertTask({ id: tk.id, isPinned: !tk.isPinned });
                 }}
               >
-                <Link2 size={14} />
-                <span>{t.waitingOnLabel}</span>
+                {cardCtxMenu.task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                <span>{cardCtxMenu.task.isPinned ? t.unpinTask : t.pinTask}</span>
               </button>
 
+              {/* 8. Mark as Milestone / Remove Milestone */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1166,45 +1148,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 </span>
               </button>
 
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => {
-                  const tk = cardCtxMenu.task;
-                  setCardCtxMenu(null);
-                  void localDb.upsertTask({ id: tk.id, isPinned: !tk.isPinned });
-                }}
-              >
-                {cardCtxMenu.task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                <span>{cardCtxMenu.task.isPinned ? t.unpinTask : t.pinTask}</span>
-              </button>
-
-              {cardCtxMenu.task.status === 'OPEN' && (
-                <button
-                  type="button"
-                  className="context-menu-item"
-                  onClick={() => {
-                    const tk = cardCtxMenu.task;
-                    const focusMins =
-                      tk.durationMinutes != null && tk.durationMinutes > 0
-                        ? Math.min(720, tk.durationMinutes)
-                        : 25;
-                    setCardCtxMenu(null);
-                    onStartFocusTimer(tk.id, tk.title, focusMins);
-                  }}
-                >
-                  <Timer size={14} style={{ color: 'var(--things-blue)' }} />
-                  <span>
-                    {t.actionFocusTimerMinutes(
-                      cardCtxMenu.task.durationMinutes != null &&
-                        cardCtxMenu.task.durationMinutes > 0
-                        ? Math.min(720, cardCtxMenu.task.durationMinutes)
-                        : 25
-                    )}
-                  </span>
-                </button>
-              )}
-
+              {/* 9. Duplicate To-Do */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -1220,6 +1164,23 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
 
               <div className="context-menu-divider" />
 
+              {/* 10. Mark as Canceled */}
+              {cardCtxMenu.task.status !== 'CANCELED' && (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  onClick={() => {
+                    const tk = cardCtxMenu.task;
+                    setCardCtxMenu(null);
+                    void commitTaskStatus(tk, 'CANCELED');
+                  }}
+                >
+                  <XCircle size={14} />
+                  <span>{t.actionCancelTodo}</span>
+                </button>
+              )}
+
+              {/* 11. Delete To-Do */}
               <button
                 type="button"
                 className="context-menu-item danger"

@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -268,9 +269,7 @@ fun ExpandableTaskCard(
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
-    val clipboardManager = LocalClipboardManager.current
     val currentOnStatusChange by rememberUpdatedState(onStatusChange)
-    val fallbackCopyTitle = stringResource(R.string.placeholder_todo_title)
     var lastPlainTapUptimeMs by remember(task.id) { mutableLongStateOf(0L) }
 
     // Focus tracking across all text inputs inside this card so right-click NEVER hijacks native text editing
@@ -1220,28 +1219,15 @@ fun ExpandableTaskCard(
                 isSelected = isSelected,
                 offset = contextMenuOffsetDp,
                 onOpenDetails = if (!isCompletingAnim) ({ onExpandToggle() }) else null,
-                onStartInlineQuickEdit = if (!isCompletingAnim) ({ startInlineQuickEdit() }) else null,
                 onToggleSelection = onToggleSelection,
                 onStatusChange = handleStatusRequest,
                 onOpenWhenDialog = { showWhenDialog = true },
                 onOpenDeadlineDialog = { showDeadlineDialog = true },
-                onOpenRepeatDialog = { showRepeatDialog = true },
-                onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
-                onUpdateEffortLevel = onUpdateEffortLevel,
-                onUpdateStandaloneDuration = onUpdateStandaloneDuration,
-                onOpenDependenciesDialog = if (onUpdateBlockedBy != null) ({ showDependenciesDialog = true }) else null,
                 onOpenMoveDialog = { showMoveDialog = true },
                 onOpenTagPickerDialog = { showTagPickerDialog = true },
-                onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
-                onStartFocusTimer = onStartFocusTimer,
                 onTogglePin = onTogglePin,
                 onToggleMilestone = onToggleMilestone,
                 onDuplicateTask = onDuplicateTask,
-                onCopyTaskMarkdown = {
-                    clipboardManager.setText(
-                        AnnotatedString(formatTaskMarkdownForClipboard(task, fallbackCopyTitle))
-                    )
-                },
                 onDeleteTask = onDeleteTask,
                 onDismiss = { showContextMenu = false }
             )
@@ -3635,36 +3621,29 @@ private fun ExpandedTaskCardBody(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskContextDropdownMenu(
     task: TaskItem,
     isSelected: Boolean,
     offset: DpOffset,
     onOpenDetails: (() -> Unit)? = null,
-    onStartInlineQuickEdit: (() -> Unit)? = null,
     onToggleSelection: (() -> Unit)?,
     onStatusChange: (TaskStatus) -> Unit,
     onOpenWhenDialog: () -> Unit,
     onOpenDeadlineDialog: () -> Unit,
-    onOpenRepeatDialog: () -> Unit,
-    onOpenTimeblockDialog: (() -> Unit)? = null,
-    onUpdateEffortLevel: ((effortLevel: String?) -> Unit)? = null,
-    onUpdateStandaloneDuration: ((durationMinutes: Int?) -> Unit)? = null,
-    onOpenDependenciesDialog: (() -> Unit)? = null,
     onOpenMoveDialog: () -> Unit,
     onOpenTagPickerDialog: () -> Unit,
-    onTriggerGeminiMagicBreakdown: () -> Unit,
-    onStartFocusTimer: (() -> Unit)? = null,
     onTogglePin: (() -> Unit)? = null,
     onToggleMilestone: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
-    onCopyTaskMarkdown: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     val targetTaskTitle = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) }
+    val compactItemPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+    val compactItemModifier = Modifier.height(38.dp)
+
     DropdownMenu(
         expanded = true,
         onDismissRequest = onDismiss,
@@ -3675,7 +3654,7 @@ private fun TaskContextDropdownMenu(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(colors.thingsBlueSoft.copy(alpha = 0.65f))
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -3697,8 +3676,11 @@ private fun TaskContextDropdownMenu(
         }
         HorizontalDivider(color = colors.hairlineDivider)
 
+        // 1. Open Details
         if (onOpenDetails != null) {
             DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
                 text = {
                     Text(
                         text = stringResource(R.string.v30_open_details_action),
@@ -3721,55 +3703,143 @@ private fun TaskContextDropdownMenu(
             )
         }
 
-        if (onStartInlineQuickEdit != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = stringResource(R.string.v30_quick_edit_action),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                        color = colors.thingsBlue
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Edit,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    onDismiss()
-                    onStartInlineQuickEdit()
-                }
-            )
+        // 2. Complete / Reopen
+        val isClosed = task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED
+        DropdownMenuItem(
+            modifier = compactItemModifier,
+            contentPadding = compactItemPadding,
+            text = {
+                Text(
+                    text = if (isClosed) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Check,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onStatusChange(if (isClosed) TaskStatus.OPEN else TaskStatus.COMPLETED)
+            }
+        )
+
+        HorizontalDivider(color = colors.hairlineDivider)
+
+        // 3. When? (Date & Reminder)
+        DropdownMenuItem(
+            modifier = compactItemModifier,
+            contentPadding = compactItemPadding,
+            text = {
+                Text(
+                    text = stringResource(R.string.context_when_date_reminder),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.CalendarToday,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenWhenDialog()
+            }
+        )
+
+        // 4. Deadline
+        DropdownMenuItem(
+            modifier = compactItemModifier,
+            contentPadding = compactItemPadding,
+            text = {
+                Text(
+                    text = stringResource(R.string.context_adjust_deadline),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Flag,
+                    contentDescription = null,
+                    tint = colors.deadlineUrgentRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenDeadlineDialog()
+            }
+        )
+
+        // 5. Move (Project / Area)
+        DropdownMenuItem(
+            modifier = compactItemModifier,
+            contentPadding = compactItemPadding,
+            text = {
+                Text(
+                    text = stringResource(R.string.move_dialog_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.Folder,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenMoveDialog()
+            }
+        )
+
+        // 6. Assign Categories
+        DropdownMenuItem(
+            modifier = compactItemModifier,
+            contentPadding = compactItemPadding,
+            text = {
+                Text(
+                    text = stringResource(R.string.context_assign_tags),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.primaryText
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Outlined.GridView,
+                    contentDescription = null,
+                    tint = colors.thingsBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismiss()
+                onOpenTagPickerDialog()
+            }
+        )
+
+        if (onTogglePin != null || onToggleMilestone != null || onToggleSelection != null || onDuplicateTask != null) {
+            HorizontalDivider(color = colors.hairlineDivider)
         }
 
-        if (onToggleSelection != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = if (isSelected) stringResource(R.string.context_deselect_task) else stringResource(R.string.context_select_task),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.thingsBlue
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.CheckCircleOutline,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    onDismiss()
-                    onToggleSelection()
-                }
-            )
-        }
+        // 7. Pin to Top / Unpin
         if (onTogglePin != null) {
             DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
                 text = {
                     Text(
                         text = stringResource(
@@ -3793,8 +3863,12 @@ private fun TaskContextDropdownMenu(
                 }
             )
         }
+
+        // 8. Mark as Milestone / Remove Milestone
         if (onToggleMilestone != null) {
             DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
                 text = {
                     Text(
                         text = stringResource(
@@ -3817,61 +3891,22 @@ private fun TaskContextDropdownMenu(
                 }
             )
         }
-        val isClosed = task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = if (isClosed) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.primaryText
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Outlined.Check,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onStatusChange(if (isClosed) TaskStatus.OPEN else TaskStatus.COMPLETED)
-            }
-        )
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = stringResource(R.string.context_when_date_reminder),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.primaryText
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Outlined.CalendarToday,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onOpenWhenDialog()
-            }
-        )
-        if (onOpenTimeblockDialog != null) {
+
+        // 9. Select / Deselect Task
+        if (onToggleSelection != null) {
             DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
                 text = {
                     Text(
-                        text = stringResource(R.string.v2_timeblock_title),
+                        text = if (isSelected) stringResource(R.string.context_deselect_task) else stringResource(R.string.context_select_task),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
+                        color = colors.thingsBlue
                     )
                 },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Outlined.AccessTime,
+                        imageVector = Icons.Outlined.CheckCircleOutline,
                         contentDescription = null,
                         tint = colors.thingsBlue,
                         modifier = Modifier.size(18.dp)
@@ -3879,219 +3914,16 @@ private fun TaskContextDropdownMenu(
                 },
                 onClick = {
                     onDismiss()
-                    onOpenTimeblockDialog()
+                    onToggleSelection()
                 }
             )
         }
-        if (onUpdateStandaloneDuration != null) {
-            FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.v30_duration_label) + ":",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.secondaryText,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-                listOf(15 to "15m", 30 to "30m", 60 to "1h", 120 to "2h", 240 to "4h", 480 to "8h").forEach { (mins, lbl) ->
-                    ThingsTagPill(
-                        title = lbl,
-                        onClick = {
-                            onDismiss()
-                            onUpdateStandaloneDuration(if (task.durationMinutes == mins) null else mins)
-                        }
-                    )
-                }
-            }
-        }
-        if (onUpdateEffortLevel != null) {
-            val currentEff = EffortLevel.normalize(task.effortLevel)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.v30_effort_label) + ":",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.secondaryText
-                )
-                listOf(
-                    EffortLevel.QUICK_WIN to "⚡",
-                    EffortLevel.MEDIUM to "◐",
-                    EffortLevel.DEEP_FOCUS to "🧠"
-                ).forEach { (effKey, icon) ->
-                    ThingsTagPill(
-                        title = icon,
-                        onClick = {
-                            onDismiss()
-                            onUpdateEffortLevel(if (currentEff == effKey) null else effKey)
-                        }
-                    )
-                }
-            }
-        }
-        if (onOpenDependenciesDialog != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = stringResource(R.string.v30_blocked_by_action),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.HourglassTop,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    onDismiss()
-                    onOpenDependenciesDialog()
-                }
-            )
-        }
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = stringResource(R.string.context_adjust_deadline),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.primaryText
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Outlined.Flag,
-                    contentDescription = null,
-                    tint = colors.deadlineUrgentRed,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onOpenDeadlineDialog()
-            }
-        )
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = stringResource(R.string.context_configure_repeat),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.primaryText
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Outlined.Repeat,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onOpenRepeatDialog()
-            }
-        )
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = stringResource(R.string.move_dialog_title),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.primaryText
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Outlined.Folder,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onOpenMoveDialog()
-            }
-        )
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = stringResource(R.string.context_assign_tags),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.primaryText
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Outlined.GridView,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onOpenTagPickerDialog()
-            }
-        )
-        if (onStartFocusTimer != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = stringResource(R.string.action_focus_timer),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Timer,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    onDismiss()
-                    onStartFocusTimer()
-                }
-            )
-        }
-        if (onCopyTaskMarkdown != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = stringResource(R.string.action_copy_todo),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Outlined.ContentCopy,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    onDismiss()
-                    onCopyTaskMarkdown()
-                }
-            )
-        }
+
+        // 10. Duplicate
         if (onDuplicateTask != null) {
             DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
                 text = {
                     Text(
                         text = stringResource(R.string.action_duplicate_todo),
@@ -4113,53 +3945,40 @@ private fun TaskContextDropdownMenu(
                 }
             )
         }
-        DropdownMenuItem(
-            text = {
-                Text(
-                    text = "${stringResource(R.string.gemini_magic_breakdown)} (Gemini ✨)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.thingsBlue
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Outlined.AutoAwesome,
-                    contentDescription = null,
-                    tint = colors.thingsBlue,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onTriggerGeminiMagicBreakdown()
-            }
-        )
+
         HorizontalDivider(color = colors.hairlineDivider)
-        val isAlreadyCanceled = task.status == TaskStatus.CANCELED
+
+        // 11. Mark as Canceled (when not already canceled)
+        if (task.status != TaskStatus.CANCELED) {
+            DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
+                text = {
+                    Text(
+                        text = stringResource(R.string.action_cancel_todo),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.secondaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = null,
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onStatusChange(TaskStatus.CANCELED)
+                }
+            )
+        }
+
+        // 12. Delete (destructive red)
         DropdownMenuItem(
-            text = {
-                Text(
-                    text = stringResource(
-                        if (isAlreadyCanceled) R.string.action_reopen_todo else R.string.action_cancel_todo
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.secondaryText
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = if (isAlreadyCanceled) Icons.Outlined.Check else Icons.Outlined.Close,
-                    contentDescription = null,
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            onClick = {
-                onDismiss()
-                onStatusChange(if (isAlreadyCanceled) TaskStatus.OPEN else TaskStatus.CANCELED)
-            }
-        )
-        DropdownMenuItem(
+            modifier = compactItemModifier,
+            contentPadding = compactItemPadding,
             text = {
                 Text(
                     text = stringResource(R.string.action_delete),

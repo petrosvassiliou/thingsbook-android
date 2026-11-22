@@ -17,6 +17,8 @@ public struct TaskRowCardView: View {
     @State private var inlineDraftTitle = ""
     @FocusState private var isInlineTitleFocused: Bool
     @State private var isRowWhenPopoverOpen = false
+    @State private var isRowDeadlinePopoverOpen = false
+    @State private var isRowMovePopoverOpen = false
     @State private var isHoveringRow = false
     @State private var isHoveringQuickEditIcon = false
     @State private var isHoveringQuickWhenIcon = false
@@ -462,6 +464,29 @@ public struct TaskRowCardView: View {
                             store.setTaskStandaloneDuration(latestTask.id, durationMinutes: customMins)
                         }
                     }
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isRowDeadlinePopoverOpen) {
+                        DeadlinePopoverView(store: store, currentDeadlineMillis: latestTask.deadline) { dl in
+                            var copy = latestTask
+                            copy.deadline = dl
+                            store.updateTask(copy)
+                        }
+                    }
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isRowMovePopoverOpen) {
+                        MoveDestinationPopoverView(store: store, task: latestTask) { projId, headId, areaId, schedOverride in
+                            var copy = latestTask
+                            copy.projectId = projId
+                            copy.headingId = headId
+                            copy.areaId = areaId
+                            if let schedOverride {
+                                copy.scheduleState = schedOverride
+                            }
+                            store.updateTask(copy)
+                        }
+                    }
             }
             .padding(.trailing, 24)
         }
@@ -584,11 +609,6 @@ public struct TaskRowCardView: View {
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
             }
-            Button {
-                store.copySelectedTasksToPasteboard()
-            } label: {
-                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
-            }
             Divider()
             Button(role: .destructive) {
                 store.deleteSelectedTasks()
@@ -597,73 +617,66 @@ public struct TaskRowCardView: View {
             }
         } else {
             Button {
-                beginInlineQuickEdit()
-            } label: {
-                Label(store.tr("v30_quick_edit_action"), systemImage: "pencil")
-            }
-            Button {
-                isRowWhenPopoverOpen = true
-            } label: {
-                Label(store.tr("action_when"), systemImage: "calendar")
-            }
-            Button {
                 store.openTaskModal(task.id)
             } label: {
                 Label(store.tr("v30_open_details_action"), systemImage: "slider.horizontal.3")
             }
-            Divider()
-            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                store.toggleTaskCompletion(latestTask)
-            }
-            Button(task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo")) {
-                store.cancelTask(latestTask)
-            }
-            Button(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task")) {
-                store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
-            }
             Button {
-                store.setTasksMilestone([latestTask.id], isMilestone: !latestTask.isMilestone)
+                store.toggleTaskCompletion(latestTask)
             } label: {
                 Label(
-                    store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
-                    systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
+                    task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete"),
+                    systemImage: task.status == .completed ? "arrow.uturn.backward.circle" : "checkmark.circle"
                 )
             }
             Divider()
-            Button(store.tr("view_today")) {
-                store.scheduleTasks([latestTask.id], to: .today)
-            }
-            Button(store.tr("view_this_evening")) {
-                store.scheduleTasks([latestTask.id], to: .thisEvening)
-            }
-            Button(store.tr("view_someday")) {
-                store.scheduleTasks([latestTask.id], to: .someday)
-            }
-            Menu(store.tr("v30_duration_label")) {
-                durationMenuItems(for: latestTask)
-            }
-            Menu(store.tr("v30_effort_label")) {
-                effortMenuItems(for: latestTask)
-            }
-            Button(store.tr("v30_blocked_by_action")) {
-                isCollapsedDependenciesPopoverOpen = true
-            }
-            Menu(store.tr("v2_timeblock_title")) {
-                Button("09:00 · 30m") { store.setTaskTimeblock(latestTask.id, startMinutes: 9 * 60, durationMinutes: 30) }
-                Button("11:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 11 * 60, durationMinutes: 45) }
-                Button("14:00 · 60m") { store.setTaskTimeblock(latestTask.id, startMinutes: 14 * 60, durationMinutes: 60) }
-                Button("16:00 · 45m") { store.setTaskTimeblock(latestTask.id, startMinutes: 16 * 60, durationMinutes: 45) }
-                if latestTask.scheduledStartMinutes != nil {
-                    Divider()
-                    Button(store.tr("v2_timeblock_clear"), role: .destructive) {
-                        store.setTaskTimeblock(latestTask.id, startMinutes: nil, durationMinutes: nil)
-                    }
+            Menu {
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .today)
+                } label: {
+                    Label(store.tr("view_today"), systemImage: "sun.max.fill")
                 }
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .thisEvening)
+                } label: {
+                    Label(store.tr("view_this_evening"), systemImage: "moon.stars.fill")
+                }
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .someday)
+                } label: {
+                    Label(store.tr("view_someday"), systemImage: "cloud.fill")
+                }
+                Divider()
+                Button {
+                    if isInlineQuickEditing {
+                        commitInlineQuickEdit()
+                    }
+                    isRowWhenPopoverOpen = true
+                } label: {
+                    Label(store.tr("repeat_ends_pick_date"), systemImage: "calendar")
+                }
+            } label: {
+                Label(store.tr("action_when"), systemImage: "calendar")
+            }
+            Button {
+                isRowDeadlinePopoverOpen = true
+            } label: {
+                Label("\(store.tr("action_deadline"))…", systemImage: "flag")
+            }
+            Button {
+                isRowMovePopoverOpen = true
+            } label: {
+                Label("\(store.tr("action_move"))…", systemImage: "folder")
             }
             if let pid = latestTask.projectId {
-                let projectHeadings = (store.headingsByProject[pid] ?? []).filter { !$0.isDeleted && !$0.isArchived }
+                let projectHeadings = (store.headingsByProject[pid] ?? [])
+                    .filter { !$0.isDeleted && !$0.isArchived }
+                    .sorted {
+                        if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                        return $0.id < $1.id
+                    }
                 if !projectHeadings.isEmpty {
-                    Menu(store.tr("entity_heading")) {
+                    Menu {
                         Button {
                             var copy = latestTask
                             copy.headingId = nil
@@ -689,33 +702,46 @@ public struct TaskRowCardView: View {
                                 }
                             }
                         }
+                    } label: {
+                        Label(store.tr("entity_heading"), systemImage: "flag.checkered")
                     }
                 }
             }
             Divider()
-            Button(store.tr("action_attach_file")) {
-                store.pickAndAttachFiles(taskId: task.id)
-            }
-            Button(store.tr("action_focus_timer")) {
-                store.startFocusTimer(for: latestTask)
-            }
-            Button(store.tr("action_duplicate_todo")) {
-                _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            Button {
+                store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+            } label: {
+                Label(
+                    store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task"),
+                    systemImage: latestTask.isPinned ? "pin.slash" : "pin"
+                )
             }
             Button {
-                store.copyTaskToPasteboard(latestTask)
+                store.setTasksMilestone([latestTask.id], isMilestone: !latestTask.isMilestone)
             } label: {
-                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
+                Label(
+                    store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
+                )
             }
-            Button(store.tr("context_select_task")) {
-                store.selectedTaskIds.insert(task.id)
-                store.lastSelectedTaskId = task.id
+            Button {
+                _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            } label: {
+                Label(store.tr("action_duplicate_todo"), systemImage: "plus.square.on.square")
             }
             Divider()
+            Button {
+                store.cancelTask(latestTask)
+            } label: {
+                Label(
+                    task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo"),
+                    systemImage: task.status == .canceled ? "arrow.uturn.backward.circle" : "xmark.circle"
+                )
+            }
             Button(role: .destructive) {
                 store.deleteTask(latestTask)
             } label: {
-                Text(store.tr("action_delete"))
+                Label(store.tr("action_delete"), systemImage: "trash")
             }
         }
     }

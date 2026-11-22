@@ -6,9 +6,9 @@ import { APP_BUILD_CODE, APP_VERSION } from '../src/domain/types.ts';
 
 const SRC_DIR = path.resolve(import.meta.dirname, '../src');
 
-test('v3.0.0+: ChromeOS PWA keeps window orientation untouched (no orientation lock)', () => {
+test('v3.0.1+: ChromeOS PWA keeps window orientation untouched (no orientation lock)', () => {
   assert.ok(APP_VERSION.startsWith('3.0.'));
-  assert.ok(APP_BUILD_CODE >= 111);
+  assert.ok(APP_BUILD_CODE >= 112);
 
   const filesToCheck = [
     'App.tsx',

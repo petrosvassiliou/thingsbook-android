@@ -772,9 +772,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(111, BuildConfig.VERSION_CODE)
-        assertEquals("3.0.0", BuildConfig.VERSION_NAME)
-        assertFalse("3.0.0 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(112, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.1", BuildConfig.VERSION_NAME)
+        assertFalse("3.0.1 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2777,5 +2777,57 @@ class V2UpgradeAndFeaturesTest {
         assertTrue(modalsKt.contains(".thingsTimelineMouseHoverTooltip("))
         assertTrue(inspectorKt.contains(".thingsTimelineMouseHoverTooltip("))
     }
-}
 
+    @Test
+    fun `v3_0_1 streamlined task context menus keep high-frequency actions and Delete visible while delegating secondary planning to Modal and Inspector`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
+        val workspaceKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ProjectWorkspaceViews.kt").readText()
+
+        val taskContextMenuChunk = cardKt
+            .substringAfter("private fun TaskContextDropdownMenu(")
+            .substringBefore("private fun TaskCardDialogsHost(")
+
+        // High-frequency items preserved in streamlined logical order
+        assertTrue(taskContextMenuChunk.contains("R.string.v30_open_details_action"))
+        assertTrue(taskContextMenuChunk.contains("R.string.action_complete"))
+        assertTrue(taskContextMenuChunk.contains("R.string.action_reopen_todo"))
+        assertTrue(taskContextMenuChunk.contains("R.string.context_when_date_reminder"))
+        assertTrue(taskContextMenuChunk.contains("R.string.context_adjust_deadline"))
+        assertTrue(taskContextMenuChunk.contains("R.string.move_dialog_title"))
+        assertTrue(taskContextMenuChunk.contains("R.string.context_assign_tags"))
+        assertTrue(taskContextMenuChunk.contains("R.string.v25_pin_task"))
+        assertTrue(taskContextMenuChunk.contains("R.string.v30_mark_as_milestone"))
+        assertTrue(taskContextMenuChunk.contains("R.string.context_select_task"))
+        assertTrue(taskContextMenuChunk.contains("R.string.action_duplicate_todo"))
+        assertTrue(taskContextMenuChunk.contains("R.string.action_cancel_todo"))
+        assertTrue(taskContextMenuChunk.contains("R.string.action_delete"))
+
+        // Secondary bloat removed from context menu (lives in Soft Bento Modal & Inspector)
+        assertFalse(taskContextMenuChunk.contains("onOpenTimeblockDialog"))
+        assertFalse(taskContextMenuChunk.contains("onOpenRepeatDialog"))
+        assertFalse(taskContextMenuChunk.contains("gemini_magic_breakdown"))
+        assertFalse(taskContextMenuChunk.contains("onStartInlineQuickEdit"))
+        assertFalse(taskContextMenuChunk.contains("onUpdateStandaloneDuration"))
+        assertFalse(taskContextMenuChunk.contains("onUpdateEffortLevel"))
+        assertFalse(taskContextMenuChunk.contains("onOpenDependenciesDialog"))
+        assertFalse(taskContextMenuChunk.contains("onStartFocusTimer"))
+        assertFalse(taskContextMenuChunk.contains("onCopyTaskMarkdown"))
+
+        // Kanban card context menu is equally streamlined
+        val kanbanMenuChunk = workspaceKt
+            .substringAfter("expanded = showKanbanContextMenu")
+            .substringBefore("// Mode 3: Project Roadmap Workspace")
+        assertTrue(kanbanMenuChunk.contains("R.string.v30_open_details_action"))
+        assertTrue(kanbanMenuChunk.contains("R.string.action_complete"))
+        assertTrue(kanbanMenuChunk.contains("R.string.v25_pin_task"))
+        assertTrue(kanbanMenuChunk.contains("R.string.v30_mark_as_milestone"))
+        assertTrue(kanbanMenuChunk.contains("R.string.context_select_task"))
+        assertTrue(kanbanMenuChunk.contains("R.string.action_duplicate_todo"))
+        assertTrue(kanbanMenuChunk.contains("R.string.action_cancel_todo"))
+        assertTrue(kanbanMenuChunk.contains("R.string.action_delete"))
+        assertFalse(kanbanMenuChunk.contains("onOpenTimeblockDialog"))
+        assertFalse(kanbanMenuChunk.contains("onOpenRepeatDialog"))
+        assertFalse(kanbanMenuChunk.contains("gemini_magic_breakdown"))
+    }
+}

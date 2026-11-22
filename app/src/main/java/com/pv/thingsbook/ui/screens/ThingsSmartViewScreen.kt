@@ -2955,6 +2955,12 @@ private fun ThingsMainTaskLazyList(
                 onRangeSelectTask = { taskId ->
                     viewModel.selectTaskRange(allVisibleTaskIds, taskId)
                 },
+                onDuplicateTask = { taskId ->
+                    viewModel.duplicateTask(taskId)
+                },
+                onDeleteTask = { taskId ->
+                    viewModel.deleteTask(taskId)
+                },
                 modifier = modifier.imePadding()
             )
             return

@@ -4,16 +4,16 @@
 
 # Thingsbook
 
-**Native GTD & Visual Project Planning Suite for Android, ChromeOS & macOS (`v3.0.0`, Build `111`)**
+**Native GTD & Visual Project Planning Suite for Android, ChromeOS & macOS (`v3.0.1`, Build `112`)**
 
-[![Version](https://img.shields.io/badge/version-3.0.0%20(Build%20111)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v3.0.0)
+[![Version](https://img.shields.io/badge/version-3.0.1%20(Build%20112)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v3.0.1)
 [![Android](https://img.shields.io/badge/Android%20%26%20Googlebook-100%25%20Kotlin%20%2B%20Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](#1-thingsbook-for-android--googlebook-os-native-apk--v300)
 [![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20PWA-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos--web-standalone-pwa--v300)
 [![macOS](https://img.shields.io/badge/macOS-100%25%20Swift%20%2B%20SwiftUI%20Universal-000000?style=flat-square&logo=apple&logoColor=white)](#3-thingsbook-for-macos-native-universal-app--v300)
 [![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES%20(650%20keys)-6E56CF?style=flat-square)](#localization-5-languages)
 [![Encryption](https://img.shields.io/badge/backup-AES--256--GCM-16A34A?style=flat-square)](#offline-first-storage-backups--cloud-sync)
 
-[**📱 Download Android APK (v3.0.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-v3.0.0-GTD-Full.apk) · [**🍎 Download macOS Universal DMG (v3.0.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-macOS-v3.0.0-Universal.dmg) · [**💻 Launch ChromeOS / Web App**](https://thingsbook-prod.web.app) · [**📦 GitHub Releases**](https://github.com/petrosvassiliou/thingsbook-android/releases/latest) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
+[**📱 Download Android APK (v3.0.1)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-v3.0.1-GTD-Full.apk) · [**🍎 Download macOS Universal DMG (v3.0.1)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-macOS-v3.0.1-Universal.dmg) · [**💻 Launch ChromeOS / Web App**](https://thingsbook-prod.web.app) · [**📦 GitHub Releases**](https://github.com/petrosvassiliou/thingsbook-android/releases/latest) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
 
 </div>
 
@@ -83,9 +83,9 @@
 
 **Thingsbook for Android** (`app/`) is a 100% native GTD & project planning app built from scratch for **Android smartphones, tablets, foldables, and Googlebook OS / ChromeOS ARCVM** using **Kotlin**, **Jetpack Compose (Material 3)**, and an **offline-first Room v7 + SQLite FTS5 (`unicode61`) database**.
 
-### 📥 Direct Android Download (`v3.0.0`, Build `111`)
-- **[Download `Thingsbook-v3.0.0-GTD-Full.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-v3.0.0-GTD-Full.apk)**
-- **[Download `Thingsbook-Full-GTD-Edition.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-Full-GTD-Edition.apk)**
+### 📥 Direct Android Download (`v3.0.1`, Build `112`)
+- **[Download `Thingsbook-v3.0.1-GTD-Full.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-v3.0.1-GTD-Full.apk)**
+- **[Download `Thingsbook-Full-GTD-Edition.apk`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-Full-GTD-Edition.apk)**
 
 ### 📱 Mobile Portrait Views (`1236×2745` `3x` Retina)
 
@@ -177,15 +177,15 @@ npm run build
 
 **Thingsbook for macOS** (`macos/`) is a **100% native Swift + SwiftUI + AppKit desktop application** for **macOS 14+ (Sonoma, Sequoia & Tahoe)** compiled as a Universal binary for both **Apple Silicon (`arm64`) and Intel (`x86_64`)** Macs—engineered in strict feature, localization (`650` keys), SQLite FTS5, `.tbbackup`, and Firestore sync parity with Android and ChromeOS (`v3.0.0`, Build `111`).
 
-### 📥 Install or Upgrade on macOS (`v3.0.0`, Build `111`)
-- **Direct Universal DMG Download:** **[Download `Thingsbook-macOS-v3.0.0-Universal.dmg`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-macOS-v3.0.0-Universal.dmg)**
+### 📥 Install or Upgrade on macOS (`v3.0.1`, Build `112`)
+- **Direct Universal DMG Download:** **[Download `Thingsbook-macOS-v3.0.1-Universal.dmg`](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-macOS-v3.0.1-Universal.dmg)**
 - **In-App 1-Click Updater:** Open **Settings (`⌘,`) → Updates → Install & Relaunch** to download, verify, atomically swap `/Applications/Thingsbook.app`, and relaunch without touching a `.dmg`.
 - **Instant 1-Command Terminal Install / Upgrade (No Gatekeeper Prompts):**
   ```bash
   curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/install.sh | bash
   ```
 
-### ✨ Native macOS Highlights (`v3.0.0`, Build `111`)
+### ✨ Native macOS Highlights (`v3.0.1`, Build `112`)
 1. **📊 Native SwiftUI/AppKit Project List, Kanban Board & Interactive Gantt Timeline**
    - Multi-day task & phase bars, 45° Royal-Violet Milestone Diamonds (`◆`), curved dependency connectors, AppKit mouse-hover timeline tooltips, Full-Screen presentation mode (`⌃⌘F`), and native CoreGraphics multi-page Vector PDF & High-DPI PNG export.
 2. **🍱 Two-Column Soft Bento Task Modal & Wide-Screen Right-Side Inspector Panel**
@@ -194,9 +194,9 @@ npm run build
 
 ---
 
-## 🔄 Seamless Cross-Platform Interoperability & Upgrade (`v1.8 / v2.x → v3.0.0`)
+## 🔄 Seamless Cross-Platform Interoperability & Upgrade (`v1.8 / v2.x → v3.0.1`)
 - **100% Zero-Data-Loss In-Place Upgrades:**
-  - **Android:** Signed with the identical persistent release certificate (`versionCode → 111`) and automatic Room migrations (`MIGRATION_2_3` through `MIGRATION_6_7`).
+  - **Android:** Signed with the identical persistent release certificate (`versionCode → 112`) and automatic Room migrations (`MIGRATION_2_3` through `MIGRATION_6_7`).
   - **ChromeOS:** Automatic additive IndexedDB migrations (`DB_VERSION → 5`) and Service Worker `autoUpdate`.
   - **macOS:** Automatic additive SQLite3 schema migrations (`is_milestone`, `effort_level`, `is_pinned`, `blocked_by_task_ids`, `perspectives`, phase `start_date`/`end_date`) and 1-click in-app updates.
 - **Real-Time Multi-Device Delta Sync & Identical `.tbbackup` Format:** Sync seamlessly across Android, Googlebook, ChromeOS, and macOS via Firestore + `ntfy` wake relay, or transfer encrypted **AES-256-GCM `.tbbackup`** archives offline between any of the three platforms.
@@ -205,23 +205,23 @@ npm run build
 
 ## 🇩🇪 Deutsche Dokumentation
 
-### 1. Thingsbook für Android & Googlebook OS (Native App — `v3.0.0`, Build `111`)
-Eigenständige, native GTD- & Projektplanungs-App für **Android-Smartphones, Tablets, Foldables und Googlebook OS**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room v7 (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup`**, optionalem **Firebase Firestore Echtzeit-Delta-Sync**, **BYOK Gemini-KI** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES` — `650` lokalisierte Schlüssel)**. Nahtlos aktualisierbar von `v1.8.x`, `v2.x` und `v3.0.0-beta.x`.
-- **📱 Direkt-Download Android-APK (`v3.0.0`):** **[Thingsbook-v3.0.0-GTD-Full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-v3.0.0-GTD-Full.apk)**
+### 1. Thingsbook für Android & Googlebook OS (Native App — `v3.0.1`, Build `112`)
+Eigenständige, native GTD- & Projektplanungs-App für **Android-Smartphones, Tablets, Foldables und Googlebook OS**, entwickelt mit **100 % Kotlin**, **Jetpack Compose**, **Offline-First Room v7 (SQLite FTS5 `unicode61`)**, **AES-256-GCM `.tbbackup`**, optionalem **Firebase Firestore Echtzeit-Delta-Sync**, **BYOK Gemini-KI** und **5 Sprachen (`DE`, `EN`, `FR`, `IT`, `ES` — `650` lokalisierte Schlüssel)**. Nahtlos aktualisierbar von `v1.8.x`, `v2.x` und `v3.0.0`.
+- **📱 Direkt-Download Android-APK (`v3.0.1`):** **[Thingsbook-v3.0.1-GTD-Full.apk herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-v3.0.1-GTD-Full.apk)**
 
-#### ✨ Highlights in `v3.0.0`:
+#### ✨ Highlights in `v3.0`:
 - **📊 Drei Projekt-Ansichten (`📋 Liste` · `🗂️ Kanban-Board` · `📊 Interaktive Gantt-Zeitachse`):** Phasen mit Start-/Enddatum, **Meilensteine (`◆`)**, Abhängigkeiten (*Wartet auf*), Halten-&-Ziehen-Terminverschiebung, Maus-Tooltips in der Zeitachse, Vollbildmodus sowie mehrseitiger **Vektor-PDF- & High-DPI-PNG-Export**.
 - **🍱 Zweispaltiger Soft-Bento-Aufgabendialog & Breitbild-Inspektor-Seitenleiste:** Symmetrischer Aufgaben-Editor (Markdown-Notizen & Checklisten links; Planung, Meilenstein `◆`, Aufwand *Niedrig / Mittel / Hoch*, Dauer `5m`–`8h` + mehrtägig, Zeitblock, Abhängigkeiten, Bereich/Projekt/Phase & Kategorien rechts) sowie rechte **Inspektor-Seitenleiste** auf großen Bildschirmen.
 - **🔄 Asana-JSON- & Microsoft-Planner-/Todoist-CSV-Import & -Export** inkl. Bereichs-Vorauswahl (*Zielbereich*), Meilensteinen, Phasen und Unteraufgaben.
 - **🧭 4-Schritte-GTD-Wochenrückblick (`Strg + Umschalt + R`), 📋 Projekt-Vorlagen, 🗓️ Tages-Zeitachse, 🔍 Optionale Perspektiven, 🎙️ Spracheingabe, 📎 Foto-/PDF-Anhänge & 🔒 Biometrie-Sperre.**
 
-### 2. Thingsbook für ChromeOS & Web (Eigenständige Standalone-PWA — `v3.0.0`)
-`chromeos-pwa/` bietet **100 % `v3.0.0`-Funktionsparität** (*Liste / Kanban-Board / Gantt-Zeitachse mit Meilensteinen & PDF/PNG-Export*, *Soft-Bento-Editor*, *Breitbild-Inspektor*, *Asana- & Planner-Import/Export*, *Wochenrückblick*, *Tages-Zeitachse*, *Spracheingabe*, *IndexedDB-Anhänge* und *WebAuthn-/PIN-Sperre*) — direkt ohne Linux-Container im **ChromeOS-Launcher & Shelf** installierbar:
+### 2. Thingsbook für ChromeOS & Web (Eigenständige Standalone-PWA — `v3.0.1`)
+`chromeos-pwa/` bietet **100 % `v3.0.1`-Funktionsparität** (*Liste / Kanban-Board / Gantt-Zeitachse mit Meilensteinen & PDF/PNG-Export*, *Soft-Bento-Editor*, *Breitbild-Inspektor*, *Asana- & Planner-Import/Export*, *Wochenrückblick*, *Tages-Zeitachse*, *Spracheingabe*, *IndexedDB-Anhänge* und *WebAuthn-/PIN-Sperre*) — direkt ohne Linux-Container im **ChromeOS-Launcher & Shelf** installierbar:
 - **💻 Live-App starten:** **[https://thingsbook-prod.web.app](https://thingsbook-prod.web.app)**
 
-### 3. Thingsbook für macOS (Native Universal-App — `v3.0.0`, Build `111`)
-`macos/` enthält die **100 % native Swift/SwiftUI/AppKit-Desktop-App für macOS 14+ (Apple Silicon & Intel)** mit voller `v3.0.0`-Parität (*Liste, Kanban-Board & Gantt-Zeitachse mit Meilensteinen `◆`, Maus-Tooltips & Vektor-PDF/PNG-Export*, *Soft-Bento-Aufgabendialog*, *Breitbild-Inspektor*, *Asana-/Planner-Import*, *In-App-Auto-Updater*, *Menüleisten-App*, *Live-Sprachdiktat*, *Apple-Kalender (`EventKit`)*, *`PDFKit`-Anhänge*, *Touch ID*, *SQLite FTS5*, *`.tbbackup`* und *Firestore Cloud-Sync*):
-- **🍎 Direkt-Download Universal-DMG (`v3.0.0`):** **[Thingsbook-macOS-v3.0.0-Universal.dmg herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.0/Thingsbook-macOS-v3.0.0-Universal.dmg)**
+### 3. Thingsbook für macOS (Native Universal-App — `v3.0.1`, Build `112`)
+`macos/` enthält die **100 % native Swift/SwiftUI/AppKit-Desktop-App für macOS 14+ (Apple Silicon & Intel)** mit voller `v3.0.1`-Parität (*Liste, Kanban-Board & Gantt-Zeitachse mit Meilensteinen `◆`, Maus-Tooltips & Vektor-PDF/PNG-Export*, *Soft-Bento-Aufgabendialog*, *Breitbild-Inspektor*, *Asana-/Planner-Import*, *In-App-Auto-Updater*, *Menüleisten-App*, *Live-Sprachdiktat*, *Apple-Kalender (`EventKit`)*, *`PDFKit`-Anhänge*, *Touch ID*, *SQLite FTS5*, *`.tbbackup`* und *Firestore Cloud-Sync*):
+- **🍎 Direkt-Download Universal-DMG (`v3.0.1`):** **[Thingsbook-macOS-v3.0.1-Universal.dmg herunterladen](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-macOS-v3.0.1-Universal.dmg)**
 - **⚡ 1-Befehl-Installation / Upgrade im Terminal:**
   ```bash
   curl -fsSL https://raw.githubusercontent.com/petrosvassiliou/thingsbook-android/main/macos/install.sh | bash

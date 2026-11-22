@@ -61,6 +61,7 @@ import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloseFullscreen
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
@@ -538,6 +539,8 @@ fun ProjectBoardWorkspace(
     onSelectSingleTask: ((taskId: String) -> Unit)? = null,
     onToggleTaskSelection: (taskId: String) -> Unit,
     onRangeSelectTask: (taskId: String) -> Unit,
+    onDuplicateTask: ((taskId: String) -> Unit)? = null,
+    onDeleteTask: ((taskId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = ThingsTheme.colors
@@ -647,7 +650,9 @@ fun ProjectBoardWorkspace(
                     onOpenTaskEditor = onOpenTaskEditor,
                     onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
-                    onRangeSelectTask = onRangeSelectTask
+                    onRangeSelectTask = onRangeSelectTask,
+                    onDuplicateTask = onDuplicateTask,
+                    onDeleteTask = onDeleteTask
                 )
             }
 
@@ -681,7 +686,9 @@ fun ProjectBoardWorkspace(
                     onOpenTaskEditor = onOpenTaskEditor,
                     onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
-                    onRangeSelectTask = onRangeSelectTask
+                    onRangeSelectTask = onRangeSelectTask,
+                    onDuplicateTask = onDuplicateTask,
+                    onDeleteTask = onDeleteTask
                 )
             }
 
@@ -834,7 +841,9 @@ private fun ProjectBoardPhaseColumn(
     onOpenTaskEditor: (String) -> Unit,
     onSelectSingleTask: ((String) -> Unit)? = null,
     onToggleTaskSelection: (String) -> Unit,
-    onRangeSelectTask: (String) -> Unit
+    onRangeSelectTask: (String) -> Unit,
+    onDuplicateTask: ((String) -> Unit)? = null,
+    onDeleteTask: ((String) -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
     val zone = ZoneId.systemDefault()
@@ -1208,7 +1217,9 @@ private fun ProjectBoardPhaseColumn(
                             onOpenEditor = { onOpenTaskEditor(task.id) },
                             onSelectSingle = onSelectSingleTask?.let { fn -> { fn(task.id) } },
                             onToggleSelection = { onToggleTaskSelection(task.id) },
-                            onRangeSelect = { onRangeSelectTask(task.id) }
+                            onRangeSelect = { onRangeSelectTask(task.id) },
+                            onDuplicateTask = onDuplicateTask?.let { fn -> { fn(task.id) } },
+                            onDeleteTask = onDeleteTask?.let { fn -> { fn(task.id) } }
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
@@ -1312,7 +1323,9 @@ private fun KanbanTaskCard(
     onOpenEditor: () -> Unit,
     onSelectSingle: (() -> Unit)? = null,
     onToggleSelection: () -> Unit,
-    onRangeSelect: () -> Unit
+    onRangeSelect: () -> Unit,
+    onDuplicateTask: (() -> Unit)? = null,
+    onDeleteTask: (() -> Unit)? = null
 ) {
     val colors = ThingsTheme.colors
     val density = LocalDensity.current
@@ -1632,13 +1645,19 @@ private fun KanbanTaskCard(
             }
         }
 
+        val compactMenuPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+        val compactMenuModifier = Modifier.height(38.dp)
+
         DropdownMenu(
             expanded = showKanbanContextMenu,
             onDismissRequest = { showKanbanContextMenu = false },
             offset = kanbanContextMenuOffsetDp,
             modifier = Modifier.background(colors.cardElevatedSurface)
         ) {
+            // 1. Open Details
             DropdownMenuItem(
+                modifier = compactMenuModifier,
+                contentPadding = compactMenuPadding,
                 text = {
                     Text(
                         text = stringResource(R.string.v30_open_details_action),
@@ -1659,17 +1678,22 @@ private fun KanbanTaskCard(
                     onOpenEditor()
                 }
             )
+
+            // 2. Complete / Reopen
+            val isClosed = task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED
             DropdownMenuItem(
+                modifier = compactMenuModifier,
+                contentPadding = compactMenuPadding,
                 text = {
                     Text(
-                        text = if (isSelected) stringResource(R.string.context_deselect_task) else stringResource(R.string.context_select_task),
+                        text = if (isClosed) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colors.thingsBlue
+                        color = colors.primaryText
                     )
                 },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Outlined.CheckCircleOutline,
+                        imageVector = Icons.Outlined.Check,
                         contentDescription = null,
                         tint = colors.thingsBlue,
                         modifier = Modifier.size(18.dp)
@@ -1677,10 +1701,16 @@ private fun KanbanTaskCard(
                 },
                 onClick = {
                     showKanbanContextMenu = false
-                    onToggleSelection()
+                    onStatusChange(if (isClosed) TaskStatus.OPEN else TaskStatus.COMPLETED)
                 }
             )
+
+            HorizontalDivider(color = colors.hairlineDivider)
+
+            // 3. Pin to Top / Unpin
             DropdownMenuItem(
+                modifier = compactMenuModifier,
+                contentPadding = compactMenuPadding,
                 text = {
                     Text(
                         text = stringResource(if (task.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task),
@@ -1701,8 +1731,12 @@ private fun KanbanTaskCard(
                     onTogglePin()
                 }
             )
+
+            // 4. Mark as Milestone / Remove Milestone
             if (onToggleMilestone != null) {
                 DropdownMenuItem(
+                    modifier = compactMenuModifier,
+                    contentPadding = compactMenuPadding,
                     text = {
                         Text(
                             text = stringResource(
@@ -1725,18 +1759,21 @@ private fun KanbanTaskCard(
                     }
                 )
             }
-            val isClosed = task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED
+
+            // 5. Select / Deselect Task
             DropdownMenuItem(
+                modifier = compactMenuModifier,
+                contentPadding = compactMenuPadding,
                 text = {
                     Text(
-                        text = if (isClosed) stringResource(R.string.action_reopen_todo) else stringResource(R.string.action_complete),
+                        text = if (isSelected) stringResource(R.string.context_deselect_task) else stringResource(R.string.context_select_task),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colors.primaryText
+                        color = colors.thingsBlue
                     )
                 },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Outlined.Check,
+                        imageVector = Icons.Outlined.CheckCircleOutline,
                         contentDescription = null,
                         tint = colors.thingsBlue,
                         modifier = Modifier.size(18.dp)
@@ -1744,9 +1781,94 @@ private fun KanbanTaskCard(
                 },
                 onClick = {
                     showKanbanContextMenu = false
-                    onStatusChange(if (isClosed) TaskStatus.OPEN else TaskStatus.COMPLETED)
+                    onToggleSelection()
                 }
             )
+
+            // 6. Duplicate
+            if (onDuplicateTask != null) {
+                DropdownMenuItem(
+                    modifier = compactMenuModifier,
+                    contentPadding = compactMenuPadding,
+                    text = {
+                        Text(
+                            text = stringResource(R.string.action_duplicate_todo),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.primaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.ContentCopy,
+                            contentDescription = null,
+                            tint = colors.thingsBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showKanbanContextMenu = false
+                        onDuplicateTask()
+                    }
+                )
+            }
+
+            if (task.status != TaskStatus.CANCELED || onDeleteTask != null) {
+                HorizontalDivider(color = colors.hairlineDivider)
+            }
+
+            // 7. Mark as Canceled (when not already canceled)
+            if (task.status != TaskStatus.CANCELED) {
+                DropdownMenuItem(
+                    modifier = compactMenuModifier,
+                    contentPadding = compactMenuPadding,
+                    text = {
+                        Text(
+                            text = stringResource(R.string.action_cancel_todo),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.secondaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = null,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showKanbanContextMenu = false
+                        onStatusChange(TaskStatus.CANCELED)
+                    }
+                )
+            }
+
+            // 8. Delete (destructive red)
+            if (onDeleteTask != null) {
+                DropdownMenuItem(
+                    modifier = compactMenuModifier,
+                    contentPadding = compactMenuPadding,
+                    text = {
+                        Text(
+                            text = stringResource(R.string.action_delete),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.deadlineUrgentRed
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = null,
+                            tint = colors.deadlineUrgentRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    onClick = {
+                        showKanbanContextMenu = false
+                        onDeleteTask()
+                    }
+                )
+            }
         }
     }
 }

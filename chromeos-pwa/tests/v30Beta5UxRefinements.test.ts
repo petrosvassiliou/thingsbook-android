@@ -7,9 +7,9 @@ import { TRANSLATIONS } from '../src/i18n/translations.ts';
 
 const SRC_DIR = path.resolve(import.meta.dirname, '../src');
 
-test('v3.0.0 build constants and localized UX strings exist across all 5 languages', () => {
+test('v3.0.1 build constants and localized UX strings exist across all 5 languages', () => {
   assert.ok(APP_VERSION.startsWith('3.0.'));
-  assert.ok(APP_BUILD_CODE >= 111);
+  assert.ok(APP_BUILD_CODE >= 112);
 
   for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
     const dict = TRANSLATIONS[lang];
@@ -83,15 +83,20 @@ test('v3.0.0-beta.5 Issue 1 + Polish: sticky non-clipped Soft Bento modal footer
   assert.ok(footerJsxSlice.includes('data-testid="task-modal-done-btn"'));
 });
 
-test('v3.0.0-beta.5 Issue 2: 1-click interactive badges + inline quick-rename (✏️ / F2) + quick-action strip on collapsed rows', () => {
+test('v3.0.0-beta.5 Issue 2 + v3.0.1 streamlined context menu: 1-click interactive badges + inline quick-rename (✏️ / F2) + streamlined context menus', () => {
   const taskItemSrc = fs.readFileSync(path.join(SRC_DIR, 'components/TaskItem.tsx'), 'utf8');
+  const boardRoadmapSrc = fs.readFileSync(
+    path.join(SRC_DIR, 'components/ProjectBoardAndRoadmap.tsx'),
+    'utf8'
+  );
   const appSrc = fs.readFileSync(path.join(SRC_DIR, 'App.tsx'), 'utf8');
 
   // Collapsed row interactive badge testids & popovers
   const requiredQuickEditIds = [
     'isInlineQuickEditing',
     'task-row-quick-edit-btn',
-    'task-ctx-quick-edit-btn',
+    'task-ctx-edit-btn',
+    'task-ctx-milestone-btn',
     'task-row-inline-title-input',
     'task-row-inline-save-btn',
     'task-row-quick-strip',
@@ -115,6 +120,38 @@ test('v3.0.0-beta.5 Issue 2: 1-click interactive badges + inline quick-rename (�
   for (const id of requiredQuickEditIds) {
     assert.ok(taskItemSrc.includes(id), `TaskItem.tsx missing inline quick-edit identifier: ${id}`);
   }
+
+  // v3.0.1 Streamlined Task Context Menu removes crowded secondary items and inline chips
+  assert.ok(
+    !taskItemSrc.includes('task-ctx-quick-edit-btn'),
+    'TaskItem.tsx context menu must omit Quick Edit (kept on row pencil button & F2)'
+  );
+  assert.ok(
+    !taskItemSrc.includes('context-menu-inline-chips'),
+    'TaskItem.tsx context menu must omit inline duration/effort chip rows'
+  );
+  const ctxMenuIdx = taskItemSrc.indexOf('{/* Right-Click TaskContextDropdownMenu');
+  assert.ok(ctxMenuIdx !== -1);
+  const ctxMenuSlice = taskItemSrc.slice(ctxMenuIdx);
+  assert.ok(ctxMenuSlice.includes('data-testid="task-ctx-edit-btn"'));
+  assert.ok(ctxMenuSlice.includes('data-testid="task-ctx-milestone-btn"'));
+  assert.ok(!ctxMenuSlice.includes('onOpenRepeatModal'));
+  assert.ok(!ctxMenuSlice.includes('onOpenDependenciesModal'));
+  assert.ok(!ctxMenuSlice.includes('runMagicBreakdown'));
+  assert.ok(!ctxMenuSlice.includes('onStartFocusTimer'));
+
+  // Kanban Board card context menu matches streamlined v3.0.1 menu
+  const cardCtxIdx = boardRoadmapSrc.indexOf('{cardCtxMenu &&');
+  const roadmapSectionIdx = boardRoadmapSrc.indexOf('// ==================== 2. Roadmap Gantt View');
+  assert.ok(cardCtxIdx !== -1 && roadmapSectionIdx > cardCtxIdx);
+  const cardCtxSlice = boardRoadmapSrc.slice(cardCtxIdx, roadmapSectionIdx);
+  assert.ok(cardCtxSlice.includes('data-testid="task-ctx-edit-btn"'));
+  assert.ok(cardCtxSlice.includes('data-testid="task-ctx-milestone-btn"'));
+  assert.ok(cardCtxSlice.includes('t.openDetailsAction'));
+  assert.ok(cardCtxSlice.includes('t.actionCancelTodo'));
+  assert.ok(!cardCtxSlice.includes('onOpenRepeatModal'));
+  assert.ok(!cardCtxSlice.includes('onOpenDependenciesModal'));
+  assert.ok(!cardCtxSlice.includes('onStartFocusTimer'));
 
   // Effort cycling order: null -> QUICK_WIN -> MEDIUM -> DEEP_FOCUS -> null
   assert.ok(taskItemSrc.includes("if (!cur) return 'QUICK_WIN';"));

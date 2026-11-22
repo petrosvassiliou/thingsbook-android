@@ -52,11 +52,11 @@ class V3Beta5UxRefinementsTest {
         val appSrcMain = resolveAppSrcMain()
         val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
 
-        // Inline Quick Edit local state, trigger button, context menu action, and quick-action strip
+        // Inline Quick Edit local state, trigger button, and quick-action strip
         assertTrue(cardKt.contains("var isInlineQuickEditing by remember(task.id) { mutableStateOf(false) }"))
         assertTrue(cardKt.contains("R.string.v30_quick_edit_action"))
         assertTrue(cardKt.contains("R.string.v30_open_details_action"))
-        assertTrue(cardKt.contains("onStartInlineQuickEdit"))
+        assertTrue(cardKt.contains("startInlineQuickEdit"))
 
         // CollapsedTaskInlineBadges wires interactive pickers & dropdowns directly on collapsed rows
         val badgesChunk = cardKt.substringAfter("private fun CollapsedTaskInlineBadges(").substringBefore("private fun ExpandedTaskCardBody(")
@@ -157,8 +157,8 @@ class V3Beta5UxRefinementsTest {
                 assertTrue("Blank $key in $folder/strings.xml", keys[key]!!.isNotBlank())
             }
         }
-        assertTrue(BuildConfig.VERSION_CODE >= 111)
-        assertTrue(BuildConfig.VERSION_NAME.startsWith("3.0.0"))
-        assertFalse("3.0.0 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(112, BuildConfig.VERSION_CODE)
+        assertEquals("3.0.1", BuildConfig.VERSION_NAME)
+        assertFalse("3.0.1 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
     }
 }

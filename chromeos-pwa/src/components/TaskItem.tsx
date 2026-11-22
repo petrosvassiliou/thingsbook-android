@@ -2805,21 +2805,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               </div>
               <div className="context-menu-divider" />
 
-              {/* 0a. Inline Quick Edit (Rename + Quick Strip) */}
-              <button
-                type="button"
-                className="context-menu-item"
-                data-testid="task-ctx-quick-edit-btn"
-                onClick={() => {
-                  setCtxMenu(null);
-                  startInlineQuickEdit();
-                }}
-              >
-                <Edit3 size={14} />
-                <span>{t.quickEditAction}</span>
-              </button>
-
-              {/* 0b. Open Details (Full Two-Zone Soft Bento Modal) */}
+              {/* 1. Open Details (Full Two-Zone Soft Bento Modal) */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -2833,20 +2819,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <span>{t.openDetailsAction}</span>
               </button>
 
-              {/* 1. Select / Deselect */}
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => {
-                  setCtxMenu(null);
-                  onSelect(true);
-                }}
-              >
-                <CheckSquare size={14} />
-                <span>{isSelected ? t.ctxDeselect : t.ctxSelect}</span>
-              </button>
-
-              {/* 2. Mark Completed / Reopen */}
+              {/* 2. Complete / Reopen */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -2858,6 +2831,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 {task.status === 'OPEN' ? <CheckCircle2 size={14} /> : <RotateCcw size={14} />}
                 <span>{task.status === 'OPEN' ? t.actionComplete : t.actionReopenTodo}</span>
               </button>
+
+              <div className="context-menu-divider" />
 
               {/* 3. When? (Date & Reminder) */}
               <button
@@ -2885,20 +2860,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <span>{t.actionDeadline}</span>
               </button>
 
-              {/* 5. Repeat */}
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => {
-                  setCtxMenu(null);
-                  onOpenRepeatModal(task.id);
-                }}
-              >
-                <Repeat size={14} />
-                <span>{t.actionRepeat}</span>
-              </button>
-
-              {/* 6. Move (Area / Project) */}
+              {/* 5. Move (Project / Area) */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -2911,7 +2873,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <span>{t.ctxMoveContainer}</span>
               </button>
 
-              {/* 7. Assign Categories */}
+              {/* 6. Assign Categories */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -2924,112 +2886,22 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <span>{t.ctxAssignTags}</span>
               </button>
 
-              {/* 7b. Waiting On… (Dependencies) */}
-              {onOpenDependenciesModal && (
-                <button
-                  type="button"
-                  className="context-menu-item"
-                  onClick={() => {
-                    setCtxMenu(null);
-                    onOpenDependenciesModal(task.id);
-                  }}
-                >
-                  <Link2 size={14} />
-                  <span>{t.waitingOnLabel}</span>
-                </button>
-              )}
-
-              {/* 7c. Quick Standalone Duration & Effort Strips */}
-              <div className="context-menu-divider" />
-              <div className="context-menu-inline-chips" aria-label={t.durationLabel}>
-                {STANDALONE_DURATION_PRESETS.map((dur) => (
-                  <button
-                    key={dur}
-                    type="button"
-                    className={`chip-btn ${task.durationMinutes === dur ? 'active' : ''}`}
-                    style={{ padding: '2px 6px', fontSize: 11 }}
-                    onClick={() => {
-                      setCtxMenu(null);
-                      void localDb.upsertTask({
-                        id: task.id,
-                        durationMinutes: task.durationMinutes === dur ? null : dur
-                      });
-                    }}
-                  >
-                    {formatStandaloneDuration(dur)}
-                  </button>
-                ))}
-                {task.durationMinutes != null && (
-                  <button
-                    type="button"
-                    className="chip-btn urgent"
-                    style={{ padding: '2px 6px', fontSize: 11 }}
-                    title={t.durationClear}
-                    onClick={() => {
-                      setCtxMenu(null);
-                      void localDb.upsertTask({ id: task.id, durationMinutes: null });
-                    }}
-                  >
-                    <X size={10.5} />
-                  </button>
-                )}
-              </div>
-
-              <div className="context-menu-inline-chips" aria-label={t.effortLabel}>
-                {(
-                  [
-                    [null, t.effortNone],
-                    ['QUICK_WIN', '⚡'],
-                    ['MEDIUM', t.effortMedium],
-                    ['DEEP_FOCUS', '🧠']
-                  ] as Array<[EffortLevel | null, string]>
-                ).map(([lvl, label]) => (
-                  <button
-                    key={lvl ?? 'none'}
-                    type="button"
-                    className={`chip-btn ${(task.effortLevel ?? null) === lvl ? 'active' : ''}`}
-                    style={{ padding: '2px 7px', fontSize: 11 }}
-                    onClick={() => {
-                      setCtxMenu(null);
-                      void localDb.upsertTask({ id: task.id, effortLevel: lvl });
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
               <div className="context-menu-divider" />
 
-              {/* 8. Magic Breakdown (Gemini ✨) */}
+              {/* 7. Pin to Top / Unpin */}
               <button
                 type="button"
                 className="context-menu-item"
                 onClick={() => {
                   setCtxMenu(null);
-                  onExpand();
-                  void runMagicBreakdown();
+                  void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
                 }}
               >
-                <Sparkles size={14} style={{ color: 'var(--gemini-violet)' }} />
-                <span>{t.geminiMagicBreakdown} ✨</span>
+                {task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
               </button>
 
-              {/* 9. Start Focus Timer (task.durationMinutes ?? 25m) */}
-              {task.status === 'OPEN' && (
-                <button
-                  type="button"
-                  className="context-menu-item"
-                  onClick={() => {
-                    setCtxMenu(null);
-                    onStartFocusTimer(task.id, task.title, focusDurationMins);
-                  }}
-                >
-                  <Timer size={14} style={{ color: 'var(--things-blue)' }} />
-                  <span>{t.actionFocusTimerMinutes(focusDurationMins)}</span>
-                </button>
-              )}
-
-              {/* 9a. Mark as Milestone / Remove Milestone */}
+              {/* 8. Mark as Milestone / Remove Milestone */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -3043,20 +2915,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <span>{task.isMilestone ? t.removeMilestone : t.markAsMilestone}</span>
               </button>
 
-              {/* 9b. Pin to Top / Unpin */}
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => {
-                  setCtxMenu(null);
-                  void localDb.upsertTask({ id: task.id, isPinned: !task.isPinned });
-                }}
-              >
-                {task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
-              </button>
-
-              {/* 10. Duplicate To-Do */}
+              {/* 9. Duplicate To-Do */}
               <button
                 type="button"
                 className="context-menu-item"
@@ -3071,20 +2930,22 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
               <div className="context-menu-divider" />
 
-              {/* 11. Mark as Canceled */}
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => {
-                  setCtxMenu(null);
-                  void commitStatus('CANCELED');
-                }}
-              >
-                <XCircle size={14} />
-                <span>{t.actionCancelTodo}</span>
-              </button>
+              {/* 10. Mark as Canceled */}
+              {task.status !== 'CANCELED' && (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  onClick={() => {
+                    setCtxMenu(null);
+                    void commitStatus('CANCELED');
+                  }}
+                >
+                  <XCircle size={14} />
+                  <span>{t.actionCancelTodo}</span>
+                </button>
+              )}
 
-              {/* 12. Delete To-Do */}
+              {/* 11. Delete To-Do */}
               <button
                 type="button"
                 className="context-menu-item danger"

@@ -698,13 +698,16 @@ private struct KanbanTaskCardView: View {
 
     @State private var isHovering = false
     @State private var isDependenciesPopoverOpen = false
+    @State private var isWhenPopoverOpen = false
+    @State private var isDeadlinePopoverOpen = false
+    @State private var isMovePopoverOpen = false
 
     private var isSelected: Bool {
         store.selectedTaskIds.contains(task.id)
     }
 
     private var latestTask: TaskItem {
-        store.allOpenTasks.first(where: { $0.id == task.id }) ?? task
+        store.taskIncludingTrash(byId: task.id) ?? task
     }
 
     var body: some View {
@@ -888,12 +891,53 @@ private struct KanbanTaskCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .thingsCardSurface(cornerRadius: 11, isSelected: isSelected)
         .background(alignment: .bottomLeading) {
-            Color.clear
-                .frame(width: 1, height: 1)
-                .padding(.leading, 16)
-                .popover(isPresented: $isDependenciesPopoverOpen) {
-                    DependenciesPopoverView(store: store, task: latestTask)
-                }
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isDependenciesPopoverOpen) {
+                        DependenciesPopoverView(store: store, task: latestTask)
+                    }
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isWhenPopoverOpen) {
+                        WhenPopoverView(
+                            store: store,
+                            currentSchedule: latestTask.scheduleState,
+                            currentWhenMillis: latestTask.whenDate,
+                            currentReminderMillis: latestTask.reminderTime
+                        ) { resolved in
+                            var copy = latestTask
+                            copy.scheduleState = resolved.scheduleState
+                            copy.whenDate = resolved.whenDateEpochMillis
+                            copy.reminderTime = resolved.reminderEpochMillis
+                            store.updateTask(copy)
+                        }
+                    }
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isDeadlinePopoverOpen) {
+                        DeadlinePopoverView(store: store, currentDeadlineMillis: latestTask.deadline) { dl in
+                            var copy = latestTask
+                            copy.deadline = dl
+                            store.updateTask(copy)
+                        }
+                    }
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .popover(isPresented: $isMovePopoverOpen) {
+                        MoveDestinationPopoverView(store: store, task: latestTask) { projId, headId, areaId, schedOverride in
+                            var copy = latestTask
+                            copy.projectId = projId
+                            copy.headingId = headId
+                            copy.areaId = areaId
+                            if let schedOverride {
+                                copy.scheduleState = schedOverride
+                            }
+                            store.updateTask(copy)
+                        }
+                    }
+            }
+            .padding(.leading, 16)
         }
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .onHover { hovering in
@@ -1032,11 +1076,6 @@ private struct KanbanTaskCardView: View {
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
             }
-            Button {
-                store.copySelectedTasksToPasteboard()
-            } label: {
-                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
-            }
             Divider()
             Button(role: .destructive) {
                 store.deleteSelectedTasks()
@@ -1047,65 +1086,60 @@ private struct KanbanTaskCardView: View {
             Button {
                 onOpenDetail()
             } label: {
-                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
-            }
-            Divider()
-            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                store.toggleTaskCompletion(latestTask)
-            }
-            Button(store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task")) {
-                store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+                Label(store.tr("v30_open_details_action"), systemImage: "slider.horizontal.3")
             }
             Button {
-                store.setTasksMilestone([latestTask.id], isMilestone: !latestTask.isMilestone)
+                store.toggleTaskCompletion(latestTask)
             } label: {
                 Label(
-                    store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
-                    systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
+                    task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete"),
+                    systemImage: task.status == .completed ? "arrow.uturn.backward.circle" : "checkmark.circle"
                 )
             }
             Divider()
-            Button(store.tr("view_today")) {
-                store.scheduleTasks([latestTask.id], to: .today)
-            }
-            Button(store.tr("view_this_evening")) {
-                store.scheduleTasks([latestTask.id], to: .thisEvening)
-            }
-            Button(store.tr("view_someday")) {
-                store.scheduleTasks([latestTask.id], to: .someday)
-            }
-            Menu(store.tr("v30_duration_label")) {
-                ForEach(TaskItem.standaloneDurationPresets + [960, 1440, 2400], id: \.self) { mins in
-                    Button(TaskItem.formatCompactDuration(mins)) {
-                        store.setTaskStandaloneDuration(latestTask.id, durationMinutes: mins)
-                    }
+            Menu {
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .today)
+                } label: {
+                    Label(store.tr("view_today"), systemImage: "sun.max.fill")
+                }
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .thisEvening)
+                } label: {
+                    Label(store.tr("view_this_evening"), systemImage: "moon.stars.fill")
+                }
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .someday)
+                } label: {
+                    Label(store.tr("view_someday"), systemImage: "cloud.fill")
                 }
                 Divider()
-                Button(store.tr("v30_duration_custom")) {
-                    onOpenDetail()
+                Button {
+                    isWhenPopoverOpen = true
+                } label: {
+                    Label(store.tr("repeat_ends_pick_date"), systemImage: "calendar")
                 }
-                if (latestTask.durationMinutes ?? 0) > 0 {
-                    Button(store.tr("v30_duration_clear"), role: .destructive) {
-                        store.setTaskStandaloneDuration(latestTask.id, durationMinutes: nil)
-                    }
-                }
+            } label: {
+                Label(store.tr("action_when"), systemImage: "calendar")
             }
-            Menu(store.tr("v30_effort_label")) {
-                ForEach(TaskEffortLevel.allCases, id: \.rawValue) { level in
-                    Button(effortTitle(level)) {
-                        store.setTaskEffort(latestTask.id, effortLevel: level.rawValue)
-                    }
-                }
-                if latestTask.resolvedEffort != nil {
-                    Divider()
-                    Button(store.tr("v30_effort_none")) {
-                        store.setTaskEffort(latestTask.id, effortLevel: nil)
-                    }
-                }
+            Button {
+                isDeadlinePopoverOpen = true
+            } label: {
+                Label("\(store.tr("action_deadline"))…", systemImage: "flag")
             }
-            let projectHeadings = (store.headingsByProject[project.id] ?? []).filter { !$0.isDeleted && !$0.isArchived }
+            Button {
+                isMovePopoverOpen = true
+            } label: {
+                Label("\(store.tr("action_move"))…", systemImage: "folder")
+            }
+            let projectHeadings = (store.headingsByProject[project.id] ?? [])
+                .filter { !$0.isDeleted && !$0.isArchived }
+                .sorted {
+                    if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                    return $0.id < $1.id
+                }
             if !projectHeadings.isEmpty {
-                Menu(store.tr("entity_heading")) {
+                Menu {
                     Button {
                         var copy = latestTask
                         copy.headingId = nil
@@ -1131,28 +1165,45 @@ private struct KanbanTaskCardView: View {
                             }
                         }
                     }
+                } label: {
+                    Label(store.tr("entity_heading"), systemImage: "flag.checkered")
                 }
             }
-            Button(store.tr("v30_blocked_by_action")) {
-                isDependenciesPopoverOpen = true
-            }
-            Button(store.tr("action_duplicate_todo")) {
-                _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            Divider()
+            Button {
+                store.setTasksPinned([latestTask.id], isPinned: !latestTask.isPinned)
+            } label: {
+                Label(
+                    store.tr(latestTask.isPinned ? "v25_unpin_task" : "v25_pin_task"),
+                    systemImage: latestTask.isPinned ? "pin.slash" : "pin"
+                )
             }
             Button {
-                store.copyTaskToPasteboard(latestTask)
+                store.setTasksMilestone([latestTask.id], isMilestone: !latestTask.isMilestone)
             } label: {
-                Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
+                Label(
+                    store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
+                )
             }
-            Button(store.tr("context_select_task")) {
-                store.selectedTaskIds.insert(task.id)
-                store.lastSelectedTaskId = task.id
+            Button {
+                _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            } label: {
+                Label(store.tr("action_duplicate_todo"), systemImage: "plus.square.on.square")
             }
             Divider()
+            Button {
+                store.cancelTask(latestTask)
+            } label: {
+                Label(
+                    task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo"),
+                    systemImage: task.status == .canceled ? "arrow.uturn.backward.circle" : "xmark.circle"
+                )
+            }
             Button(role: .destructive) {
                 store.deleteTask(latestTask)
             } label: {
-                Text(store.tr("action_delete"))
+                Label(store.tr("action_delete"), systemImage: "trash")
             }
         }
     }
@@ -1767,29 +1818,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                     }
                 )
                 .contextMenu {
-                    Button {
-                        store.openTaskModal(bar.id)
-                    } label: {
-                        Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
-                    }
-                    Divider()
-                    Button(bar.task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                        store.toggleTaskCompletion(bar.task)
-                    }
-                    Button {
-                        store.setTasksMilestone([bar.task.id], isMilestone: !bar.task.isMilestone)
-                    } label: {
-                        Label(
-                            store.tr(bar.task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
-                            systemImage: bar.task.isMilestone ? "diamond.fill" : "diamond"
-                        )
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        store.deleteTask(bar.task)
-                    } label: {
-                        Text(store.tr("action_delete"))
-                    }
+                    roadmapTaskContextMenu(for: bar.task, includeDateShift: true)
                 }
                 .thingsTaskDraggable(store: store, task: bar.task)
         }
@@ -2397,49 +2426,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                         }
                 )
                 .contextMenu {
-                    Button {
-                        store.openTaskModal(task.id)
-                    } label: {
-                        Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
-                    }
-                    Divider()
-                    Button(store.tr("v30_roadmap_shift_earlier")) {
-                        store.shiftTaskRoadmapDates(task, deltaDays: -1)
-                    }
-                    Button(store.tr("v30_roadmap_shift_later")) {
-                        store.shiftTaskRoadmapDates(task, deltaDays: 1)
-                    }
-                    Divider()
-                    Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                        store.toggleTaskCompletion(task)
-                    }
-                    Button {
-                        store.setTasksMilestone([task.id], isMilestone: !task.isMilestone)
-                    } label: {
-                        Label(
-                            store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
-                            systemImage: task.isMilestone ? "diamond.fill" : "diamond"
-                        )
-                    }
-                    Button(store.tr("view_today")) {
-                        var copy = task
-                        copy.scheduleState = .today
-                        copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-                        store.updateTask(copy)
-                    }
-                    Button(store.tr("view_someday")) {
-                        var copy = task
-                        copy.scheduleState = .someday
-                        copy.whenDate = nil
-                        copy.deadline = nil
-                        store.updateTask(copy)
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        store.deleteTask(task)
-                    } label: {
-                        Text(store.tr("action_delete"))
-                    }
+                    roadmapTaskContextMenu(for: task, includeDateShift: true)
                 }
         }
     }
@@ -2623,31 +2610,183 @@ public struct ProjectRoadmapWorkspaceView: View {
             }
         )
         .contextMenu {
-            Button {
-                store.openTaskModal(task.id)
-            } label: {
-                Label("\(store.tr("action_more_options"))…", systemImage: "slider.horizontal.3")
+            roadmapTaskContextMenu(for: task, includeDateShift: false)
+        }
+        .thingsTaskDraggable(store: store, task: task)
+    }
+
+    @ViewBuilder
+    private func roadmapTaskContextMenu(for task: TaskItem, includeDateShift: Bool) -> some View {
+        let latest = store.taskIncludingTrash(byId: task.id) ?? task
+        let isBatch = store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(task.id)
+
+        if isBatch {
+            let allMilestones = store.selectedTaskIds.allSatisfy { id in
+                store.allOpenTasks.first(where: { $0.id == id })?.isMilestone == true
             }
-            Divider()
-            Button(task.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete")) {
-                store.toggleTaskCompletion(task)
+            Button(store.tr("action_complete")) {
+                store.completeSelectedTasks()
+            }
+            Button(store.tr("view_today")) {
+                store.scheduleSelectedTasks(.today)
+            }
+            Button(store.tr("v25_batch_someday")) {
+                store.scheduleSelectedTasks(.someday)
+            }
+            Button(store.tr("v25_batch_pin")) {
+                store.togglePinForSelectedTasks()
             }
             Button {
-                store.setTasksMilestone([task.id], isMilestone: !task.isMilestone)
+                store.toggleMilestoneForSelectedTasks()
             } label: {
                 Label(
-                    store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
-                    systemImage: task.isMilestone ? "diamond.fill" : "diamond"
+                    store.tr(allMilestones ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: allMilestones ? "diamond.fill" : "diamond"
                 )
+            }
+            Button(store.tr("v25_batch_duplicate")) {
+                store.duplicateSelectedTasks()
             }
             Divider()
             Button(role: .destructive) {
-                store.deleteTask(task)
+                store.deleteSelectedTasks()
             } label: {
                 Text(store.tr("action_delete"))
             }
+        } else {
+            Button {
+                store.openTaskModal(task.id)
+            } label: {
+                Label(store.tr("v30_open_details_action"), systemImage: "slider.horizontal.3")
+            }
+            Button {
+                store.toggleTaskCompletion(latest)
+            } label: {
+                Label(
+                    latest.status == .completed ? store.tr("action_reopen_todo") : store.tr("action_complete"),
+                    systemImage: latest.status == .completed ? "arrow.uturn.backward.circle" : "checkmark.circle"
+                )
+            }
+            Divider()
+            if includeDateShift {
+                Button {
+                    store.shiftTaskRoadmapDates(latest, deltaDays: -1)
+                } label: {
+                    Label(store.tr("v30_roadmap_shift_earlier"), systemImage: "arrow.left")
+                }
+                Button {
+                    store.shiftTaskRoadmapDates(latest, deltaDays: 1)
+                } label: {
+                    Label(store.tr("v30_roadmap_shift_later"), systemImage: "arrow.right")
+                }
+            }
+            Menu {
+                Button {
+                    var copy = latest
+                    copy.scheduleState = .today
+                    copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                    store.updateTask(copy)
+                } label: {
+                    Label(store.tr("view_today"), systemImage: "sun.max.fill")
+                }
+                Button {
+                    var copy = latest
+                    copy.scheduleState = .thisEvening
+                    copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                    store.updateTask(copy)
+                } label: {
+                    Label(store.tr("view_this_evening"), systemImage: "moon.stars.fill")
+                }
+                Button {
+                    var copy = latest
+                    copy.scheduleState = .someday
+                    copy.whenDate = nil
+                    copy.deadline = nil
+                    store.updateTask(copy)
+                } label: {
+                    Label(store.tr("view_someday"), systemImage: "cloud.fill")
+                }
+                Divider()
+                Button {
+                    if includeDateShift {
+                        store.openTaskModal(task.id)
+                    } else {
+                        unscheduledStartPopoverTaskId = task.id
+                    }
+                } label: {
+                    Label(store.tr("repeat_ends_pick_date"), systemImage: "calendar")
+                }
+            } label: {
+                Label(store.tr("action_when"), systemImage: "calendar")
+            }
+            if !activeHeadings.isEmpty {
+                Menu {
+                    Button {
+                        var copy = latest
+                        copy.headingId = nil
+                        store.updateTask(copy)
+                    } label: {
+                        if latest.headingId == nil {
+                            Label(store.tr("v30_board_ungrouped_column"), systemImage: "checkmark")
+                        } else {
+                            Text(store.tr("v30_board_ungrouped_column"))
+                        }
+                    }
+                    Divider()
+                    ForEach(activeHeadings) { heading in
+                        Button {
+                            var copy = latest
+                            copy.headingId = heading.id
+                            store.updateTask(copy)
+                        } label: {
+                            if latest.headingId == heading.id {
+                                Label(heading.title, systemImage: "checkmark")
+                            } else {
+                                Text(heading.title)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(store.tr("entity_heading"), systemImage: "flag.checkered")
+                }
+            }
+            Divider()
+            Button {
+                store.setTasksPinned([latest.id], isPinned: !latest.isPinned)
+            } label: {
+                Label(
+                    store.tr(latest.isPinned ? "v25_unpin_task" : "v25_pin_task"),
+                    systemImage: latest.isPinned ? "pin.slash" : "pin"
+                )
+            }
+            Button {
+                store.setTasksMilestone([latest.id], isMilestone: !latest.isMilestone)
+            } label: {
+                Label(
+                    store.tr(latest.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
+                    systemImage: latest.isMilestone ? "diamond.fill" : "diamond"
+                )
+            }
+            Button {
+                _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
+            } label: {
+                Label(store.tr("action_duplicate_todo"), systemImage: "plus.square.on.square")
+            }
+            Divider()
+            Button {
+                store.cancelTask(latest)
+            } label: {
+                Label(
+                    latest.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo"),
+                    systemImage: latest.status == .canceled ? "arrow.uturn.backward.circle" : "xmark.circle"
+                )
+            }
+            Button(role: .destructive) {
+                store.deleteTask(latest)
+            } label: {
+                Label(store.tr("action_delete"), systemImage: "trash")
+            }
         }
-        .thingsTaskDraggable(store: store, task: task)
     }
 
     // MARK: - Configurable Vector PDF & 1-Click 2x Retina PNG Export

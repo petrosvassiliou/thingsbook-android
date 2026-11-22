@@ -532,7 +532,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         if clamped < 60 {
             return "\(clamped)m"
         }
-        if clamped >= MINUTES_PER_WORKDAY {
+        if clamped > MINUTES_PER_WORKDAY {
             let d = clamped / MINUTES_PER_WORKDAY
             let rem = clamped % MINUTES_PER_WORKDAY
             let h = rem / 60

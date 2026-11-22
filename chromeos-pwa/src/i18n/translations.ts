@@ -3,7 +3,7 @@ import type { SupportedLang } from '../domain/types';
 function formatFocusMinutesCompact(mins: number): string {
   const safe = Math.max(1, Math.min(720, Math.trunc(Number.isFinite(mins) ? mins : 25)));
   if (safe < 60) return `${safe}m`;
-  if (safe >= 480) {
+  if (safe > 480) {
     const d = Math.floor(safe / 480);
     const rem = safe % 480;
     const h = Math.floor(rem / 60);
@@ -268,6 +268,8 @@ export interface TranslationStrings {
   settingsWorkflowSecuritySection: string;
   settingsGroupTodayTitle: string;
   settingsGroupTodayDesc: string;
+  settingsShowPerspectives: string;
+  settingsShowPerspectivesDesc: string;
   settingsBiometricLockTitle: string;
   settingsBiometricLockDesc: string;
   appLockTitle: string;
@@ -785,6 +787,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsWorkflowSecuritySection: 'Workflow, Today Grouping & App Lock',
     settingsGroupTodayTitle: 'Group Today by Project or Area',
     settingsGroupTodayDesc: 'Organize Today tasks under their Project or Area section cards.',
+    settingsShowPerspectives: 'Show Custom Perspectives in Sidebar',
+    settingsShowPerspectivesDesc:
+      'Adds a saved-filters section to the sidebar for custom multi-criteria views',
     settingsBiometricLockTitle: 'Biometric / PIN App Lock',
     settingsBiometricLockDesc:
       'Require fingerprint, face unlock, or device PIN when opening Thingsbook (off by default).',
@@ -1310,6 +1315,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsGroupTodayTitle: '„Heute“ nach Projekt oder Bereich gruppieren',
     settingsGroupTodayDesc:
       'Aufgaben in „Heute“ übersichtlich unter ihren Projekt- oder Bereichskarten gruppieren.',
+    settingsShowPerspectives: 'Eigene Perspektiven in der Seitenleiste anzeigen',
+    settingsShowPerspectivesDesc:
+      'Fügt der Seitenleiste einen Bereich für gespeicherte Mehrfachfilter hinzu',
     settingsBiometricLockTitle: 'Biometrische App-Sperre (Fingerabdruck / PIN)',
     settingsBiometricLockDesc:
       'Beim Öffnen von Thingsbook Fingerabdruck, Gesichtserkennung oder Geräte-PIN anfordern (standardmäßig deaktiviert).',
@@ -1833,6 +1841,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsGroupTodayTitle: "Regrouper Aujourd'hui par projet ou domaine",
     settingsGroupTodayDesc:
       "Organiser les tâches d'Aujourd'hui sous leurs cartes de projet ou de domaine.",
+    settingsShowPerspectives: 'Afficher les perspectives personnalisées dans la barre latérale',
+    settingsShowPerspectivesDesc:
+      'Ajoute une section de filtres enregistrés à la barre latérale',
     settingsBiometricLockTitle: 'Verrouillage biométrique / PIN',
     settingsBiometricLockDesc:
       "Exiger l'empreinte digitale, la reconnaissance faciale ou le code PIN à l'ouverture (désactivé par défaut).",
@@ -2358,6 +2369,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsGroupTodayTitle: 'Raggruppa Oggi per progetto o area',
     settingsGroupTodayDesc:
       'Organizza le attività di Oggi sotto le schede di progetto o area.',
+    settingsShowPerspectives: 'Mostra prospettive personalizzate nella barra laterale',
+    settingsShowPerspectivesDesc:
+      'Aggiunge una sezione di filtri salvati alla barra laterale',
     settingsBiometricLockTitle: 'Blocco app biometrico / PIN',
     settingsBiometricLockDesc:
       "Richiedi impronta digitale, sblocco facciale o PIN all'apertura (disattivato per impostazione predefinita).",
@@ -2882,6 +2896,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsGroupTodayTitle: 'Agrupar Hoy por proyecto o área',
     settingsGroupTodayDesc:
       'Organizar las tareas de Hoy bajo sus tarjetas de proyecto o área.',
+    settingsShowPerspectives: 'Mostrar perspectivas personalizadas en la barra lateral',
+    settingsShowPerspectivesDesc:
+      'Añade una sección de filtros guardados a la barra lateral',
     settingsBiometricLockTitle: 'Bloqueo biométrico / PIN',
     settingsBiometricLockDesc:
       'Requerir huella digital, desbloqueo facial o PIN al abrir Thingsbook (desactivado por defecto).',

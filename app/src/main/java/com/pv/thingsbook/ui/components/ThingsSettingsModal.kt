@@ -119,6 +119,8 @@ fun ThingsSettingsModal(
     onRefreshCalendars: () -> Unit = {},
     groupTodayByProjectOrArea: Boolean = false,
     onSetGroupTodayByProjectOrArea: (Boolean) -> Unit = {},
+    showPerspectivesInSidebar: Boolean = false,
+    onSetShowPerspectivesInSidebar: (Boolean) -> Unit = {},
     biometricAppLockEnabled: Boolean = false,
     onSetBiometricAppLockEnabled: (Boolean) -> Unit = {},
     autoCheckUpdatesEnabled: Boolean = true,
@@ -672,6 +674,39 @@ fun ThingsSettingsModal(
                                 onCheckedChange = { enabled ->
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onSetGroupTodayByProjectOrArea(enabled)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = colors.thingsBlue
+                                )
+                            )
+                        }
+
+                        HorizontalDivider(color = colors.hairlineDivider)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.v30_settings_show_perspectives),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText
+                                )
+                                Text(
+                                    text = stringResource(R.string.v30_settings_show_perspectives_desc),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                    color = colors.secondaryText
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(
+                                checked = showPerspectivesInSidebar,
+                                onCheckedChange = { enabled ->
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSetShowPerspectivesInSidebar(enabled)
                                 },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Color.White,

@@ -53,6 +53,7 @@ interface SidebarProps {
   areas: AreaRecord[];
   projects: ProjectRecord[];
   tasks: TaskRecord[];
+  showPerspectives?: boolean;
   savedPerspectives?: SavedPerspective[];
   perspectiveCounts?: ReadonlyMap<string, number>;
   selectedTaskIds?: string[];
@@ -111,6 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   projects,
   tasks,
   savedPerspectives = [],
+  showPerspectives = savedPerspectives.length > 0,
   perspectiveCounts,
   selectedTaskIds = [],
   orderedVisibleTaskIds = [],
@@ -351,93 +353,100 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* 3. Custom Perspectives Soft Bento Card (Dynamic Filter Views — visually self-contained) */}
-          {onCreatePerspective && (
-            <div className="sidebar-perspectives-section" data-testid="sidebar-perspectives-section">
-              <div className="sidebar-section-header">
-                <span className="sidebar-section-heading-group">
-                  <SlidersHorizontal
-                    size={12.5}
-                    className="sidebar-section-icon perspectives"
-                    aria-hidden="true"
-                  />
-                  <span className="sidebar-section-title">{t.perspectivesSectionTitle}</span>
-                  {sortedPerspectives.length > 0 && (
-                    <span className="sidebar-section-count">{sortedPerspectives.length}</span>
-                  )}
-                </span>
-                <button
-                  type="button"
-                  className="sidebar-section-plus"
-                  data-testid="sidebar-add-perspective-btn"
-                  title={t.perspectiveNewTitle}
-                  aria-label={t.perspectiveNewTitle}
-                  onClick={() => {
-                    onCloseMobile();
-                    onCreatePerspective();
-                  }}
+          {showPerspectives && (
+            <>
+              {onCreatePerspective && (
+                <div
+                  className="sidebar-perspectives-section"
+                  data-testid="sidebar-perspectives-section"
                 >
-                  <Plus size={13.5} />
-                </button>
-              </div>
-
-              {sortedPerspectives.map((persp) => {
-                const isPerspActive =
-                  activeNav.kind === 'perspective' && activeNav.perspectiveId === persp.id;
-                const matchCount = perspectiveCounts?.get(persp.id) ?? 0;
-                return (
-                  <div key={persp.id} className="nav-row-wrap">
+                  <div className="sidebar-section-header">
+                    <span className="sidebar-section-heading-group">
+                      <SlidersHorizontal
+                        size={12.5}
+                        className="sidebar-section-icon perspectives"
+                        aria-hidden="true"
+                      />
+                      <span className="sidebar-section-title">{t.perspectivesSectionTitle}</span>
+                      {sortedPerspectives.length > 0 && (
+                        <span className="sidebar-section-count">{sortedPerspectives.length}</span>
+                      )}
+                    </span>
                     <button
                       type="button"
-                      className={`nav-item ${isPerspActive ? 'active' : ''}`}
-                      data-testid={`sidebar-perspective-${persp.id}`}
-                      title={persp.title}
-                      onClick={() =>
-                        onSelectNav({ kind: 'perspective', perspectiveId: persp.id })
-                      }
+                      className="sidebar-section-plus"
+                      data-testid="sidebar-add-perspective-btn"
+                      title={t.perspectiveNewTitle}
+                      aria-label={t.perspectiveNewTitle}
+                      onClick={() => {
+                        onCloseMobile();
+                        onCreatePerspective();
+                      }}
                     >
-                      <SlidersHorizontal
-                        size={14}
-                        style={{
-                          color: isPerspActive ? 'var(--things-blue)' : 'var(--gemini-violet)',
-                          flexShrink: 0
-                        }}
-                      />
-                      <span className="nav-item-label">{persp.title}</span>
-                      {matchCount > 0 && (
-                        <span
-                          style={{
-                            fontSize: 11.5,
-                            fontWeight: 600,
-                            color: isPerspActive ? 'var(--things-blue)' : 'var(--text-tertiary)',
-                            fontVariantNumeric: 'tabular-nums'
-                          }}
-                        >
-                          {matchCount}
-                        </span>
-                      )}
+                      <Plus size={13.5} />
                     </button>
-                    {onEditPerspective && (
-                      <button
-                        type="button"
-                        className="nav-inline-plus"
-                        title={t.perspectiveEditTitle}
-                        aria-label={t.perspectiveEditTitle}
-                        onClick={() => {
-                          onCloseMobile();
-                          onEditPerspective(persp);
-                        }}
-                      >
-                        <Edit3 size={12.5} />
-                      </button>
-                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
 
-          {/* Unconditional structural divider separating dynamic Perspectives from Workspace Areas */}
-          <div className="sidebar-divider" data-testid="sidebar-perspectives-areas-divider" />
+                  {sortedPerspectives.map((persp) => {
+                    const isPerspActive =
+                      activeNav.kind === 'perspective' && activeNav.perspectiveId === persp.id;
+                    const matchCount = perspectiveCounts?.get(persp.id) ?? 0;
+                    return (
+                      <div key={persp.id} className="nav-row-wrap">
+                        <button
+                          type="button"
+                          className={`nav-item ${isPerspActive ? 'active' : ''}`}
+                          data-testid={`sidebar-perspective-${persp.id}`}
+                          title={persp.title}
+                          onClick={() =>
+                            onSelectNav({ kind: 'perspective', perspectiveId: persp.id })
+                          }
+                        >
+                          <SlidersHorizontal
+                            size={14}
+                            style={{
+                              color: isPerspActive ? 'var(--things-blue)' : 'var(--gemini-violet)',
+                              flexShrink: 0
+                            }}
+                          />
+                          <span className="nav-item-label">{persp.title}</span>
+                          {matchCount > 0 && (
+                            <span
+                              style={{
+                                fontSize: 11.5,
+                                fontWeight: 600,
+                                color: isPerspActive ? 'var(--things-blue)' : 'var(--text-tertiary)',
+                                fontVariantNumeric: 'tabular-nums'
+                              }}
+                            >
+                              {matchCount}
+                            </span>
+                          )}
+                        </button>
+                        {onEditPerspective && (
+                          <button
+                            type="button"
+                            className="nav-inline-plus"
+                            title={t.perspectiveEditTitle}
+                            aria-label={t.perspectiveEditTitle}
+                            onClick={() => {
+                              onCloseMobile();
+                              onEditPerspective(persp);
+                            }}
+                          >
+                            <Edit3 size={12.5} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Structural divider separating dynamic Perspectives from Workspace Areas */}
+              <div className="sidebar-divider" data-testid="sidebar-perspectives-areas-divider" />
+            </>
+          )}
 
           {/* 4. Areas -> Projects Collapsible Hierarchy with Explicit Section Header */}
           <div className="sidebar-areas-section" data-testid="sidebar-areas-section">

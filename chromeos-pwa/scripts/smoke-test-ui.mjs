@@ -499,9 +499,34 @@ async function main() {
     await cdp.clickSelector('[data-testid="today-mode-list-btn"]');
     cdp.assertZeroErrors('Today Timeline + Full Screen');
 
-    // Create & verify Custom Perspective
+    // Option 1: Verify Custom Perspectives are hidden in Sidebar on fresh boot (0 saved perspectives)
+    const perspHiddenByDefault = await cdp.evalJs(`
+      return (
+        document.querySelector('[data-testid="sidebar-perspectives-section"]') === null &&
+        document.querySelector('[data-testid="sidebar-perspectives-areas-divider"]') === null
+      );
+    `);
+    assert(perspHiddenByDefault, 'Expected sidebar-perspectives-section to be hidden on fresh boot (0 saved perspectives)');
+
+    // Enable Custom Perspectives in Settings, then create & verify 'Sprint Focus' (including <= 4h & <= 8h chips)
+    await cdp.clickSelector('header .topbar-right button:last-child');
+    await cdp.waitForSelector('[data-testid="settings-show-perspectives-toggle"]');
+    await cdp.clickSelector('[data-testid="settings-show-perspectives-toggle"]');
+    await cdp.pressKey('Escape', 'Escape', 27);
+    await sleep(160);
+
+    await cdp.waitForSelector('[data-testid="sidebar-add-perspective-btn"]');
     await cdp.clickSelector('[data-testid="sidebar-add-perspective-btn"]');
     await cdp.waitForSelector('[data-testid="perspective-modal"]');
+    const perspDurationChips = await cdp.evalJs(`
+      return Array.from(document.querySelectorAll('[data-testid="perspective-modal"] .chip-btn')).map(
+        (b) => (b.textContent || '').trim()
+      );
+    `);
+    assert(
+      perspDurationChips.includes('≤ 4h') && perspDurationChips.includes('≤ 8h'),
+      `Expected Perspective Editor max-duration chips to include "≤ 4h" and "≤ 8h", got ${JSON.stringify(perspDurationChips)}`
+    );
     await cdp.setReactInputValue('[data-testid="perspective-modal"] input.text-field', 'Sprint Focus');
     await cdp.clickSelector('[data-testid="perspective-modal"] button[type="submit"]');
     await sleep(180);
@@ -785,6 +810,16 @@ async function main() {
     // Expand Duration & Effort panel on Right Column so Right Column is substantially taller than Left Column!
     await cdp.clickSelector('[data-testid="task-effort-duration-chip"]');
     await cdp.waitForSelector('[data-testid="task-effort-duration-panel"]');
+    const durChipsCheck = await cdp.evalJs(`
+      return {
+        chip240: document.querySelector('[data-testid="task-duration-chip-240"]')?.textContent?.trim() || '',
+        chip480: document.querySelector('[data-testid="task-duration-chip-480"]')?.textContent?.trim() || ''
+      };
+    `);
+    assert(
+      durChipsCheck.chip240 === '4h' && durChipsCheck.chip480 === '8h',
+      `Expected task-duration-chip-240="4h" and task-duration-chip-480="8h", got ${JSON.stringify(durChipsCheck)}`
+    );
     await cdp.evalJs(`if (document.activeElement instanceof HTMLElement) document.activeElement.blur();`);
     await sleep(180);
 

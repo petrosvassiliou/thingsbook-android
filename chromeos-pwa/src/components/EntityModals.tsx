@@ -1684,7 +1684,7 @@ interface PerspectiveModalProps {
   onClose: () => void;
 }
 
-const PERSPECTIVE_MAX_DURATION_PRESETS = [5, 15, 30, 60, 120] as const;
+const PERSPECTIVE_MAX_DURATION_PRESETS = [5, 15, 30, 60, 120, 240, 480] as const;
 
 export const PerspectiveModal: React.FC<PerspectiveModalProps> = ({
   perspective,

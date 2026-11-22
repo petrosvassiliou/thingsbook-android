@@ -3635,6 +3635,7 @@ private fun ExpandedTaskCardBody(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskContextDropdownMenu(
     task: TaskItem,
@@ -3883,19 +3884,20 @@ private fun TaskContextDropdownMenu(
             )
         }
         if (onUpdateStandaloneDuration != null) {
-            Row(
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
                     text = stringResource(R.string.v30_duration_label) + ":",
                     style = MaterialTheme.typography.labelSmall,
-                    color = colors.secondaryText
+                    color = colors.secondaryText,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
-                listOf(15 to "15m", 30 to "30m", 60 to "1h", 480 to "1d").forEach { (mins, lbl) ->
+                listOf(15 to "15m", 30 to "30m", 60 to "1h", 120 to "2h", 240 to "4h", 480 to "8h").forEach { (mins, lbl) ->
                     ThingsTagPill(
                         title = lbl,
                         onClick = {

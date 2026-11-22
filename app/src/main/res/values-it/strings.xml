@@ -603,4 +603,6 @@
     <string name="v30_inspector_overview_title">Panoramica</string>
     <string name="v30_inspector_upcoming_deadlines">Scadenze e traguardi imminenti</string>
     <string name="v30_inspector_toggle_tooltip">Mostra/nascondi pannello Ispettore</string>
+    <string name="v30_settings_show_perspectives">Mostra prospettive personalizzate nella barra laterale</string>
+    <string name="v30_settings_show_perspectives_desc">Aggiunge una sezione di filtri salvati alla barra laterale</string>
 </resources>

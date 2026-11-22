@@ -25,7 +25,7 @@ export const STALLED_PROJECT_THRESHOLD_MS = STALLED_PROJECT_THRESHOLD_DAYS * 86_
 
 export const DEFAULT_TIMEBLOCK_DURATION_MINUTES = 30;
 export const DEFAULT_DAILY_CAPACITY_MINUTES = 480;
-export const TIMEBLOCK_DURATION_PRESETS = [15, 30, 45, 60, 90, 120] as const;
+export const TIMEBLOCK_DURATION_PRESETS = [15, 30, 45, 60, 90, 120, 240, 480] as const;
 export const STANDALONE_DURATION_PRESETS = [5, 15, 30, 60, 120, 240, 480] as const;
 export const TIMEBLOCK_QUICK_START_MINUTES = [
   480, // 08:00
@@ -166,7 +166,7 @@ export function formatTimeblockRange(
   const startMin = Math.max(0, Math.min(1439, Math.trunc(scheduledStartMinutes)));
   const startClock = formatMinutesAsClock(startMin);
   const durLabel = formatStandaloneDuration(dur);
-  if (dur >= DEFAULT_DAILY_CAPACITY_MINUTES) {
+  if (dur > DEFAULT_DAILY_CAPACITY_MINUTES) {
     return `${startClock} · ${durLabel}`;
   }
   const rawEnd = startMin + dur;
@@ -2393,13 +2393,13 @@ export function resolveTopBarLayoutTier(workspaceWidthPx: number): TopBarLayoutT
 }
 
 /**
- * Formats standalone duration minutes into compact human-readable form ("15m", "45m", "1h", "1h 30m", "1d", "2d 4h").
- * Uses 480m = 1 workday (8h), matching Project Roadmap span days and Today Capacity budget.
+ * Formats standalone duration minutes into compact human-readable form ("15m", "45m", "1h", "4h", "8h", "1d 4h", "2d").
+ * Uses 480m = 1 workday (8h) for multi-day durations (> 480m), matching Project Roadmap span days and Today Capacity budget.
  */
 export function formatStandaloneDuration(minutes: number): string {
   const safe = Math.max(0, Math.trunc(Number.isFinite(minutes) ? minutes : 0));
   if (safe < 60) return `${safe}m`;
-  if (safe >= DEFAULT_DAILY_CAPACITY_MINUTES) {
+  if (safe > DEFAULT_DAILY_CAPACITY_MINUTES) {
     const d = Math.floor(safe / DEFAULT_DAILY_CAPACITY_MINUTES);
     const rem = safe % DEFAULT_DAILY_CAPACITY_MINUTES;
     const h = Math.floor(rem / 60);

@@ -173,7 +173,7 @@ val STANDALONE_DURATION_PRESETS: List<Int> = listOf(5, 15, 30, 60, 120, 240, 480
 
 fun formatDurationCompact(minutes: Int): String {
     val safeMins = minutes.coerceAtLeast(1)
-    if (safeMins >= 480) {
+    if (safeMins > 480) {
         val days = safeMins / 480
         val rem = safeMins % 480
         val hours = rem / 60

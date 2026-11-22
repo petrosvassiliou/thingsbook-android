@@ -149,9 +149,13 @@ class V3Beta7LayoutPolishTest {
         val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
         val repoRoot = if (appSrcMain.path.startsWith("app/")) File(".") else File("..")
 
-        // 1. Duration formatting & custom duration parser (480m = 1d workday)
+        // 1. Duration formatting & custom duration parser (240m = 4h, 480m = 8h; >480m formats in days)
+        assertTrue(com.pv.thingsbook.domain.model.STANDALONE_DURATION_PRESETS.contains(240))
         assertTrue(com.pv.thingsbook.domain.model.STANDALONE_DURATION_PRESETS.contains(480))
-        org.junit.Assert.assertEquals("1d", com.pv.thingsbook.domain.model.formatDurationCompact(480))
+        assertTrue(com.pv.thingsbook.domain.model.TimeblockScheduleUtils.DURATION_PRESETS_MINUTES.contains(240))
+        assertTrue(com.pv.thingsbook.domain.model.TimeblockScheduleUtils.DURATION_PRESETS_MINUTES.contains(480))
+        org.junit.Assert.assertEquals("4h", com.pv.thingsbook.domain.model.formatDurationCompact(240))
+        org.junit.Assert.assertEquals("8h", com.pv.thingsbook.domain.model.formatDurationCompact(480))
         org.junit.Assert.assertEquals("1d 4h", com.pv.thingsbook.domain.model.formatDurationCompact(720))
         org.junit.Assert.assertEquals("2d", com.pv.thingsbook.domain.model.formatDurationCompact(960))
         org.junit.Assert.assertEquals(480, com.pv.thingsbook.domain.model.parseCustomDurationMinutes("1d"))
@@ -235,7 +239,11 @@ class V3Beta7LayoutPolishTest {
             com.pv.thingsbook.domain.model.TimeblockScheduleUtils.formatTimeblockRange(9 * 60, 45)
         )
         org.junit.Assert.assertEquals(
-            "09:00 (1d)",
+            "09:00–13:00 (4h)",
+            com.pv.thingsbook.domain.model.TimeblockScheduleUtils.formatTimeblockRange(9 * 60, 240)
+        )
+        org.junit.Assert.assertEquals(
+            "09:00–17:00 (8h)",
             com.pv.thingsbook.domain.model.TimeblockScheduleUtils.formatTimeblockRange(9 * 60, 480)
         )
         org.junit.Assert.assertEquals(

@@ -63,6 +63,7 @@ export interface BackupPreferencesDto {
   lastWeeklyReviewAt?: number | null;
   tagSortMode?: string | null;
   viewSortMode?: string | null;
+  showPerspectives?: boolean | null;
   savedPerspectivesJson?: string | null;
   savedPerspectives?: SavedPerspective[] | null;
 }
@@ -858,6 +859,7 @@ export interface NormalizedBackupEntities {
     lastWeeklyReviewAt: number;
     tagSortMode: TagSortMode;
     viewSortMode: ViewSortMode;
+    showPerspectives?: boolean;
     savedPerspectives: SavedPerspective[];
   };
 }
@@ -1163,6 +1165,10 @@ export function normalizeBackupPayloadToEntities(
           : 0,
       tagSortMode: normalizeTagSortMode(payload.preferences?.tagSortMode),
       viewSortMode: normalizeViewSortMode(payload.preferences?.viewSortMode),
+      showPerspectives:
+        typeof payload.preferences?.showPerspectives === 'boolean'
+          ? payload.preferences.showPerspectives
+          : undefined,
       savedPerspectives: restoredPerspectives
     }
   };

@@ -1935,7 +1935,7 @@ public struct TimeblockPopoverView: View {
     @State private var customTimeDate: Date
 
     private static let presetStartHours: [Int] = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-    private static let presetDurations: [Int] = [15, 30, 45, 60, 90, 120]
+    private static let presetDurations: [Int] = [15, 30, 45, 60, 90, 120, 240, 480]
 
     public init(
         store: ThingsbookStore,
@@ -2028,7 +2028,7 @@ public struct TimeblockPopoverView: View {
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 4), spacing: 5) {
                 ForEach(Self.presetDurations, id: \.self) { dur in
                     let isSelected = selectedDurationMinutes == dur
                     Button {
@@ -2367,6 +2367,8 @@ public struct PerspectiveEditorSheetView: View {
                         Text("≤ 30m").tag(30)
                         Text("≤ 1h").tag(60)
                         Text("≤ 2h").tag(120)
+                        Text("≤ 4h").tag(240)
+                        Text("≤ 8h").tag(480)
                     }
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)

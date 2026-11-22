@@ -591,7 +591,9 @@ fun PerspectiveEditorDialog(
                                 15 to "≤ 15m",
                                 30 to "≤ 30m",
                                 60 to "≤ 1h",
-                                120 to "≤ 2h"
+                                120 to "≤ 2h",
+                                240 to "≤ 4h",
+                                480 to "≤ 8h"
                             )
                             durationChoices.forEach { (mins, label) ->
                                 PerspectiveFilterChip(

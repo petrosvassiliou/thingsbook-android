@@ -112,12 +112,14 @@ public struct SidebarView: View {
                     }
 
                     // 2.5 Custom Saved Perspectives Soft Bento Card (v3.0 Dynamic Filter Views)
-                    perspectivesSection
+                    if store.showPerspectivesInSidebar {
+                        perspectivesSection
 
-                    // Unconditional structural divider separating dynamic Perspectives from Workspace Areas
-                    Divider()
-                        .padding(.vertical, 3)
-                        .padding(.horizontal, 4)
+                        // Structural divider separating dynamic Perspectives from Workspace Areas
+                        Divider()
+                            .padding(.vertical, 3)
+                            .padding(.horizontal, 4)
+                    }
 
                     // 3. Areas -> Nested Projects Hierarchy with Explicit Section Header
                     VStack(alignment: .leading, spacing: 6) {

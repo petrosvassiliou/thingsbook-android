@@ -1675,7 +1675,7 @@ object TimeblockScheduleUtils {
         17 * 60
     )
 
-    val DURATION_PRESETS_MINUTES: List<Int> = listOf(15, 30, 45, 60, 90, 120)
+    val DURATION_PRESETS_MINUTES: List<Int> = listOf(15, 30, 45, 60, 90, 120, 240, 480)
 
     fun formatMinutesAsHm(minutesFromMidnight: Int): String {
         val clamped = ((minutesFromMidnight % 1440) + 1440) % 1440
@@ -1688,7 +1688,7 @@ object TimeblockScheduleUtils {
         val dur = (durationMinutes ?: DEFAULT_TIMEBLOCK_DURATION_MINUTES).coerceIn(1, MAX_TASK_DURATION_MINUTES)
         val startStr = formatMinutesAsHm(startMinutes)
         val compactDur = formatDurationCompact(dur)
-        if (dur >= 480) {
+        if (dur > 480) {
             return "$startStr ($compactDur)"
         }
         val endTotal = startMinutes + dur

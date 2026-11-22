@@ -409,17 +409,18 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.17")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.17")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 108)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.0-beta.18")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.0-beta.18")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 109)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.17", current: "2.5.0", includeBeta: false))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.17", current: "2.5.0", includeBeta: true))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.17", current: "3.0.0-beta.16"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.17"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.17"))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.18", current: "2.5.0", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.18", current: "2.5.0", includeBeta: true))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.18", current: "3.0.0-beta.17"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-rc.1", current: "3.0.0-beta.18"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0", current: "3.0.0-beta.18"))
         XCTAssertTrue(TaskItem.standaloneDurationPresets.contains(480))
-        XCTAssertEqual(TaskItem.formatCompactDuration(480), "1d")
+        XCTAssertEqual(TaskItem.formatCompactDuration(240), "4h")
+        XCTAssertEqual(TaskItem.formatCompactDuration(480), "8h")
         XCTAssertEqual(TaskItem.formatCompactDuration(720), "1d 4h")
         XCTAssertEqual(TaskItem.formatCompactDuration(960), "2d")
         XCTAssertEqual(TaskItem.parseCustomDurationMinutes("1d"), 480)
@@ -5074,7 +5075,7 @@ final class ThingsbookCoreTests: XCTestCase {
             createdAt: 1,
             updatedAt: 1
         )
-        XCTAssertEqual(pill1d.formattedTimeblockPill, "09:00 · 1d")
+        XCTAssertEqual(pill1d.formattedTimeblockPill, "09:00 · 8h")
 
         let pill2d = TaskItem(
             id: "p-960",
@@ -5601,6 +5602,81 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .fr), "Aperçu")
         XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .it), "Panoramica")
         XCTAssertEqual(strings.text("v30_inspector_overview_title", lang: .es), "Resumen")
+    }
+
+    // MARK: - v3.0.0-beta.18 Sidebar Perspectives Settings & 4h / 8h Effort Durations
+
+    func testV30Beta18PerspectivesSettingsLocalizationAndEffortDurations() {
+        let strings = ThingsStrings.shared
+        let perspectiveSettingsKeys = [
+            "v30_settings_show_perspectives",
+            "v30_settings_show_perspectives_desc"
+        ]
+
+        let explicitLanguages: [AppLanguage] = [.en, .de, .fr, .it, .es]
+        for lang in explicitLanguages {
+            let langKeys = strings.keys(for: lang.rawValue)
+            for key in perspectiveSettingsKeys {
+                XCTAssertTrue(langKeys.contains(key), "Missing \(key) in \(lang.rawValue) table")
+                let resolved = strings.text(key, lang: lang)
+                XCTAssertFalse(resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Empty value for \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(resolved, key, "Key \(key) leaked raw identifier in \(lang.rawValue)")
+            }
+        }
+
+        for lang in AppLanguage.allCases {
+            for key in perspectiveSettingsKeys {
+                let resolved = strings.text(key, lang: lang)
+                XCTAssertFalse(resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Empty value for \(key) in \(lang.rawValue)")
+                XCTAssertNotEqual(resolved, key, "Key \(key) leaked raw identifier in \(lang.rawValue)")
+            }
+        }
+
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives", lang: .en), "Show Custom Perspectives in Sidebar")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives", lang: .de), "Eigene Perspektiven in der Seitenleiste anzeigen")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives", lang: .fr), "Afficher les perspectives personnalisées dans la barre latérale")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives", lang: .it), "Mostra prospettive personalizzate nella barra laterale")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives", lang: .es), "Mostrar perspectivas personalizadas en la barra lateral")
+
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives_desc", lang: .en), "Adds a saved-filters section to the sidebar for custom multi-criteria views")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives_desc", lang: .de), "Fügt der Seitenleiste einen Bereich für gespeicherte Mehrfachfilter hinzu")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives_desc", lang: .fr), "Ajoute une section de filtres enregistrés à la barre latérale")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives_desc", lang: .it), "Aggiunge una sezione di filtri salvati alla barra laterale")
+        XCTAssertEqual(strings.text("v30_settings_show_perspectives_desc", lang: .es), "Añade una sección de filtros guardados a la barra lateral")
+
+        // Verify standalone duration presets & compact formatting for 4h (240m), 8h (480m), and multi-day (> 480m)
+        XCTAssertEqual(TaskItem.standaloneDurationPresets, [5, 15, 30, 60, 120, 240, 480])
+        XCTAssertEqual(TaskItem.formatCompactDuration(240), "4h")
+        XCTAssertEqual(TaskItem.formatCompactDuration(480), "8h")
+        XCTAssertEqual(TaskItem.formatCompactDuration(720), "1d 4h")
+        XCTAssertEqual(TaskItem.formatCompactDuration(960), "2d")
+        XCTAssertEqual(TaskItem.formatCompactDuration(2400), "5d")
+
+        // Verify PerspectiveFilterEngine maxDurationMinutes supports <= 4h (240m) and <= 8h (480m)
+        let tasks = [
+            TaskItem(id: "t-2h", title: "2h Task", durationMinutes: 120, createdAt: 1, updatedAt: 1),
+            TaskItem(id: "t-4h", title: "4h Task", durationMinutes: 240, createdAt: 1, updatedAt: 1),
+            TaskItem(id: "t-8h", title: "8h Task", durationMinutes: 480, createdAt: 1, updatedAt: 1),
+            TaskItem(id: "t-2d", title: "2d Task", durationMinutes: 960, createdAt: 1, updatedAt: 1)
+        ]
+        let p4h = SavedPerspective(id: "p-4h", title: "Half Day", maxDurationMinutes: 240)
+        let p8h = SavedPerspective(id: "p-8h", title: "Full Day", maxDurationMinutes: 480)
+        let matched4h = PerspectiveFilterEngine.filter(
+            tasks: tasks,
+            perspective: p4h,
+            openTaskIds: Set(tasks.map(\.id)),
+            todayEpochMillis: 1_795_046_400_000,
+            projectsById: [:]
+        )
+        let matched8h = PerspectiveFilterEngine.filter(
+            tasks: tasks,
+            perspective: p8h,
+            openTaskIds: Set(tasks.map(\.id)),
+            todayEpochMillis: 1_795_046_400_000,
+            projectsById: [:]
+        )
+        XCTAssertEqual(matched4h.map(\.id), ["t-2h", "t-4h"])
+        XCTAssertEqual(matched8h.map(\.id), ["t-2h", "t-4h", "t-8h"])
     }
 }
 

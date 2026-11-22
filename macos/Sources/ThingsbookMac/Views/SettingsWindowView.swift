@@ -220,6 +220,28 @@ public struct SettingsWindowView: View {
 
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
+                            Text(store.tr("v30_settings_show_perspectives"))
+                                .font(.system(size: 13.5, weight: .medium))
+                            Text(store.tr("v30_settings_show_perspectives_desc"))
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { store.showPerspectivesInSidebar },
+                                set: { store.setShowPerspectivesInSidebar($0) }
+                            )
+                        )
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                    }
+
+                    Divider()
+
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(store.tr("macos_touch_id_title"))
                                 .font(.system(size: 13.5, weight: .medium))
                             Text(store.tr("macos_touch_id_desc"))

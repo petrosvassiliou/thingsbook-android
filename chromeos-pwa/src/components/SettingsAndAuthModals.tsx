@@ -24,6 +24,7 @@ import {
 import {
   APP_BUILD_CODE,
   APP_VERSION,
+  resolveEffectiveShowPerspectives,
   type AppPreferences,
   type DeviceCalendarInfo,
   type SupportedLang,
@@ -336,6 +337,11 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
             p.savedPerspectivesJson ?? p.savedPerspectives
           );
         }
+        if (typeof p.showPerspectives === 'boolean') {
+          restoredPatch.showPerspectives = p.showPerspectives;
+        } else if (restoredPatch.savedPerspectives !== undefined) {
+          restoredPatch.showPerspectives = undefined;
+        }
         onRestoredPrefs(restoredPatch);
       }
 
@@ -538,6 +544,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [connectingGcal, setConnectingGcal] = useState(false);
   const isBetaBuild = isPrereleaseVersion(APP_VERSION);
   const effectiveIncludeBeta = Boolean(prefs.includeBetaUpdates) || isBetaBuild;
+  const effectiveShowPerspectives = resolveEffectiveShowPerspectives(prefs);
 
   const backupInputRef = useRef<HTMLInputElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
@@ -872,6 +879,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className={`toggle-switch ${prefs.groupTodayByProjectOrArea ? 'on' : ''}`}
                 onClick={() =>
                   onUpdatePrefs({ groupTodayByProjectOrArea: !prefs.groupTodayByProjectOrArea })
+                }
+              >
+                <span className="toggle-switch-knob" />
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                paddingTop: 10,
+                paddingBottom: 10,
+                borderBottom: '1px solid var(--border-subtle)'
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.3, fontWeight: 600 }}>
+                  {t.settingsShowPerspectives}
+                </div>
+                <div style={{ fontSize: 11.8, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t.settingsShowPerspectivesDesc}
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="settings-show-perspectives-toggle"
+                aria-label={t.settingsShowPerspectives}
+                aria-pressed={effectiveShowPerspectives}
+                className={`toggle-switch ${effectiveShowPerspectives ? 'on' : ''}`}
+                onClick={() =>
+                  onUpdatePrefs({ showPerspectives: !effectiveShowPerspectives })
                 }
               >
                 <span className="toggle-switch-knob" />

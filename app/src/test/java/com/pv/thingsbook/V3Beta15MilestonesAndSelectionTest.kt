@@ -235,4 +235,71 @@ class V3Beta15MilestonesAndSelectionTest {
         assertTrue(smartViewKt.contains("end = if (showInspectorPane) 24.dp + 353.dp else 24.dp"))
         assertTrue(smartViewKt.contains("R.string.v30_inspector_toggle_tooltip"))
     }
+
+    @Test
+    fun `v3_0_0_beta_18 perspectives sidebar setting strings in all 5 locales, hidden_by_default toggle wiring, and 4h_8h effort durations work cleanly`() {
+        val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
+        val resRoot = File(appSrcMain, "res")
+
+        // 1. Verify v30_settings_show_perspectives and v30_settings_show_perspectives_desc across all 5 values* folders
+        val expectedPerspectivesSettingStrings = mapOf(
+            "values" to mapOf(
+                "v30_settings_show_perspectives" to "Show Custom Perspectives in Sidebar",
+                "v30_settings_show_perspectives_desc" to "Adds a saved-filters section to the sidebar for custom multi-criteria views"
+            ),
+            "values-de" to mapOf(
+                "v30_settings_show_perspectives" to "Eigene Perspektiven in der Seitenleiste anzeigen",
+                "v30_settings_show_perspectives_desc" to "Fügt der Seitenleiste einen Bereich für gespeicherte Mehrfachfilter hinzu"
+            ),
+            "values-fr" to mapOf(
+                "v30_settings_show_perspectives" to "Afficher les perspectives personnalisées dans la barre latérale",
+                "v30_settings_show_perspectives_desc" to "Ajoute une section de filtres enregistrés à la barre latérale"
+            ),
+            "values-it" to mapOf(
+                "v30_settings_show_perspectives" to "Mostra prospettive personalizzate nella barra laterale",
+                "v30_settings_show_perspectives_desc" to "Aggiunge una sezione di filtri salvati alla barra laterale"
+            ),
+            "values-es" to mapOf(
+                "v30_settings_show_perspectives" to "Mostrar perspectivas personalizadas en la barra lateral",
+                "v30_settings_show_perspectives_desc" to "Añade una sección de filtros guardados a la barra lateral"
+            )
+        )
+
+        val dbf = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+        for ((folder, expectedKeys) in expectedPerspectivesSettingStrings) {
+            val xmlFile = File(resRoot, "$folder/strings.xml")
+            assertTrue("Missing $folder/strings.xml", xmlFile.isFile)
+            val doc = dbf.newDocumentBuilder().parse(xmlFile)
+            val nodes = doc.getElementsByTagName("string")
+            val parsed = mutableMapOf<String, String>()
+            for (i in 0 until nodes.length) {
+                val elem = nodes.item(i)
+                val name = elem.attributes?.getNamedItem("name")?.nodeValue ?: continue
+                parsed[name] = elem.textContent.orEmpty()
+            }
+            for ((key, expectedVal) in expectedKeys) {
+                val actualVal = parsed[key]
+                assertTrue("Missing '$key' in $folder/strings.xml", actualVal != null && actualVal.isNotBlank())
+                assertEquals("Mismatch for '$key' in $folder/strings.xml", expectedVal, actualVal)
+            }
+        }
+
+        // 2. Verify STANDALONE_DURATION_PRESETS contains 240 & 480 and formats 240 -> "4h" and 480 -> "8h"
+        val presets = com.pv.thingsbook.domain.model.STANDALONE_DURATION_PRESETS
+        assertEquals(listOf(5, 15, 30, 60, 120, 240, 480), presets)
+        assertEquals("4h", com.pv.thingsbook.domain.model.formatDurationCompact(240))
+        assertEquals("8h", com.pv.thingsbook.domain.model.formatDurationCompact(480))
+        assertEquals("1d 4h", com.pv.thingsbook.domain.model.formatDurationCompact(720))
+        assertEquals("5d", com.pv.thingsbook.domain.model.formatDurationCompact(2400))
+
+        // 3. Verify ViewModel, Settings Modal, and Sidebar Perspectives gating
+        val viewModelKt = File(appSrcMain, "java/com/pv/thingsbook/ui/viewmodel/ThingsbookViewModel.kt").readText()
+        assertTrue(viewModelKt.contains("val showPerspectivesInSidebar: StateFlow<Boolean>"))
+        assertTrue(viewModelKt.contains("fun setShowPerspectivesInSidebar(enabled: Boolean)"))
+        assertTrue(viewModelKt.contains("settingsPrefs.contains(\"show_perspectives_in_sidebar\")"))
+
+        val settingsKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsSettingsModal.kt").readText()
+        assertTrue(settingsKt.contains("R.string.v30_settings_show_perspectives"))
+        assertTrue(settingsKt.contains("R.string.v30_settings_show_perspectives_desc"))
+    }
 }

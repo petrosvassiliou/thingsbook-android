@@ -326,6 +326,25 @@ class ThingsbookViewModel @Inject constructor(
     )
     val savedPerspectives: StateFlow<List<SavedPerspective>> = _savedPerspectives.asStateFlow()
 
+    private val _showPerspectivesInSidebar = MutableStateFlow(
+        if (settingsPrefs.contains("show_perspectives_in_sidebar")) {
+            settingsPrefs.getBoolean("show_perspectives_in_sidebar", false)
+        } else {
+            _savedPerspectives.value.isNotEmpty()
+        }
+    )
+    val showPerspectivesInSidebar: StateFlow<Boolean> = _showPerspectivesInSidebar.asStateFlow()
+
+    fun setShowPerspectivesInSidebar(enabled: Boolean) {
+        _showPerspectivesInSidebar.value = enabled
+        runCatching {
+            settingsPrefs.edit().putBoolean("show_perspectives_in_sidebar", enabled).apply()
+        }
+        if (!enabled && _navigationTarget.value is ActiveNavigationTarget.PerspectiveDetail) {
+            selectSmartView(SmartViewType.TODAY)
+        }
+    }
+
     private fun persistSavedPerspectives(list: List<SavedPerspective>) {
         val sorted = list
             .filter { it.id.isNotBlank() && it.title.isNotBlank() }
@@ -344,6 +363,9 @@ class ThingsbookViewModel @Inject constructor(
     private fun restoreSavedPerspectivesFromJson(raw: String) {
         val parsed = decodeSavedPerspectives(raw)
         persistSavedPerspectives(parsed)
+        if (parsed.isNotEmpty() && !settingsPrefs.contains("show_perspectives_in_sidebar")) {
+            _showPerspectivesInSidebar.value = true
+        }
     }
 
     // Tag Filter & Tag Management Modal States
@@ -718,6 +740,7 @@ class ThingsbookViewModel @Inject constructor(
         )
         val updated = existingList.filterNot { it.id == resolvedId } + cleanPerspective
         persistSavedPerspectives(updated)
+        setShowPerspectivesInSidebar(true)
         _expandedTaskId.value = null
         _isTimelineFullScreen.value = false
         clearTaskSelection()

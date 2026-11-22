@@ -1445,23 +1445,26 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     <div className="v2-timeblock-row" style={{ marginTop: 8 }}>
                       <span className="v2-timeblock-label">{t.timeblockDuration}</span>
                       <div className="v2-timeblock-slots">
-                        {TIMEBLOCK_DURATION_PRESETS.map((dur) => (
-                          <button
-                            key={dur}
-                            type="button"
-                            className={`chip-btn ${currentDuration === dur ? 'active' : ''}`}
-                            title={`${t.timeblockDuration}: ${dur}m`}
-                            onClick={() =>
-                              void localDb.upsertTask({
-                                id: task.id,
-                                scheduledStartMinutes: task.scheduledStartMinutes ?? 9 * 60,
-                                durationMinutes: dur
-                              })
-                            }
-                          >
-                            {dur}m
-                          </button>
-                        ))}
+                        {TIMEBLOCK_DURATION_PRESETS.map((dur) => {
+                          const label = formatStandaloneDuration(dur);
+                          return (
+                            <button
+                              key={dur}
+                              type="button"
+                              className={`chip-btn ${currentDuration === dur ? 'active' : ''}`}
+                              title={`${t.timeblockDuration}: ${label}`}
+                              onClick={() =>
+                                void localDb.upsertTask({
+                                  id: task.id,
+                                  scheduledStartMinutes: task.scheduledStartMinutes ?? 9 * 60,
+                                  durationMinutes: dur
+                                })
+                              }
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
                       </div>
 
                       {task.scheduledStartMinutes != null && (
@@ -2427,7 +2430,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                                   });
                                 }}
                               >
-                                {dur}m
+                                {formatStandaloneDuration(dur)}
                               </button>
                             ))}
                             <button

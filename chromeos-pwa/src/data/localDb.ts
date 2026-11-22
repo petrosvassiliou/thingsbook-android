@@ -189,6 +189,8 @@ export function loadPreferences(): AppPreferences {
     return {
       ...DEFAULT_PREFS,
       ...(parsed as Partial<AppPreferences>),
+      showPerspectives:
+        typeof parsed?.showPerspectives === 'boolean' ? parsed.showPerspectives : undefined,
       tagSortMode: normalizeTagSortMode(parsed?.tagSortMode),
       viewSortMode: normalizeViewSortMode(parsed?.viewSortMode),
       savedPerspectives: safeParseSavedPerspectives(parsed?.savedPerspectives)
@@ -200,6 +202,12 @@ export function loadPreferences(): AppPreferences {
 
 export function savePreferences(prefs: AppPreferences): void {
   localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(prefs));
+}
+
+export function updatePreferences(patch: Partial<AppPreferences>): AppPreferences {
+  const next: AppPreferences = { ...loadPreferences(), ...patch };
+  savePreferences(next);
+  return next;
 }
 
 export type UndoEventKind =
@@ -265,6 +273,10 @@ export class ThingsLocalDb {
       () => undefined
     );
     return next;
+  }
+
+  updatePreferences(patch: Partial<AppPreferences>): AppPreferences {
+    return updatePreferences(patch);
   }
 
   setSyncTrigger(cb: (immediate?: boolean) => void) {
@@ -4418,6 +4430,9 @@ export class ThingsLocalDb {
         lastWeeklyReviewAt: prefs.lastWeeklyReviewAt || 0,
         tagSortMode: prefs.tagSortMode ?? 'alpha',
         viewSortMode: prefs.viewSortMode ?? 'manual',
+        ...(typeof prefs.showPerspectives === 'boolean'
+          ? { showPerspectives: prefs.showPerspectives }
+          : {}),
         savedPerspectivesJson: JSON.stringify(prefs.savedPerspectives ?? [])
       },
       appVersionName: `${APP_VERSION}-chromeos`

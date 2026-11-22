@@ -5,17 +5,19 @@ import path from 'node:path';
 import type { IDBPDatabase } from 'idb';
 import {
   STANDALONE_DURATION_PRESETS,
+  TIMEBLOCK_DURATION_PRESETS,
   buildDailyTimeline,
   formatStandaloneDuration,
   formatTimeblockRange,
   parseCustomDurationMinutes,
   parseProjectOutlineInput
 } from '../src/domain/v2Utils.ts';
+import { resolveEffectiveShowPerspectives } from '../src/domain/types.ts';
 import {
   buildProjectRoadmapLayout,
   generateRoadmapPdfBytes
 } from '../src/domain/v30Roadmap.ts';
-import { ThingsLocalDb } from '../src/data/localDb.ts';
+import { DEFAULT_PREFS, ThingsLocalDb } from '../src/data/localDb.ts';
 import { TRANSLATIONS } from '../src/i18n/translations.ts';
 
 const SRC_DIR = path.resolve(import.meta.dirname, '../src');
@@ -188,9 +190,13 @@ test('v3.0.0-beta.13 subtle pill hover, 1-day & custom durations, 0ms macOS task
   assert.ok(pillHoverCss.includes('border-color: rgba(56, 152, 236, 0.38);'));
   assert.ok(!pillHoverCss.includes('padding'));
 
-  // 2. 1-day (480m) preset + multi-day formatting + custom duration parser & input
+  // 2. 4h (240m) & 8h (480m) presets + multi-day formatting + custom duration parser & input
+  assert.ok(STANDALONE_DURATION_PRESETS.includes(240));
   assert.ok(STANDALONE_DURATION_PRESETS.includes(480));
-  assert.equal(formatStandaloneDuration(480), '1d');
+  assert.ok(TIMEBLOCK_DURATION_PRESETS.includes(240));
+  assert.ok(TIMEBLOCK_DURATION_PRESETS.includes(480));
+  assert.equal(formatStandaloneDuration(240), '4h');
+  assert.equal(formatStandaloneDuration(480), '8h');
   assert.equal(formatStandaloneDuration(720), '1d 4h');
   assert.equal(formatStandaloneDuration(960), '2d');
   assert.equal(parseCustomDurationMinutes('1d'), 480);
@@ -203,6 +209,65 @@ test('v3.0.0-beta.13 subtle pill hover, 1-day & custom durations, 0ms macOS task
   assert.equal(parseCustomDurationMinutes('45'), 45);
   assert.equal(parseCustomDurationMinutes('invalid'), null);
   assert.ok(taskItemSrc.includes('data-testid="task-custom-duration-input"'));
+
+  // 2b. Option 1: Hide Perspectives in Sidebar by default unless enabled in Settings or already used
+  assert.equal(resolveEffectiveShowPerspectives(DEFAULT_PREFS), false);
+  assert.equal(
+    resolveEffectiveShowPerspectives({ showPerspectives: undefined, savedPerspectives: [] }),
+    false
+  );
+  assert.equal(
+    resolveEffectiveShowPerspectives({
+      showPerspectives: undefined,
+      savedPerspectives: [
+        {
+          id: 'p1',
+          title: 'Sprint',
+          categoryIds: [],
+          effortLevel: null,
+          maxDurationMinutes: 240,
+          dueWindow: 'ANY',
+          areaId: null,
+          actionableOnly: true,
+          sortOrder: 1000
+        }
+      ]
+    }),
+    true
+  );
+  assert.equal(
+    resolveEffectiveShowPerspectives({ showPerspectives: true, savedPerspectives: [] }),
+    true
+  );
+  assert.equal(
+    resolveEffectiveShowPerspectives({
+      showPerspectives: false,
+      savedPerspectives: [
+        {
+          id: 'p1',
+          title: 'Sprint',
+          categoryIds: [],
+          effortLevel: null,
+          maxDurationMinutes: 480,
+          dueWindow: 'ANY',
+          areaId: null,
+          actionableOnly: true,
+          sortOrder: 1000
+        }
+      ]
+    }),
+    false
+  );
+  for (const code of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    assert.ok(
+      TRANSLATIONS[code].settingsShowPerspectives.length > 0,
+      `Missing settingsShowPerspectives for ${code}`
+    );
+    assert.ok(
+      TRANSLATIONS[code].settingsShowPerspectivesDesc.length > 0,
+      `Missing settingsShowPerspectivesDesc for ${code}`
+    );
+  }
 
   // 3. macOS 0ms instant task selection (zero TapGesture(count: 2) disambiguation delay)
   const macRowSwift = fs.readFileSync(
@@ -463,8 +528,9 @@ Modernize landing pages.
   // Localization checks
   assert.equal(TRANSLATIONS.fr.repeatClearBtn, 'Désactivé');
   assert.equal(TRANSLATIONS.it.repeatClearBtn, 'Disattivo');
-  assert.equal(TRANSLATIONS.en.actionFocusTimerMinutes(480), 'Start Focus Timer (1d)');
-  assert.equal(TRANSLATIONS.de.actionFocusTimerMinutes(480), 'Fokus-Timer starten (1d)');
+  assert.equal(TRANSLATIONS.en.actionFocusTimerMinutes(480), 'Start Focus Timer (8h)');
+  assert.equal(TRANSLATIONS.de.actionFocusTimerMinutes(480), 'Fokus-Timer starten (8h)');
+  assert.equal(TRANSLATIONS.en.actionFocusTimerMinutes(720), 'Start Focus Timer (1d 4h)');
   assert.equal(TRANSLATIONS.de.actionFocusTimerMinutes(25), 'Fokus-Timer starten (25m)');
 
   // Localized German Roadmap PDF header

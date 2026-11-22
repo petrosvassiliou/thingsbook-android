@@ -2166,7 +2166,7 @@ fun ThingsTimeblockPickerDialog(
                     TimeblockScheduleUtils.DURATION_PRESETS_MINUTES.forEach { durMins ->
                         val active = selectedDuration == durMins
                         QuickReviewChip(
-                            label = "${durMins}m",
+                            label = formatDurationCompact(durMins),
                             bg = if (active) colors.thingsBlue else colors.tagPillBg,
                             fg = if (active) Color.White else colors.primaryText
                         ) {

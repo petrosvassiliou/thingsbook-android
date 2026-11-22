@@ -603,4 +603,6 @@
     <string name="v30_inspector_overview_title">Aperçu</string>
     <string name="v30_inspector_upcoming_deadlines">Échéances &amp; jalons à venir</string>
     <string name="v30_inspector_toggle_tooltip">Afficher/masquer le panneau Inspecteur</string>
+    <string name="v30_settings_show_perspectives">Afficher les perspectives personnalisées dans la barre latérale</string>
+    <string name="v30_settings_show_perspectives_desc">Ajoute une section de filtres enregistrés à la barre latérale</string>
 </resources>

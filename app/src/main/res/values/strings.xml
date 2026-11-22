@@ -603,4 +603,6 @@
     <string name="v30_inspector_overview_title">Overview</string>
     <string name="v30_inspector_upcoming_deadlines">Upcoming Deadlines &amp; Milestones</string>
     <string name="v30_inspector_toggle_tooltip">Toggle Inspector Panel</string>
+    <string name="v30_settings_show_perspectives">Show Custom Perspectives in Sidebar</string>
+    <string name="v30_settings_show_perspectives_desc">Adds a saved-filters section to the sidebar for custom multi-criteria views</string>
 </resources>

@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.0.0-beta.17';
-export const APP_BUILD_CODE = 108;
+export const APP_VERSION = '3.0.0-beta.18';
+export const APP_BUILD_CODE = 109;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -266,10 +266,20 @@ export interface AppPreferences {
   appLockWebAuthnCredId: string;
   tagSortMode?: TagSortMode;
   viewSortMode?: ViewSortMode;
+  showPerspectives?: boolean;
   savedPerspectives?: SavedPerspective[];
 }
 
 export type AppSettings = AppPreferences;
+export type UserPreferences = AppPreferences;
+
+export function resolveEffectiveShowPerspectives(
+  prefs: Pick<AppPreferences, 'showPerspectives' | 'savedPerspectives'>
+): boolean {
+  return prefs.showPerspectives !== undefined
+    ? prefs.showPerspectives
+    : (prefs.savedPerspectives?.length ?? 0) > 0;
+}
 
 export interface QuickShareDraft {
   initialTitle: string;

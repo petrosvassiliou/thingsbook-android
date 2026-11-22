@@ -50,6 +50,7 @@ import {
   computeUpcomingTargetDate,
   daysBetweenToday,
   endOfDayEpoch,
+  resolveEffectiveShowPerspectives,
   startOfDayEpoch,
   type ActiveNavigation,
   type AppPreferences,
@@ -1026,6 +1027,14 @@ export const App: React.FC = () => {
       ),
     [prefs.savedPerspectives]
   );
+  const effectiveShowPerspectives = useMemo(
+    () =>
+      resolveEffectiveShowPerspectives({
+        showPerspectives: prefs.showPerspectives,
+        savedPerspectives
+      }),
+    [prefs.showPerspectives, savedPerspectives]
+  );
 
   const tasksByIdMap = useMemo(
     () => new Map(snapshot.tasks.filter((tk) => !tk.isDeleted).map((tk) => [tk.id, tk])),
@@ -1078,11 +1087,12 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (
       activeNav.kind === 'perspective' &&
-      !savedPerspectives.some((p) => p.id === activeNav.perspectiveId)
+      (!effectiveShowPerspectives ||
+        !savedPerspectives.some((p) => p.id === activeNav.perspectiveId))
     ) {
       setActiveNav({ kind: 'smart', view: 'TODAY' });
     }
-  }, [activeNav, savedPerspectives]);
+  }, [activeNav, effectiveShowPerspectives, savedPerspectives]);
 
   // ==================== Calendar Integration State & Refresh (Android v1.6.21–v1.6.23 Parity) ====================
   const [hasCalendarPermission, setHasCalendarPermission] = useState<boolean>(() =>
@@ -2953,6 +2963,7 @@ export const App: React.FC = () => {
         selectedTaskIds={selectedTaskIds}
         orderedVisibleTaskIds={orderedVisibleTaskIds}
         counts={sidebarCounts}
+        showPerspectives={effectiveShowPerspectives}
         savedPerspectives={savedPerspectives}
         perspectiveCounts={perspectiveCounts}
         stalledProjectsCount={stalledProjects.length}
@@ -5869,7 +5880,7 @@ export const App: React.FC = () => {
             const nextList = exists
               ? savedPerspectives.map((p) => (p.id === saved.id ? saved : p))
               : [...savedPerspectives, saved];
-            updatePrefs({ savedPerspectives: nextList });
+            updatePrefs({ savedPerspectives: nextList, showPerspectives: true });
             setPerspectiveModalState({ open: false, perspective: null });
             handleSelectNav({ kind: 'perspective', perspectiveId: saved.id });
             showToast(`✓ ${saved.title}`);

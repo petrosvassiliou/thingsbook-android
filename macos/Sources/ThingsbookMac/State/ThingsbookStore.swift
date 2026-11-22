@@ -98,6 +98,21 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public static let showPerspectivesDefaultsKey = "thingsbook.macos.showPerspectives"
+    @Published public var showPerspectivesInSidebar: Bool {
+        didSet {
+            UserDefaults.standard.set(showPerspectivesInSidebar, forKey: Self.showPerspectivesDefaultsKey)
+        }
+    }
+
+    public func setShowPerspectivesInSidebar(_ visible: Bool) {
+        showPerspectivesInSidebar = visible
+        UserDefaults.standard.set(visible, forKey: Self.showPerspectivesDefaultsKey)
+        if !visible, case .perspective = selectedDestination {
+            selectedDestination = .smartView(.today)
+        }
+    }
+
     @Published public var inboxTasks: [TaskItem] = []
     @Published public var todayDaytimeTasks: [TaskItem] = []
     @Published public var thisEveningTasks: [TaskItem] = []
@@ -211,6 +226,11 @@ public final class ThingsbookStore: ObservableObject {
     public init(databasePath: String? = nil) {
         let prefs = AppPreferences.load()
         self.preferences = prefs
+        if let explicitShowPerspectives = UserDefaults.standard.object(forKey: Self.showPerspectivesDefaultsKey) as? Bool {
+            self.showPerspectivesInSidebar = explicitShowPerspectives
+        } else {
+            self.showPerspectivesInSidebar = !prefs.savedPerspectives.isEmpty
+        }
         let db = (try? ThingsSQLiteDatabase(path: databasePath)) ?? (try! ThingsSQLiteDatabase(path: ":memory:"))
         self.database = db
         self.cloudSync = FirebaseCloudSyncService(database: db)
@@ -482,6 +502,7 @@ public final class ThingsbookStore: ObservableObject {
             next.append(copy)
         }
         preferences.savedPerspectives = next
+        showPerspectivesInSidebar = true
         editingPerspective = nil
         isPerspectiveEditorPresented = false
         selectedDestination = .perspective(copy.id)
@@ -2285,6 +2306,10 @@ public final class ThingsbookStore: ObservableObject {
                let pData = rawPerspJson.data(using: .utf8),
                let decodedPerspectives = try? JSONDecoder().decode([SavedPerspective].self, from: pData) {
                 prefs.savedPerspectives = decodedPerspectives
+                if !decodedPerspectives.isEmpty,
+                   UserDefaults.standard.object(forKey: Self.showPerspectivesDefaultsKey) == nil {
+                    showPerspectivesInSidebar = true
+                }
             }
             if let tag = payload.preferences.languageTag {
                 prefs.language = tag.isEmpty ? .system : (AppLanguage(rawValue: tag) ?? .system)

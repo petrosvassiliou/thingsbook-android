@@ -117,31 +117,41 @@ public final class ThingsStrings: @unchecked Sendable {
             "v30_inspector_title": "Inspector",
             "v30_inspector_overview_title": "Overview",
             "v30_inspector_upcoming_deadlines": "Upcoming Deadlines & Milestones",
-            "v30_inspector_toggle_tooltip": "Toggle Inspector Panel"
+            "v30_inspector_toggle_tooltip": "Toggle Inspector Panel",
+            "v30_settings_show_perspectives": "Show Custom Perspectives in Sidebar",
+            "v30_settings_show_perspectives_desc": "Adds a saved-filters section to the sidebar for custom multi-criteria views"
         ],
         "de": [
             "v30_inspector_title": "Inspektor",
             "v30_inspector_overview_title": "Übersicht",
             "v30_inspector_upcoming_deadlines": "Anstehende Fristen & Meilensteine",
-            "v30_inspector_toggle_tooltip": "Inspektor-Seitenleiste ein-/ausblenden"
+            "v30_inspector_toggle_tooltip": "Inspektor-Seitenleiste ein-/ausblenden",
+            "v30_settings_show_perspectives": "Eigene Perspektiven in der Seitenleiste anzeigen",
+            "v30_settings_show_perspectives_desc": "Fügt der Seitenleiste einen Bereich für gespeicherte Mehrfachfilter hinzu"
         ],
         "fr": [
             "v30_inspector_title": "Inspecteur",
             "v30_inspector_overview_title": "Aperçu",
             "v30_inspector_upcoming_deadlines": "Échéances & jalons à venir",
-            "v30_inspector_toggle_tooltip": "Afficher/masquer le panneau Inspecteur"
+            "v30_inspector_toggle_tooltip": "Afficher/masquer le panneau Inspecteur",
+            "v30_settings_show_perspectives": "Afficher les perspectives personnalisées dans la barre latérale",
+            "v30_settings_show_perspectives_desc": "Ajoute une section de filtres enregistrés à la barre latérale"
         ],
         "it": [
             "v30_inspector_title": "Ispettore",
             "v30_inspector_overview_title": "Panoramica",
             "v30_inspector_upcoming_deadlines": "Scadenze e traguardi imminenti",
-            "v30_inspector_toggle_tooltip": "Mostra/nascondi pannello Ispettore"
+            "v30_inspector_toggle_tooltip": "Mostra/nascondi pannello Ispettore",
+            "v30_settings_show_perspectives": "Mostra prospettive personalizzate nella barra laterale",
+            "v30_settings_show_perspectives_desc": "Aggiunge una sezione di filtri salvati alla barra laterale"
         ],
         "es": [
             "v30_inspector_title": "Inspector",
             "v30_inspector_overview_title": "Resumen",
             "v30_inspector_upcoming_deadlines": "Próximas fechas límite e hitos",
-            "v30_inspector_toggle_tooltip": "Mostrar/ocultar panel Inspector"
+            "v30_inspector_toggle_tooltip": "Mostrar/ocultar panel Inspector",
+            "v30_settings_show_perspectives": "Mostrar perspectivas personalizadas en la barra lateral",
+            "v30_settings_show_perspectives_desc": "Añade una sección de filtros guardados a la barra lateral"
         ]
     ]
 

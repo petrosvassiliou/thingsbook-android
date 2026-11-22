@@ -603,4 +603,6 @@
     <string name="v30_inspector_overview_title">Resumen</string>
     <string name="v30_inspector_upcoming_deadlines">Próximas fechas límite e hitos</string>
     <string name="v30_inspector_toggle_tooltip">Mostrar/ocultar panel Inspector</string>
+    <string name="v30_settings_show_perspectives">Mostrar perspectivas personalizadas en la barra lateral</string>
+    <string name="v30_settings_show_perspectives_desc">Añade una sección de filtros guardados a la barra lateral</string>
 </resources>

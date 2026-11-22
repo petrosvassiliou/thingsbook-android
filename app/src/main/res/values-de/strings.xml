@@ -603,4 +603,6 @@
     <string name="v30_inspector_overview_title">Übersicht</string>
     <string name="v30_inspector_upcoming_deadlines">Anstehende Fristen &amp; Meilensteine</string>
     <string name="v30_inspector_toggle_tooltip">Inspektor-Seitenleiste ein-/ausblenden</string>
+    <string name="v30_settings_show_perspectives">Eigene Perspektiven in der Seitenleiste anzeigen</string>
+    <string name="v30_settings_show_perspectives_desc">Fügt der Seitenleiste einen Bereich für gespeicherte Mehrfachfilter hinzu</string>
 </resources>

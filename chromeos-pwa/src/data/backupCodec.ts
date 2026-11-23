@@ -20,7 +20,12 @@ import {
   type TaskStatus,
   type ViewSortMode
 } from '../domain/types.ts';
-import { wouldCreateDependencyCycle } from '../domain/v2Utils.ts';
+import {
+  DEFAULT_WORKDAY_END_MINUTES,
+  DEFAULT_WORKDAY_START_MINUTES,
+  normalizeWorkdayBounds,
+  wouldCreateDependencyCycle
+} from '../domain/v2Utils.ts';
 
 export const BACKUP_MAGIC = 'THINGSBOOK_BACKUP_V1';
 export const FORMAT_VERSION = 1;
@@ -66,6 +71,9 @@ export interface BackupPreferencesDto {
   showPerspectives?: boolean | null;
   savedPerspectivesJson?: string | null;
   savedPerspectives?: SavedPerspective[] | null;
+  workdayStartMinutes?: number | null;
+  workdayEndMinutes?: number | null;
+  areaViewModes?: Record<string, 'list' | 'roadmap'> | null;
 }
 
 export interface BackupProjectDto {
@@ -333,7 +341,7 @@ export function buildBackupPayloadFromEntities(params: {
   attachments?: AttachmentRecord[];
   projectTemplates?: ProjectTemplate[];
   preferences?: BackupPreferencesDto;
-  appVersionName: string;
+  appVersionName?: string;
 }): ThingsbookBackupPayload {
   const now = Date.now();
   const areas = params.areas.filter((a) => !a.isDeleted);
@@ -372,7 +380,7 @@ export function buildBackupPayloadFromEntities(params: {
   return {
     schemaVersion: FORMAT_VERSION,
     createdAt: now,
-    appVersionName: params.appVersionName,
+    appVersionName: params.appVersionName ?? `${APP_VERSION}-chromeos`,
     areas: areas.map((a) => ({
       id: a.id,
       title: a.title,
@@ -861,6 +869,9 @@ export interface NormalizedBackupEntities {
     viewSortMode: ViewSortMode;
     showPerspectives?: boolean;
     savedPerspectives: SavedPerspective[];
+    workdayStartMinutes: number;
+    workdayEndMinutes: number;
+    areaViewModes: Record<string, 'list' | 'roadmap'>;
   };
 }
 
@@ -1147,6 +1158,20 @@ export function normalizeBackupPayloadToEntities(
     areaId: p.areaId && validAreaIds.has(p.areaId) ? p.areaId : null
   }));
 
+  const restoredWorkday = normalizeWorkdayBounds(
+    payload.preferences?.workdayStartMinutes ?? DEFAULT_WORKDAY_START_MINUTES,
+    payload.preferences?.workdayEndMinutes ?? DEFAULT_WORKDAY_END_MINUTES
+  );
+
+  const restoredAreaViewModes: Record<string, 'list' | 'roadmap'> = {};
+  if (payload.preferences?.areaViewModes && typeof payload.preferences.areaViewModes === 'object') {
+    for (const [k, v] of Object.entries(payload.preferences.areaViewModes)) {
+      if (k && (v === 'list' || v === 'roadmap')) {
+        restoredAreaViewModes[k] = v;
+      }
+    }
+  }
+
   return {
     tags,
     areas,
@@ -1169,7 +1194,10 @@ export function normalizeBackupPayloadToEntities(
         typeof payload.preferences?.showPerspectives === 'boolean'
           ? payload.preferences.showPerspectives
           : undefined,
-      savedPerspectives: restoredPerspectives
+      savedPerspectives: restoredPerspectives,
+      workdayStartMinutes: restoredWorkday.startMinutes,
+      workdayEndMinutes: restoredWorkday.endMinutes,
+      areaViewModes: restoredAreaViewModes
     }
   };
 }

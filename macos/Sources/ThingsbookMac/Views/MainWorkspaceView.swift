@@ -71,12 +71,16 @@ public struct MainWorkspaceView: View {
     }
 
     private var isWideProjectWorkspace: Bool {
-        guard case .project(let projId) = store.selectedDestination,
-              let project = store.project(byId: projId) else {
+        switch store.selectedDestination {
+        case .project(let projId):
+            guard let project = store.project(byId: projId) else { return false }
+            let mode = ProjectViewMode.normalized(project.viewMode)
+            return mode == .board || mode == .roadmap
+        case .area(let areaId):
+            return store.areaViewMode(for: areaId) == .roadmap
+        default:
             return false
         }
-        let mode = ProjectViewMode.normalized(project.viewMode)
-        return mode == .board || mode == .roadmap
     }
 
     private var canShowInspector: Bool {

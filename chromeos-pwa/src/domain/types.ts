@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.0.1';
-export const APP_BUILD_CODE = 112;
+export const APP_VERSION = '3.1.0';
+export const APP_BUILD_CODE = 113;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -25,6 +25,8 @@ export type TagSortMode = 'alpha' | 'most_used' | 'manual';
 export type ViewSortMode = 'manual' | 'deadline' | 'duration' | 'effort' | 'alpha';
 
 export type ProjectViewMode = 'list' | 'board' | 'roadmap';
+
+export type AreaViewMode = 'list' | 'roadmap';
 
 export interface SavedPerspective {
   id: string;
@@ -268,6 +270,9 @@ export interface AppPreferences {
   viewSortMode?: ViewSortMode;
   showPerspectives?: boolean;
   savedPerspectives?: SavedPerspective[];
+  areaViewModes?: Record<string, 'list' | 'roadmap'>;
+  workdayStartMinutes?: number;
+  workdayEndMinutes?: number;
 }
 
 export type AppSettings = AppPreferences;

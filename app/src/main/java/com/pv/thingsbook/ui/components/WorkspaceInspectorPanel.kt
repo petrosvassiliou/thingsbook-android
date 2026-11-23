@@ -168,6 +168,7 @@ fun WorkspaceInspectorPanel(
     todayPlannedMinutes: Int,
     todayFreeMinutes: Int,
     completedTodayCount: Int,
+    sevenDayWorkload: List<com.pv.thingsbook.domain.model.DayWorkloadSummary> = emptyList(),
     areas: List<Area>,
     projects: List<Project>,
     todayDate: LocalDate,
@@ -243,6 +244,7 @@ fun WorkspaceInspectorPanel(
                 todayPlannedMinutes = todayPlannedMinutes,
                 todayFreeMinutes = todayFreeMinutes,
                 completedTodayCount = completedTodayCount,
+                sevenDayWorkload = sevenDayWorkload,
                 todayDate = todayDate,
                 locale = locale,
                 onCloseInspector = onCloseInspector,
@@ -1193,6 +1195,7 @@ private fun WorkspaceOverviewInspectorContent(
     todayPlannedMinutes: Int,
     todayFreeMinutes: Int,
     completedTodayCount: Int,
+    sevenDayWorkload: List<com.pv.thingsbook.domain.model.DayWorkloadSummary> = emptyList(),
     todayDate: LocalDate,
     locale: Locale,
     onCloseInspector: () -> Unit,
@@ -1411,6 +1414,14 @@ private fun WorkspaceOverviewInspectorContent(
                     }
                 }
             }
+        }
+
+        if (sevenDayWorkload.isNotEmpty()) {
+            SevenDayWorkloadStripCard(
+                forecast = sevenDayWorkload,
+                locale = locale,
+                compact = true
+            )
         }
 
         // 2. Today's Schedule Mini-Timeline Soft Bento Card

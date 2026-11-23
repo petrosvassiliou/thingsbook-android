@@ -71,19 +71,24 @@ import {
   type ViewSortMode
 } from './domain/types';
 import {
+  buildAreaPortfolioRoadmapLayout,
   buildProjectRoadmapLayout,
   extractDraggedTaskIds,
   hasDraggedTaskMime,
+  normalizeAreaViewMode,
   normalizeProjectViewMode,
   orderTaskIdsByVisualOrder
 } from './domain/v30Roadmap';
 import {
+  buildDayWorkloadSummary,
+  computeMultiDayWorkloadForecast,
   computeTagUsageCounts,
   computeTodayCapacitySummary,
   detectStalledProjects,
   evaluateProjectStalledStatus,
   filterTasksForPerspective,
   formatStandaloneDuration,
+  normalizeWorkdayBounds,
   resolveTopBarLayoutTier,
   sortTasksForView
 } from './domain/v2Utils';
@@ -133,7 +138,7 @@ import {
   TaskDependencyModal,
   TaskTagPickerModal
 } from './components/EntityModals';
-import { GeminiModal } from './components/GeminiModal';
+import { GeminiModal, type GeminiModalTab } from './components/GeminiModal';
 import { InlineQuickFind } from './components/InlineQuickFind';
 import { MagicPlusFab } from './components/MagicPlusFab';
 import type { MagicPlusResolvedDrop } from './domain/magicPlusDrop';
@@ -153,6 +158,7 @@ import {
   UndoSnackbarBanner
 } from './components/PowerFeaturesModals';
 import {
+  AreaPortfolioRoadmapWorkspace,
   ProjectBoardWorkspace,
   ProjectRoadmapWorkspace
 } from './components/ProjectBoardAndRoadmap';
@@ -175,7 +181,10 @@ import {
   type WeeklyReviewStep
 } from './components/WeeklyReviewModal';
 import { DeadlineModal, RepeatModal, WhenModal } from './components/WhenAndRepeatModals';
-import { WorkspaceInspectorPanel } from './components/WorkspaceInspectorPanel';
+import {
+  SevenDayWorkloadCard,
+  WorkspaceInspectorPanel
+} from './components/WorkspaceInspectorPanel';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -314,6 +323,7 @@ export const App: React.FC = () => {
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
   const [geminiModalOpen, setGeminiModalOpen] = useState(false);
+  const [geminiModalTab, setGeminiModalTab] = useState<GeminiModalTab>('braindump');
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [weeklyReviewModal, setWeeklyReviewModal] = useState<{
@@ -531,7 +541,13 @@ export const App: React.FC = () => {
           ? tr.undoTaskCompleted(fallbackTitle)
           : ev.kind === 'project_deleted'
             ? tr.undoProjectDeleted(ev.entityTitle.trim() || tr.entityNewProject)
-            : tr.undoTaskDeleted(fallbackTitle);
+            : ev.kind === 'roadmap_cascade'
+              ? tr.v31RoadmapCascadeUndo(ev.count)
+              : ev.kind === 'roadmap_rescheduled'
+                ? tr.v31RoadmapRescheduledUndo
+                : ev.kind === 'day_plan_applied'
+                  ? tr.v31GeminiPlanDayAppliedUndo(ev.count)
+                  : tr.undoTaskDeleted(fallbackTitle);
       setUndoBanner({ id: Date.now(), message: msg });
     });
 
@@ -1121,15 +1137,62 @@ export const App: React.FC = () => {
     );
   }, [prefs.calendarEventsEnabled, todayCalendarEvents, endOfToday, calendarNowMs]);
 
+  const workdayBounds = useMemo(
+    () => normalizeWorkdayBounds(prefs.workdayStartMinutes, prefs.workdayEndMinutes),
+    [prefs.workdayStartMinutes, prefs.workdayEndMinutes]
+  );
+
   const todayCapacity = useMemo(
     () =>
       computeTodayCapacitySummary(
         [...todayDaytimeTasks, ...todayEveningTasks],
         activeTodayCalendarEvents,
         todayStartMs,
-        endOfToday
+        endOfToday,
+        workdayBounds.startMinutes,
+        workdayBounds.endMinutes
       ),
-    [todayDaytimeTasks, todayEveningTasks, activeTodayCalendarEvents, todayStartMs, endOfToday]
+    [
+      todayDaytimeTasks,
+      todayEveningTasks,
+      activeTodayCalendarEvents,
+      todayStartMs,
+      endOfToday,
+      workdayBounds.startMinutes,
+      workdayBounds.endMinutes
+    ]
+  );
+
+  const sevenDayWorkload = useMemo(
+    () =>
+      computeMultiDayWorkloadForecast({
+        todayTasks: [...todayDaytimeTasks, ...todayEveningTasks],
+        allOpenTasks: openInActiveProj,
+        todayCalendarEvents: activeTodayCalendarEvents,
+        upcomingCalendarEventsByEpochDay: prefs.calendarEventsEnabled
+          ? upcomingCalendarEventsByEpochDay
+          : new Map(),
+        todayStartMillis: todayStartMs,
+        daysCount: 7,
+        workdayStartMinutes: workdayBounds.startMinutes,
+        workdayEndMinutes: workdayBounds.endMinutes
+      }),
+    [
+      todayDaytimeTasks,
+      todayEveningTasks,
+      openInActiveProj,
+      activeTodayCalendarEvents,
+      prefs.calendarEventsEnabled,
+      upcomingCalendarEventsByEpochDay,
+      todayStartMs,
+      workdayBounds.startMinutes,
+      workdayBounds.endMinutes
+    ]
+  );
+
+  const sevenDayWorkloadByEpochDay = useMemo(
+    () => new Map(sevenDayWorkload.map((d) => [d.epochDay, d])),
+    [sevenDayWorkload]
   );
 
   const maxUpcomingHorizonEpochDay = useMemo(() => {
@@ -1484,6 +1547,40 @@ export const App: React.FC = () => {
       : false;
   }, [prefs.themeMode]);
 
+  const activeAreaRecord = useMemo(
+    () =>
+      activeNav.kind === 'area' ? (areasMap.get(activeNav.areaId) ?? null) : null,
+    [activeNav, areasMap]
+  );
+
+  const activeAreaViewMode = useMemo(
+    () =>
+      activeAreaRecord
+        ? normalizeAreaViewMode(prefs.areaViewModes?.[activeAreaRecord.id])
+        : 'list',
+    [activeAreaRecord, prefs.areaViewModes]
+  );
+
+  const activeAreaRoadmapLayout = useMemo(() => {
+    if (!activeAreaRecord || activeAreaViewMode !== 'roadmap') return null;
+    return buildAreaPortfolioRoadmapLayout(
+      activeAreaRecord,
+      activeProjects,
+      snapshot.headings,
+      snapshot.tasks,
+      todayStartMs,
+      t.projectUngroupedColumn
+    );
+  }, [
+    activeAreaRecord,
+    activeAreaViewMode,
+    activeProjects,
+    snapshot.headings,
+    snapshot.tasks,
+    todayStartMs,
+    t.projectUngroupedColumn
+  ]);
+
   const activeProjectRecord = useMemo(
     () =>
       activeNav.kind === 'project'
@@ -1590,7 +1687,12 @@ export const App: React.FC = () => {
     isTimelineFullScreen &&
     activeNav.kind === 'project' &&
     activeProjectViewMode === 'roadmap';
-  const isAnyTimelineFullScreen = isTodayTimelineFullScreen || isRoadmapFullScreen;
+  const isAreaRoadmapFullScreen =
+    isTimelineFullScreen &&
+    activeNav.kind === 'area' &&
+    activeAreaViewMode === 'roadmap';
+  const isAnyTimelineFullScreen =
+    isTodayTimelineFullScreen || isRoadmapFullScreen || isAreaRoadmapFullScreen;
 
   const enterTimelineFullScreen = useCallback(() => {
     setExpandedTaskId(null);
@@ -1611,10 +1713,18 @@ export const App: React.FC = () => {
       todayViewMode === 'timeline';
     const inProjectRoadmap =
       activeNav.kind === 'project' && activeProjectViewMode === 'roadmap';
-    if (!inTodayTimeline && !inProjectRoadmap) {
+    const inAreaRoadmap =
+      activeNav.kind === 'area' && activeAreaViewMode === 'roadmap';
+    if (!inTodayTimeline && !inProjectRoadmap && !inAreaRoadmap) {
       setIsTimelineFullScreen(false);
     }
-  }, [isTimelineFullScreen, activeNav, todayViewMode, activeProjectViewMode]);
+  }, [
+    isTimelineFullScreen,
+    activeNav,
+    todayViewMode,
+    activeProjectViewMode,
+    activeAreaViewMode
+  ]);
 
   // Always reset dragOverHeadingId on global dragend / drop so '__ungrouped__' never gets stuck visible
   useEffect(() => {
@@ -2072,8 +2182,23 @@ export const App: React.FC = () => {
         return;
       }
 
-      // Pure Timeline-only Full Screen: block all non-Escape global shortcuts
+      // Pure Timeline-only Full Screen: allow F to exit, block all non-Escape global shortcuts
+      if (
+        !inInput &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'f' &&
+        isTimelineFullScreen
+      ) {
+        e.preventDefault();
+        setIsTimelineFullScreen(false);
+        return;
+      }
       if (isTodayTimelineFullScreen || isRoadmapFullScreen) {
+        return;
+      }
+      if (isAreaRoadmapFullScreen) {
         return;
       }
 
@@ -2140,6 +2265,30 @@ export const App: React.FC = () => {
 
       const lower = e.key.toLowerCase();
 
+      // F -> Toggle Full-Screen Timeline / Portfolio / Gantt mode when not typing in an input
+      if (
+        !inInput &&
+        !inInteractiveControl &&
+        !expandedTaskId &&
+        !anyOtherModalOpen &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        lower === 'f'
+      ) {
+        const canEnterFs =
+          (activeNav.kind === 'smart' &&
+            activeNav.view === 'TODAY' &&
+            todayViewMode === 'timeline') ||
+          (activeNav.kind === 'project' && activeProjectViewMode === 'roadmap') ||
+          (activeNav.kind === 'area' && activeAreaViewMode === 'roadmap');
+        if (canEnterFs) {
+          e.preventDefault();
+          enterTimelineFullScreen();
+          return;
+        }
+      }
+
       // Global Ctrl+Shift+R / Cmd+Shift+R -> Guided GTD Weekly Review (v2.0)
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && lower === 'r') {
         e.preventDefault();
@@ -2182,6 +2331,7 @@ export const App: React.FC = () => {
         }
         if (lower === 'g') {
           e.preventDefault();
+          setGeminiModalTab('braindump');
           setGeminiModalOpen(true);
           return;
         }
@@ -2336,6 +2486,11 @@ export const App: React.FC = () => {
     isTimelineFullScreen,
     isTodayTimelineFullScreen,
     isRoadmapFullScreen,
+    isAreaRoadmapFullScreen,
+    todayViewMode,
+    activeProjectViewMode,
+    activeAreaViewMode,
+    enterTimelineFullScreen,
     selectedTaskIds,
     mobileDrawerOpen,
     activeNav,
@@ -2867,8 +3022,9 @@ export const App: React.FC = () => {
 
   const effectiveSidebarVisible = isWideScreen ? prefs.sidebarVisible : mobileDrawerOpen;
   const isWideProjectCanvas =
-    activeNav.kind === 'project' &&
-    (activeProjectViewMode === 'board' || activeProjectViewMode === 'roadmap');
+    (activeNav.kind === 'project' &&
+      (activeProjectViewMode === 'board' || activeProjectViewMode === 'roadmap')) ||
+    (activeNav.kind === 'area' && activeAreaViewMode === 'roadmap');
   const canShowInspector =
     isInspectorViewport && !isAnyTimelineFullScreen && !isWideProjectCanvas;
   const effectiveInspectorOpen = canShowInspector && inspectorOpen;
@@ -3095,7 +3251,10 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 className="topbar-pill gemini-pill"
-                onClick={() => setGeminiModalOpen(true)}
+                onClick={() => {
+                  setGeminiModalTab('braindump');
+                  setGeminiModalOpen(true);
+                }}
                 title="Gemini"
               >
                 <Sparkles size={14} />
@@ -3424,6 +3583,23 @@ export const App: React.FC = () => {
 
                         {activeNav.view === 'TODAY' && (
                           <>
+                            <button
+                              type="button"
+                              className="chip-btn v31-plan-my-day-pill"
+                              data-testid="today-plan-my-day-btn"
+                              title={t.v31GeminiPlanDayDesc}
+                              onClick={() => {
+                                setGeminiModalTab('planday');
+                                setGeminiModalOpen(true);
+                              }}
+                            >
+                              <Sparkles
+                                size={13}
+                                style={{ color: 'var(--gemini-violet)', flexShrink: 0 }}
+                              />
+                              <span>{t.v31GeminiPlanDayTab}</span>
+                            </button>
+
                             <div
                               className="v2-segmented-toggle"
                               data-testid="today-mode-toggle"
@@ -3806,6 +3982,11 @@ export const App: React.FC = () => {
                 {/* UPCOMING View (Day-by-Day Groups — v1.6.22+: only future dates with tasks display non-past calendar events) */}
                 {activeNav.view === 'UPCOMING' && (
                   <>
+                    <SevenDayWorkloadCard
+                      forecast={sevenDayWorkload}
+                      lang={lang}
+                      t={t}
+                    />
                     {upcomingGroups.length === 0 ? (
                       <div className="empty-state">{t.emptyView}</div>
                     ) : (
@@ -3823,6 +4004,17 @@ export const App: React.FC = () => {
                               true
                             )
                           : [];
+                        const dayWorkload =
+                          sevenDayWorkloadByEpochDay.get(targetEpochDay) ??
+                          buildDayWorkloadSummary(
+                            targetEpochDay,
+                            dayEpoch,
+                            addDaysLocal(dayEpoch, 1),
+                            sortedGroupTasks,
+                            dayEvents,
+                            workdayBounds.startMinutes,
+                            workdayBounds.endMinutes
+                          );
                         return (
                           <div
                             key={dayEpoch}
@@ -3856,6 +4048,25 @@ export const App: React.FC = () => {
                             >
                               <span className="upcoming-day-num">{hdr.numPart}</span>
                               <span className="upcoming-day-sub">{hdr.subPart}</span>
+                              {dayWorkload.plannedMinutes > 0 && (
+                                <span
+                                  className={`upcoming-day-workload-pill ${
+                                    dayWorkload.isOverloaded ? 'overloaded' : ''
+                                  }`}
+                                  data-testid={`upcoming-day-workload-pill-${targetEpochDay}`}
+                                >
+                                  {dayWorkload.isOverloaded
+                                    ? t.v31WorkloadOverloadedShort(
+                                        formatStandaloneDuration(
+                                          dayWorkload.overloadedByMinutes
+                                        )
+                                      )
+                                    : t.todayCapacitySummary(
+                                        formatStandaloneDuration(dayWorkload.plannedMinutes),
+                                        formatStandaloneDuration(dayWorkload.freeMinutes)
+                                      )}
+                                </span>
+                              )}
                             </div>
                             {(sortedGroupTasks.length > 0 || groupPhases.length > 0) &&
                               dayEvents.length > 0 && (
@@ -3960,31 +4171,35 @@ export const App: React.FC = () => {
               const areaIdx = activeAreas.findIndex((a) => a.id === area.id);
               const areaProjects = activeProjects.filter((p) => p.areaId === area.id);
               const areaDirectTasks = sortViewList(filterByTag(currentViewBaseTasks));
+              const currentAreaMode = normalizeAreaViewMode(prefs.areaViewModes?.[area.id]);
+
+              const setAreaMode = (nextMode: 'list' | 'roadmap') => {
+                if (nextMode !== 'roadmap') {
+                  setIsTimelineFullScreen(false);
+                }
+                const nextModes: Record<string, 'list' | 'roadmap'> = {
+                  ...(prefs.areaViewModes ?? {}),
+                  [area.id]: nextMode
+                };
+                const updated = localDb.updatePreferences({ areaViewModes: nextModes });
+                setPrefs(updated);
+              };
 
               return (
                 <>
-                  <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                    <div className="view-title-row">
-                      <div className="view-title-left">
-                        <Folder size={26} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
-                        {editingAreaHeader ? (
-                          <input
-                            type="text"
-                            className="view-title-input"
-                            autoFocus
-                            value={editingAreaTitle}
-                            onChange={(e) => setEditingAreaTitle(e.target.value)}
-                            onBlur={async () => {
-                              if (editingAreaTitle.trim()) {
-                                await localDb.upsertArea({
-                                  id: area.id,
-                                  title: editingAreaTitle.trim()
-                                });
-                              }
-                              setEditingAreaHeader(false);
-                            }}
-                            onKeyDown={async (e) => {
-                              if (e.key === 'Enter') {
+                  {!isAreaRoadmapFullScreen && (
+                    <div className="view-header" onClick={(e) => e.stopPropagation()}>
+                      <div className="view-title-row">
+                        <div className="view-title-left">
+                          <Folder size={26} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                          {editingAreaHeader ? (
+                            <input
+                              type="text"
+                              className="view-title-input"
+                              autoFocus
+                              value={editingAreaTitle}
+                              onChange={(e) => setEditingAreaTitle(e.target.value)}
+                              onBlur={async () => {
                                 if (editingAreaTitle.trim()) {
                                   await localDb.upsertArea({
                                     id: area.id,
@@ -3992,140 +4207,111 @@ export const App: React.FC = () => {
                                   });
                                 }
                                 setEditingAreaHeader(false);
-                              } else if (e.key === 'Escape') {
-                                setEditingAreaHeader(false);
-                              }
+                              }}
+                              onKeyDown={async (e) => {
+                                if (e.key === 'Enter') {
+                                  if (editingAreaTitle.trim()) {
+                                    await localDb.upsertArea({
+                                      id: area.id,
+                                      title: editingAreaTitle.trim()
+                                    });
+                                  }
+                                  setEditingAreaHeader(false);
+                                } else if (e.key === 'Escape') {
+                                  setEditingAreaHeader(false);
+                                }
+                              }}
+                            />
+                          ) : (
+                            <h1 className="view-title area-view-title" title={area.title}>
+                              {area.title}
+                            </h1>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <div
+                            className="v2-segmented-toggle"
+                            data-testid="area-mode-toggle"
+                          >
+                            <button
+                              type="button"
+                              className={`v2-segmented-btn ${
+                                currentAreaMode === 'list' ? 'active' : ''
+                              }`}
+                              data-testid="area-mode-list-btn"
+                              onClick={() => setAreaMode('list')}
+                            >
+                              <List size={13.5} />
+                              <span>{t.projectViewList}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={`v2-segmented-btn ${
+                                currentAreaMode === 'roadmap' ? 'active' : ''
+                              }`}
+                              data-testid="area-mode-roadmap-btn"
+                              onClick={() => setAreaMode('roadmap')}
+                            >
+                              <CalendarDays size={13.5} />
+                              <span>{t.v31AreaPortfolioTimeline}</span>
+                            </button>
+                          </div>
+
+                          {currentAreaMode === 'list' && renderViewSortDropdown()}
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title={t.actionMove}
+                            aria-label={t.actionMove}
+                            disabled={areaIdx <= 0}
+                            onClick={() => localDb.moveAreaOrder(area.id, 'up')}
+                          >
+                            <ArrowUp size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title={t.actionMove}
+                            aria-label={t.actionMove}
+                            disabled={areaIdx < 0 || areaIdx >= activeAreas.length - 1}
+                            onClick={() => localDb.moveAreaOrder(area.id, 'down')}
+                          >
+                            <ArrowDown size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title={t.actionRename}
+                            aria-label={t.actionRename}
+                            onClick={() => {
+                              setEditingAreaTitle(area.title);
+                              setEditingAreaHeader(true);
                             }}
-                          />
-                        ) : (
-                          <h1 className="view-title area-view-title" title={area.title}>
-                            {area.title}
-                          </h1>
-                        )}
+                          >
+                            <Edit3 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title={t.actionDelete}
+                            aria-label={t.actionDelete}
+                            style={{ color: 'var(--deadline-red)' }}
+                            onClick={async () => {
+                              await localDb.deleteArea(area.id);
+                              handleSelectNav({ kind: 'smart', view: 'TODAY' });
+                            }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                        {renderViewSortDropdown()}
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t.actionMove}
-                          aria-label={t.actionMove}
-                          disabled={areaIdx <= 0}
-                          onClick={() => localDb.moveAreaOrder(area.id, 'up')}
-                        >
-                          <ArrowUp size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t.actionMove}
-                          aria-label={t.actionMove}
-                          disabled={areaIdx < 0 || areaIdx >= activeAreas.length - 1}
-                          onClick={() => localDb.moveAreaOrder(area.id, 'down')}
-                        >
-                          <ArrowDown size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t.actionRename}
-                          aria-label={t.actionRename}
-                          onClick={() => {
-                            setEditingAreaTitle(area.title);
-                            setEditingAreaHeader(true);
-                          }}
-                        >
-                          <Edit3 size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={t.actionDelete}
-                          aria-label={t.actionDelete}
-                          style={{ color: 'var(--deadline-red)' }}
-                          onClick={async () => {
-                            await localDb.deleteArea(area.id);
-                            handleSelectNav({ kind: 'smart', view: 'TODAY' });
-                          }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="project-action-pills">
-                      <button
-                        type="button"
-                        className="chip-btn"
-                        data-testid="area-new-project-btn"
-                        onClick={() =>
-                          setProjectModalState({
-                            open: true,
-                            project: null,
-                            defaultAreaId: area.id
-                          })
-                        }
-                      >
-                        <Plus size={12.5} />
-                        <span>{t.entityNewProject}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="chip-btn"
-                        data-testid="area-external-import-btn"
-                        style={{ whiteSpace: 'normal', height: 'auto' }}
-                        title={t.importAsanaPlannerLabel}
-                        onClick={() =>
-                          setTemplatesModal({
-                            open: true,
-                            tab: 'external',
-                            areaId: area.id
-                          })
-                        }
-                      >
-                        <ArrowLeftRight size={12.5} style={{ flexShrink: 0 }} />
-                        <span>{t.externalImportExportTab}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* View Tag Strip */}
-                  {usedTagsInCurrentView.length > 0 && (
-                    <div className="tag-filter-bar" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className={`tag-pill ${selectedFilterTagId === null ? 'active' : ''}`}
-                        onClick={() => setSelectedFilterTagId(null)}
-                      >
-                        {t.tagsFilterAll}
-                      </button>
-                      {usedTagsInCurrentView.map((tg) => (
-                        <button
-                          key={tg.id}
-                          type="button"
-                          className={`tag-pill ${selectedFilterTagId === tg.id ? 'active' : ''}`}
-                          onClick={() =>
-                            setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
-                          }
-                        >
-                          <LayoutGrid size={11} />
-                          <span>{tg.title}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Projects Section: Shown ONLY when areaProjects.length > 0 (exact v1.6.16 rule) */}
-                  {areaProjects.length > 0 && (
-                    <div className="group-section" onClick={(e) => e.stopPropagation()}>
-                      <div className="group-header">
-                        <span className="group-header-title muted-nonbold">
-                          {t.entityProjects} • {area.title} ({areaProjects.length})
-                        </span>
+                      <div className="project-action-pills">
                         <button
                           type="button"
                           className="chip-btn"
+                          data-testid="area-new-project-btn"
                           onClick={() =>
                             setProjectModalState({
                               open: true,
@@ -4134,139 +4320,250 @@ export const App: React.FC = () => {
                             })
                           }
                         >
-                          <Plus size={12} />
+                          <Plus size={12.5} />
                           <span>{t.entityNewProject}</span>
                         </button>
-                      </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        {areaProjects.map((proj, pIdx) => {
-                          const pTasks = snapshot.tasks.filter(
-                            (tk) =>
-                              !tk.isDeleted &&
-                              tk.projectId === proj.id &&
-                              tk.status !== 'CANCELED'
-                          );
-                          const pDone = pTasks.filter((tk) => tk.status === 'COMPLETED').length;
-                          const dlDiff =
-                            proj.deadline != null ? daysBetweenToday(proj.deadline) : null;
-
-                          return (
-                            <div key={proj.id} className="area-project-row">
-                              <button
-                                type="button"
-                                style={{
-                                  flex: 1,
-                                  minWidth: 0,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 10,
-                                  textAlign: 'left'
-                                }}
-                                onClick={() =>
-                                  handleSelectNav({ kind: 'project', projectId: proj.id })
-                                }
-                              >
-                                <ProjectProgressRing
-                                  completed={pDone}
-                                  total={pTasks.length}
-                                  size={20}
-                                />
-                                <div style={{ minWidth: 0 }}>
-                                  <div
-                                    style={{
-                                      fontWeight: 650,
-                                      fontSize: 14.3,
-                                      wordBreak: 'normal',
-                                      overflowWrap: 'break-word'
-                                    }}
-                                    title={proj.title}
-                                  >
-                                    {proj.title}
-                                  </div>
-                                  <div style={{ fontSize: 11.8, color: 'var(--text-muted)' }}>
-                                    {pDone}/{pTasks.length} • {t.entityTodos}
-                                  </div>
-                                </div>
-                              </button>
-
-                              {/* Target Date Badge or Pill */}
-                              <button
-                                type="button"
-                                className={`chip-btn ${
-                                  dlDiff != null && dlDiff <= 2
-                                    ? 'urgent'
-                                    : proj.deadline != null
-                                      ? 'active'
-                                      : ''
-                                }`}
-                                onClick={() =>
-                                  setDeadlineModalTarget({ kind: 'project', projectId: proj.id })
-                                }
-                              >
-                                <Flag size={11.5} />
-                                <span>
-                                  {proj.deadline != null && dlDiff != null
-                                    ? dlDiff === 0
-                                      ? t.deadlineToday
-                                      : dlDiff > 0
-                                        ? t.deadlineDaysLeft(dlDiff)
-                                        : t.deadlineDaysOverdue(Math.abs(dlDiff))
-                                    : t.targetDate}
-                                </span>
-                              </button>
-
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                disabled={pIdx === 0}
-                                title={t.actionMove}
-                                onClick={() =>
-                                  localDb.moveProjectOrder(proj.id, 'up', area.id)
-                                }
-                              >
-                                <ArrowUp size={14} />
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                disabled={pIdx === areaProjects.length - 1}
-                                title={t.actionMove}
-                                onClick={() =>
-                                  localDb.moveProjectOrder(proj.id, 'down', area.id)
-                                }
-                              >
-                                <ArrowDown size={14} />
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                title={t.actionEdit}
-                                onClick={() =>
-                                  setProjectModalState({ open: true, project: proj })
-                                }
-                              >
-                                <Edit3 size={14} />
-                              </button>
-                            </div>
-                          );
-                        })}
+                        <button
+                          type="button"
+                          className="chip-btn"
+                          data-testid="area-external-import-btn"
+                          style={{ whiteSpace: 'normal', height: 'auto' }}
+                          title={t.importAsanaPlannerLabel}
+                          onClick={() =>
+                            setTemplatesModal({
+                              open: true,
+                              tab: 'external',
+                              areaId: area.id
+                            })
+                          }
+                        >
+                          <ArrowLeftRight size={12.5} style={{ flexShrink: 0 }} />
+                          <span>{t.externalImportExportTab}</span>
+                        </button>
                       </div>
                     </div>
                   )}
 
-                  {/* Direct Area To-Dos */}
-                  <div className="group-section">
-                    {areaDirectTasks.length === 0 && areaProjects.length === 0 ? (
-                      <div className="empty-state">{t.emptyView}</div>
-                    ) : (
-                      <div className="task-list">
-                        {areaDirectTasks.map((tk) =>
-                          renderTaskRow(tk, areaDirectTasks, false)
-                        )}
+                  {/* View Tag Strip */}
+                  {!isAreaRoadmapFullScreen &&
+                    currentAreaMode === 'list' &&
+                    usedTagsInCurrentView.length > 0 && (
+                      <div className="tag-filter-bar" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className={`tag-pill ${selectedFilterTagId === null ? 'active' : ''}`}
+                          onClick={() => setSelectedFilterTagId(null)}
+                        >
+                          {t.tagsFilterAll}
+                        </button>
+                        {usedTagsInCurrentView.map((tg) => (
+                          <button
+                            key={tg.id}
+                            type="button"
+                            className={`tag-pill ${selectedFilterTagId === tg.id ? 'active' : ''}`}
+                            onClick={() =>
+                              setSelectedFilterTagId((cur) => (cur === tg.id ? null : tg.id))
+                            }
+                          >
+                            <LayoutGrid size={11} />
+                            <span>{tg.title}</span>
+                          </button>
+                        ))}
                       </div>
                     )}
-                  </div>
+
+                  {currentAreaMode === 'roadmap' && activeAreaRoadmapLayout ? (
+                    <AreaPortfolioRoadmapWorkspace
+                      area={area}
+                      layout={activeAreaRoadmapLayout}
+                      allTasks={snapshot.tasks}
+                      selectedTaskIds={selectedTaskIds}
+                      isMultiSelectMode={isExplicitMultiSelect}
+                      lang={lang}
+                      isDark={isEffectiveDarkTheme}
+                      isFullScreen={isAreaRoadmapFullScreen}
+                      onToggleFullScreen={() => {
+                        if (isAreaRoadmapFullScreen) {
+                          setIsTimelineFullScreen(false);
+                        } else {
+                          enterTimelineFullScreen();
+                        }
+                      }}
+                      t={t}
+                      onToast={showToast}
+                      onOpenProject={(projectId) =>
+                        handleSelectNav({ kind: 'project', projectId })
+                      }
+                      onSelectTask={handleSelectTask}
+                      onOpenTaskEditor={(taskId) => {
+                        if (isAreaRoadmapFullScreen) return;
+                        setSelectedTaskIds([]);
+                        setExpandedTaskId(taskId);
+                      }}
+                      onOpenProjectDeadlineModal={(projectId) =>
+                        setDeadlineModalTarget({ kind: 'project', projectId })
+                      }
+                    />
+                  ) : (
+                    <>
+                      {/* Projects Section: Shown ONLY when areaProjects.length > 0 (exact v1.6.16 rule) */}
+                      {areaProjects.length > 0 && (
+                        <div className="group-section" onClick={(e) => e.stopPropagation()}>
+                          <div className="group-header">
+                            <span className="group-header-title muted-nonbold">
+                              {t.entityProjects} • {area.title} ({areaProjects.length})
+                            </span>
+                            <button
+                              type="button"
+                              className="chip-btn"
+                              onClick={() =>
+                                setProjectModalState({
+                                  open: true,
+                                  project: null,
+                                  defaultAreaId: area.id
+                                })
+                              }
+                            >
+                              <Plus size={12} />
+                              <span>{t.entityNewProject}</span>
+                            </button>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            {areaProjects.map((proj, pIdx) => {
+                              const pTasks = snapshot.tasks.filter(
+                                (tk) =>
+                                  !tk.isDeleted &&
+                                  tk.projectId === proj.id &&
+                                  tk.status !== 'CANCELED'
+                              );
+                              const pDone = pTasks.filter(
+                                (tk) => tk.status === 'COMPLETED'
+                              ).length;
+                              const dlDiff =
+                                proj.deadline != null ? daysBetweenToday(proj.deadline) : null;
+
+                              return (
+                                <div key={proj.id} className="area-project-row">
+                                  <button
+                                    type="button"
+                                    style={{
+                                      flex: 1,
+                                      minWidth: 0,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 10,
+                                      textAlign: 'left'
+                                    }}
+                                    onClick={() =>
+                                      handleSelectNav({ kind: 'project', projectId: proj.id })
+                                    }
+                                  >
+                                    <ProjectProgressRing
+                                      completed={pDone}
+                                      total={pTasks.length}
+                                      size={20}
+                                    />
+                                    <div style={{ minWidth: 0 }}>
+                                      <div
+                                        style={{
+                                          fontWeight: 650,
+                                          fontSize: 14.3,
+                                          wordBreak: 'normal',
+                                          overflowWrap: 'break-word'
+                                        }}
+                                        title={proj.title}
+                                      >
+                                        {proj.title}
+                                      </div>
+                                      <div style={{ fontSize: 11.8, color: 'var(--text-muted)' }}>
+                                        {pDone}/{pTasks.length} • {t.entityTodos}
+                                      </div>
+                                    </div>
+                                  </button>
+
+                                  {/* Target Date Badge or Pill */}
+                                  <button
+                                    type="button"
+                                    className={`chip-btn ${
+                                      dlDiff != null && dlDiff <= 2
+                                        ? 'urgent'
+                                        : proj.deadline != null
+                                          ? 'active'
+                                          : ''
+                                    }`}
+                                    onClick={() =>
+                                      setDeadlineModalTarget({
+                                        kind: 'project',
+                                        projectId: proj.id
+                                      })
+                                    }
+                                  >
+                                    <Flag size={11.5} />
+                                    <span>
+                                      {proj.deadline != null && dlDiff != null
+                                        ? dlDiff === 0
+                                          ? t.deadlineToday
+                                          : dlDiff > 0
+                                            ? t.deadlineDaysLeft(dlDiff)
+                                            : t.deadlineDaysOverdue(Math.abs(dlDiff))
+                                        : t.targetDate}
+                                    </span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    disabled={pIdx === 0}
+                                    title={t.actionMove}
+                                    onClick={() =>
+                                      localDb.moveProjectOrder(proj.id, 'up', area.id)
+                                    }
+                                  >
+                                    <ArrowUp size={14} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    disabled={pIdx === areaProjects.length - 1}
+                                    title={t.actionMove}
+                                    onClick={() =>
+                                      localDb.moveProjectOrder(proj.id, 'down', area.id)
+                                    }
+                                  >
+                                    <ArrowDown size={14} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    title={t.actionEdit}
+                                    onClick={() =>
+                                      setProjectModalState({ open: true, project: proj })
+                                    }
+                                  >
+                                    <Edit3 size={14} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Direct Area To-Dos */}
+                      <div className="group-section">
+                        {areaDirectTasks.length === 0 && areaProjects.length === 0 ? (
+                          <div className="empty-state">{t.emptyView}</div>
+                        ) : (
+                          <div className="task-list">
+                            {areaDirectTasks.map((tk) =>
+                              renderTaskRow(tk, areaDirectTasks, false)
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </>
               );
             })()}
@@ -5493,6 +5790,11 @@ export const App: React.FC = () => {
             todayTasks={[...todayDaytimeTasks, ...todayEveningTasks]}
             todayCompletedCount={todayCompletedCount}
             todayCalendarEvents={activeTodayCalendarEvents}
+            upcomingCalendarEventsByEpochDay={
+              prefs.calendarEventsEnabled ? upcomingCalendarEventsByEpochDay : undefined
+            }
+            workdayStartMinutes={workdayBounds.startMinutes}
+            workdayEndMinutes={workdayBounds.endMinutes}
             todayStartMs={todayStartMs}
             endOfTodayMs={endOfToday}
             allOpenTasks={openInActiveProj}
@@ -6149,12 +6451,21 @@ export const App: React.FC = () => {
 
       {geminiModalOpen && (
         <GeminiModal
+          initialTab={geminiModalTab}
           areas={snapshot.areas}
           defaultAreaId={defaultAreaIdForNewProject}
+          todayOpenTasks={[...todayDaytimeTasks, ...todayEveningTasks]}
+          todayCalendarEvents={activeTodayCalendarEvents}
+          workdayStartMinutes={workdayBounds.startMinutes}
+          workdayEndMinutes={workdayBounds.endMinutes}
           lang={lang}
           geminiApiKey={prefs.geminiApiKey}
           t={t}
           onNavigateProject={(projectId) => handleSelectNav({ kind: 'project', projectId })}
+          onAppliedDayPlan={() => {
+            setActiveNav({ kind: 'smart', view: 'TODAY' });
+            setTodayViewMode('timeline');
+          }}
           onToast={showToast}
           onClose={() => setGeminiModalOpen(false)}
         />

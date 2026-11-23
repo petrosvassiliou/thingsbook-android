@@ -3,6 +3,8 @@ import {
   isoDayOfWeek,
   startOfDayEpoch,
   toIsoDateInputValue,
+  type AreaRecord,
+  type AreaViewMode,
   type HeadingRecord,
   type ProjectRecord,
   type ProjectViewMode,
@@ -602,6 +604,464 @@ export function shiftTaskDatesByDays(
     whenDate: newWhen,
     deadline: newDeadline,
     scheduleState: nextSchedule
+  };
+}
+
+// ==================== v3.1 Smart Push-on-Conflict Dependency Cascade & Area Portfolio Layout ====================
+
+export interface CascadedTaskShift {
+  task: TaskRecord;
+  deltaDays: number;
+  whenDate: number | null;
+  deadline: number | null;
+  scheduleState: ScheduleState;
+  isAnchor: boolean;
+}
+
+/**
+ * Smart Push-on-Conflict Auto-Cascading Dependencies (v3.1):
+ * Shifts `anchorTask` by `deltaDays`, then runs a cycle-safe BFS over open downstream tasks
+ * (`t.status === 'OPEN' && !t.isDeleted`) whose `blockedByTaskIds` reference an upstream shifted task.
+ * Only pushes a downstream scheduled task forward when `blockerNewEndDay >= depEffectiveStartDay`
+ * by `pushNeeded = (blockerNewEndDay + 1) - depEffectiveStartDay`, preserving existing slack and
+ * never pulling downstream tasks backward.
+ */
+export function computeSmartDependencyCascade(
+  anchorTask: TaskRecord,
+  deltaDays: number,
+  projectTasks: readonly TaskRecord[],
+  todayEpoch: number = startOfDayEpoch()
+): CascadedTaskShift[] {
+  const step = Math.trunc(deltaDays);
+  if (!Number.isFinite(step) || step === 0) return [];
+
+  const normToday = normalizeLocalDayEpoch(todayEpoch);
+
+  const taskById = new Map<string, TaskRecord>();
+  taskById.set(anchorTask.id, anchorTask);
+  for (const t of projectTasks) {
+    if (!t.isDeleted && t.status !== 'CANCELED') {
+      taskById.set(t.id, t);
+    }
+  }
+
+  const dependentsByBlocker = new Map<string, TaskRecord[]>();
+  for (const t of taskById.values()) {
+    if (t.isDeleted || t.status !== 'OPEN') continue;
+    for (const rawBlockerId of t.blockedByTaskIds ?? []) {
+      const clean = String(rawBlockerId || '').trim();
+      if (clean && clean !== t.id) {
+        let list = dependentsByBlocker.get(clean);
+        if (!list) {
+          list = [];
+          dependentsByBlocker.set(clean, list);
+        }
+        list.push(t);
+      }
+    }
+  }
+
+  const baseSpanByTaskId = new Map<string, { startDay: number; endDay: number }>();
+  for (const t of taskById.values()) {
+    const rawSpan = resolveRawTaskSpan(t, null);
+    if (rawSpan) {
+      baseSpanByTaskId.set(t.id, {
+        startDay: localDaysBetween(normToday, rawSpan.startEpoch),
+        endDay: localDaysBetween(normToday, rawSpan.endEpoch)
+      });
+    }
+  }
+
+  if (!baseSpanByTaskId.has(anchorTask.id)) {
+    const durDays = anchorTask.isMilestone
+      ? 1
+      : Math.max(1, Math.ceil((anchorTask.durationMinutes ?? 30) / MINUTES_PER_WORKDAY));
+    baseSpanByTaskId.set(anchorTask.id, {
+      startDay: 0,
+      endDay: durDays - 1
+    });
+  }
+
+  const appliedDeltaByTaskId = new Map<string, number>();
+  appliedDeltaByTaskId.set(anchorTask.id, step);
+
+  const queue: string[] = [anchorTask.id];
+  let guard = 0;
+  const maxIterations = Math.max(16, taskById.size * 4);
+
+  while (queue.length > 0 && guard < maxIterations) {
+    guard++;
+    const currentId = queue.shift()!;
+    const curBase = baseSpanByTaskId.get(currentId);
+    if (!curBase) continue;
+    const curDelta = appliedDeltaByTaskId.get(currentId) ?? 0;
+    const blockerNewEndDay = curBase.endDay + curDelta;
+
+    const dependents = dependentsByBlocker.get(currentId) ?? [];
+    for (const dep of dependents) {
+      if (dep.id === anchorTask.id) continue;
+      const depBase = baseSpanByTaskId.get(dep.id);
+      if (!depBase) continue;
+      const existingDepDelta = appliedDeltaByTaskId.get(dep.id) ?? 0;
+      const depEffectiveStartDay = depBase.startDay + existingDepDelta;
+      if (blockerNewEndDay >= depEffectiveStartDay) {
+        const pushNeeded = blockerNewEndDay + 1 - depEffectiveStartDay;
+        const nextDepDelta = existingDepDelta + pushNeeded;
+        if (nextDepDelta > existingDepDelta) {
+          appliedDeltaByTaskId.set(dep.id, nextDepDelta);
+          queue.push(dep.id);
+        }
+      }
+    }
+  }
+
+  const results: CascadedTaskShift[] = [];
+  for (const [taskId, taskDelta] of appliedDeltaByTaskId.entries()) {
+    if (taskDelta === 0) continue;
+    const targetTask = taskById.get(taskId);
+    if (!targetTask) continue;
+    const shifted = shiftTaskDatesByDays(targetTask, taskDelta, normToday);
+    results.push({
+      task: targetTask,
+      deltaDays: taskDelta,
+      whenDate: shifted.whenDate,
+      deadline: shifted.deadline,
+      scheduleState: shifted.scheduleState,
+      isAnchor: taskId === anchorTask.id
+    });
+  }
+
+  return results;
+}
+
+export function computeCascadeDeltaPreviewMap(
+  anchorTask: TaskRecord,
+  deltaDays: number,
+  projectTasks: readonly TaskRecord[],
+  todayEpoch: number = startOfDayEpoch()
+): Map<string, number> {
+  const map = new Map<string, number>();
+  const shifts = computeSmartDependencyCascade(anchorTask, deltaDays, projectTasks, todayEpoch);
+  for (const item of shifts) {
+    map.set(item.task.id, item.deltaDays);
+  }
+  return map;
+}
+
+export function normalizeAreaViewMode(mode?: string | null): AreaViewMode {
+  if (typeof mode === 'string' && mode.trim().toLowerCase() === 'roadmap') {
+    return 'roadmap';
+  }
+  return 'list';
+}
+
+export interface AreaPortfolioProjectLane {
+  project: ProjectRecord;
+  projectLayout: ProjectRoadmapLayout;
+  summaryStartDay: number;
+  summaryEndDay: number;
+  summaryStartDayIndex: number;
+  summaryEndDayIndex: number;
+  spanDays: number;
+  milestoneBars: PlottedRoadmapTask[];
+  completedCount: number;
+  totalCount: number;
+}
+
+export interface AreaPortfolioRoadmapLayout {
+  area: Pick<AreaRecord, 'id' | 'title'>;
+  areaId: string;
+  todayEpoch: number;
+  todayDayIndex: number;
+  windowStartEpoch: number;
+  windowEndEpoch: number;
+  totalDays: number;
+  days: RoadmapDayCell[];
+  projectLanes: AreaPortfolioProjectLane[];
+  unscheduledProjects: ProjectRecord[];
+}
+
+export function buildAreaPortfolioRoadmapLayout(
+  area: Pick<AreaRecord, 'id' | 'title'>,
+  areaProjects: readonly ProjectRecord[],
+  allHeadings: readonly HeadingRecord[],
+  allOpenTasks: readonly TaskRecord[],
+  todayEpoch: number = startOfDayEpoch(),
+  ungroupedTitle: string = 'General'
+): AreaPortfolioRoadmapLayout {
+  const todayDay = normalizeLocalDayEpoch(todayEpoch);
+
+  const activeProjects = areaProjects
+    .filter((p) => !p.isDeleted && p.status === 'ACTIVE' && (!area.id || p.areaId === area.id))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+
+  interface RawProjectCandidate {
+    project: ProjectRecord;
+    rawSubLayout: ProjectRoadmapLayout;
+    summaryStartEpoch: number;
+    summaryEndEpoch: number;
+    completedCount: number;
+    totalCount: number;
+  }
+
+  const rawScheduled: RawProjectCandidate[] = [];
+  const unscheduledProjects: ProjectRecord[] = [];
+
+  for (const proj of activeProjects) {
+    const projHeadings = allHeadings.filter(
+      (h) => !h.isDeleted && !h.isArchived && h.projectId === proj.id
+    );
+    const projTasks = allOpenTasks.filter(
+      (t) => !t.isDeleted && t.status !== 'CANCELED' && t.projectId === proj.id
+    );
+    const subLayout = buildProjectRoadmapLayout(
+      proj,
+      projHeadings,
+      projTasks,
+      todayDay,
+      ungroupedTitle
+    );
+
+    const candidateStarts: number[] = [];
+    const candidateEnds: number[] = [];
+
+    for (const lane of subLayout.lanes) {
+      if (lane.startEpoch != null && lane.endEpoch != null) {
+        candidateStarts.push(lane.startEpoch);
+        candidateEnds.push(lane.endEpoch);
+      }
+    }
+    for (const pt of subLayout.plottedTasks) {
+      candidateStarts.push(pt.startEpoch);
+      candidateEnds.push(pt.endEpoch);
+    }
+    if (proj.whenDate != null) {
+      candidateStarts.push(normalizeLocalDayEpoch(proj.whenDate));
+    }
+    if (proj.deadline != null) {
+      candidateEnds.push(normalizeLocalDayEpoch(proj.deadline));
+    }
+
+    if (candidateStarts.length === 0 && candidateEnds.length === 0) {
+      unscheduledProjects.push(proj);
+    } else {
+      const combined = [...candidateStarts, ...candidateEnds];
+      const rawMin = combined.reduce((m, v) => Math.min(m, v), Infinity);
+      const rawMax = combined.reduce((m, v) => Math.max(m, v), -Infinity);
+      const summaryStartEpoch = Math.min(rawMin, rawMax);
+      const summaryEndEpoch = Math.max(summaryStartEpoch, rawMax);
+      rawScheduled.push({
+        project: proj,
+        rawSubLayout: subLayout,
+        summaryStartEpoch,
+        summaryEndEpoch,
+        completedCount: projTasks.filter((t) => t.status === 'COMPLETED').length,
+        totalCount: projTasks.length
+      });
+    }
+  }
+
+  const minScheduled =
+    rawScheduled.length > 0
+      ? rawScheduled.reduce((m, p) => Math.min(m, p.summaryStartEpoch), Infinity)
+      : null;
+  const maxScheduled =
+    rawScheduled.length > 0
+      ? rawScheduled.reduce((m, p) => Math.max(m, p.summaryEndEpoch), -Infinity)
+      : null;
+
+  const defaultStart = addDaysLocal(todayDay, -3);
+  const earliestAllowed = addDaysLocal(todayDay, -90);
+  const windowStartEpoch =
+    minScheduled != null && minScheduled < defaultStart
+      ? Math.max(earliestAllowed, addDaysLocal(minScheduled, -1))
+      : defaultStart;
+
+  const minRequiredEnd = addDaysLocal(windowStartEpoch, MIN_ROADMAP_WINDOW_DAYS - 1);
+  const maxWindowEnd = addDaysLocal(windowStartEpoch, MAX_ROADMAP_WINDOW_DAYS - 1);
+  const twoMonthCap = addOneMonthLocal(addOneMonthLocal(maxScheduled ?? todayDay));
+  const rawEnd =
+    maxScheduled != null
+      ? Math.max(minRequiredEnd, addDaysLocal(maxScheduled, 7))
+      : minRequiredEnd;
+  const windowEndEpoch = Math.min(
+    maxWindowEnd,
+    Math.min(rawEnd, Math.max(minRequiredEnd, twoMonthCap))
+  );
+
+  const totalDays = Math.max(1, localDaysBetween(windowStartEpoch, windowEndEpoch) + 1);
+  const days: RoadmapDayCell[] = [];
+  for (let i = 0; i < totalDays; i++) {
+    const ep = addDaysLocal(windowStartEpoch, i);
+    const d = new Date(ep);
+    const dow = isoDayOfWeek(d);
+    days.push({
+      dayIndex: i,
+      epoch: ep,
+      isoDate: toIsoDateInputValue(ep),
+      dayOfMonth: d.getDate(),
+      monthIndex: d.getMonth(),
+      year: d.getFullYear(),
+      weekdayIso: dow,
+      isToday: ep === todayDay,
+      isWeekend: dow === 6 || dow === 7
+    });
+  }
+
+  const clampDayIndex = (idx: number): number => Math.max(0, Math.min(totalDays - 1, idx));
+  const todayDayIndex = clampDayIndex(localDaysBetween(windowStartEpoch, todayDay));
+
+  const projectLanes: AreaPortfolioProjectLane[] = rawScheduled.map((cand) => {
+    const remappedPlottedTasks: PlottedRoadmapTask[] = [];
+    const remappedLanes: RoadmapPhaseLane[] = cand.rawSubLayout.lanes.map((lane) => {
+      let laneStartIdx: number | null = null;
+      let laneEndIdx: number | null = null;
+      let laneSpanDays = 0;
+      if (lane.startEpoch != null && lane.endEpoch != null) {
+        const rawS = localDaysBetween(windowStartEpoch, lane.startEpoch);
+        const rawE = localDaysBetween(windowStartEpoch, lane.endEpoch);
+        if (rawE >= 0 && rawS < totalDays) {
+          laneStartIdx = clampDayIndex(rawS);
+          laneEndIdx = Math.max(laneStartIdx, clampDayIndex(rawE));
+          laneSpanDays = laneEndIdx - laneStartIdx + 1;
+        }
+      }
+
+      const laneTasks = lane.plottedTasks.map((pt) => {
+        const rawS = localDaysBetween(windowStartEpoch, pt.startEpoch);
+        const rawE = localDaysBetween(windowStartEpoch, pt.endEpoch);
+        const sIdx = clampDayIndex(rawS);
+        const eIdx = Math.max(sIdx, clampDayIndex(rawE));
+        const remapped: PlottedRoadmapTask = {
+          ...pt,
+          startDayIndex: sIdx,
+          endDayIndex: eIdx,
+          spanDays: eIdx - sIdx + 1,
+          isClippedStart: rawS < 0,
+          isClippedEnd: rawE >= totalDays
+        };
+        remappedPlottedTasks.push(remapped);
+        return remapped;
+      });
+
+      return {
+        ...lane,
+        startDayIndex: laneStartIdx,
+        endDayIndex: laneEndIdx,
+        spanDays: laneSpanDays,
+        plottedTasks: laneTasks
+      };
+    });
+
+    const remappedLayout: ProjectRoadmapLayout = {
+      ...cand.rawSubLayout,
+      todayEpoch: todayDay,
+      todayDayIndex,
+      windowStartEpoch,
+      windowEndEpoch,
+      totalDays,
+      days,
+      lanes: remappedLanes,
+      plottedTasks: remappedPlottedTasks
+    };
+
+    const rawProjS = localDaysBetween(windowStartEpoch, cand.summaryStartEpoch);
+    const rawProjE = localDaysBetween(windowStartEpoch, cand.summaryEndEpoch);
+    const summaryStartDayIndex = clampDayIndex(rawProjS);
+    const summaryEndDayIndex = Math.max(summaryStartDayIndex, clampDayIndex(rawProjE));
+
+    return {
+      project: cand.project,
+      projectLayout: remappedLayout,
+      summaryStartDay: cand.summaryStartEpoch,
+      summaryEndDay: cand.summaryEndEpoch,
+      summaryStartDayIndex,
+      summaryEndDayIndex,
+      spanDays: summaryEndDayIndex - summaryStartDayIndex + 1,
+      milestoneBars: remappedPlottedTasks.filter(
+        (pt) => pt.isMilestone || Boolean(pt.task.isMilestone)
+      ),
+      completedCount: cand.completedCount,
+      totalCount: cand.totalCount
+    };
+  });
+
+  return {
+    area: { id: area.id, title: area.title },
+    areaId: area.id,
+    todayEpoch: todayDay,
+    todayDayIndex,
+    windowStartEpoch,
+    windowEndEpoch,
+    totalDays,
+    days,
+    projectLanes,
+    unscheduledProjects
+  };
+}
+
+export function toExportablePortfolioLayout(
+  portfolio: AreaPortfolioRoadmapLayout,
+  expandedProjectIds: ReadonlySet<string> = new Set()
+): ProjectRoadmapLayout {
+  const lanes: RoadmapPhaseLane[] = [];
+  const plottedTasks: PlottedRoadmapTask[] = [];
+  const dependencyEdges: RoadmapDependencyEdge[] = [];
+
+  portfolio.projectLanes.forEach((pLane, idx) => {
+    const synHeading: HeadingRecord = {
+      id: pLane.project.id,
+      projectId: `area_export_${portfolio.areaId}`,
+      title: pLane.project.title,
+      startDate: pLane.summaryStartDay,
+      endDate: pLane.summaryEndDay,
+      sortOrder: (idx + 1) * 100,
+      isArchived: false,
+      createdAt: pLane.project.createdAt,
+      updatedAt: pLane.project.updatedAt,
+      isDeleted: false,
+      isDirty: false
+    };
+    const isExpanded = expandedProjectIds.has(pLane.project.id);
+    const sourceBars = isExpanded ? pLane.projectLayout.plottedTasks : pLane.milestoneBars;
+    const remappedBars: PlottedRoadmapTask[] = sourceBars.map((pt) => ({
+      ...pt,
+      headingId: synHeading.id
+    }));
+    plottedTasks.push(...remappedBars);
+    if (isExpanded) {
+      dependencyEdges.push(...pLane.projectLayout.dependencyEdges);
+    }
+    lanes.push({
+      heading: synHeading,
+      laneId: synHeading.id,
+      title: synHeading.title,
+      startEpoch: pLane.summaryStartDay,
+      endEpoch: pLane.summaryEndDay,
+      startDayIndex: pLane.summaryStartDayIndex,
+      endDayIndex: pLane.summaryEndDayIndex,
+      spanDays: pLane.spanDays,
+      isInferred: false,
+      plottedTasks: remappedBars,
+      unscheduledTasks: [],
+      completedCount: pLane.completedCount,
+      totalCount: pLane.totalCount
+    });
+  });
+
+  return {
+    projectId: `area_export_${portfolio.areaId}`,
+    todayEpoch: portfolio.todayEpoch,
+    todayDayIndex: portfolio.todayDayIndex,
+    windowStartEpoch: portfolio.windowStartEpoch,
+    windowEndEpoch: portfolio.windowEndEpoch,
+    totalDays: portfolio.totalDays,
+    days: portfolio.days,
+    lanes,
+    plottedTasks,
+    unscheduledTasks: [],
+    unscheduledPhases: [],
+    dependencyEdges
   };
 }
 

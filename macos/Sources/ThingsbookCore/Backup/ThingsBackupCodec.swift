@@ -626,6 +626,8 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
     public var tagSortMode: String?
     public var viewSortMode: String?
     public var savedPerspectivesJson: String?
+    public var workdayStartMinutes: Int?
+    public var workdayEndMinutes: Int?
 
     public init(
         sidebarVisible: Bool? = nil,
@@ -639,7 +641,9 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         includeBetaUpdates: Bool? = nil,
         tagSortMode: String? = nil,
         viewSortMode: String? = nil,
-        savedPerspectivesJson: String? = nil
+        savedPerspectivesJson: String? = nil,
+        workdayStartMinutes: Int? = nil,
+        workdayEndMinutes: Int? = nil
     ) {
         self.sidebarVisible = sidebarVisible
         self.dailyDigestEnabled = dailyDigestEnabled
@@ -653,6 +657,8 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         self.tagSortMode = tagSortMode
         self.viewSortMode = viewSortMode
         self.savedPerspectivesJson = savedPerspectivesJson
+        self.workdayStartMinutes = workdayStartMinutes
+        self.workdayEndMinutes = workdayEndMinutes
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -660,6 +666,7 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         case languageTag, calendarEventsEnabled, selectedCalendarIds
         case groupTodayByProjectOrArea, includeBetaUpdates
         case tagSortMode, viewSortMode, savedPerspectivesJson, savedPerspectives
+        case workdayStartMinutes, workdayEndMinutes
     }
 
     public init(from decoder: Decoder) throws {
@@ -684,6 +691,8 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         } else {
             self.savedPerspectivesJson = nil
         }
+        self.workdayStartMinutes = try? c.decodeIfPresent(Int.self, forKey: .workdayStartMinutes)
+        self.workdayEndMinutes = try? c.decodeIfPresent(Int.self, forKey: .workdayEndMinutes)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -700,6 +709,8 @@ public struct BackupPreferencesDto: Codable, Equatable, Sendable {
         try c.encodeIfPresent(tagSortMode, forKey: .tagSortMode)
         try c.encodeIfPresent(viewSortMode, forKey: .viewSortMode)
         try c.encodeIfPresent(savedPerspectivesJson, forKey: .savedPerspectivesJson)
+        try c.encodeIfPresent(workdayStartMinutes, forKey: .workdayStartMinutes)
+        try c.encodeIfPresent(workdayEndMinutes, forKey: .workdayEndMinutes)
     }
 }
 

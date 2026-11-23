@@ -1,4 +1,6 @@
 import {
+  addDaysLocal,
+  localEpochDayFromMillis,
   startOfDayEpoch,
   type AreaRecord,
   type CalendarEventItem,
@@ -25,6 +27,8 @@ export const STALLED_PROJECT_THRESHOLD_MS = STALLED_PROJECT_THRESHOLD_DAYS * 86_
 
 export const DEFAULT_TIMEBLOCK_DURATION_MINUTES = 30;
 export const DEFAULT_DAILY_CAPACITY_MINUTES = 480;
+export const DEFAULT_WORKDAY_START_MINUTES = 540; // 09:00
+export const DEFAULT_WORKDAY_END_MINUTES = 1020; // 17:00
 export const TIMEBLOCK_DURATION_PRESETS = [15, 30, 45, 60, 90, 120, 240, 480] as const;
 export const STANDALONE_DURATION_PRESETS = [5, 15, 30, 60, 120, 240, 480] as const;
 export const TIMEBLOCK_QUICK_START_MINUTES = [
@@ -2785,17 +2789,59 @@ export interface TodayCapacitySummary {
   freeMinutes: number;
 }
 
-/**
- * Computes Today's planned task duration minutes and remaining free focus minutes
- * against a standard 8h (480m) daily focus budget minus non-all-day calendar meetings.
- */
-export function computeTodayCapacitySummary(
+export interface DayWorkloadSummary {
+  epochDay: number;
+  dayStartMillis: number;
+  plannedMinutes: number;
+  busyCalendarMinutes: number;
+  freeMinutes: number;
+  totalCapacityMinutes: number;
+  overloadedByMinutes: number;
+  isOverloaded: boolean;
+  loadFraction: number;
+  taskCount: number;
+}
+
+export function normalizeWorkdayBounds(
+  workdayStartMinutes?: number | null,
+  workdayEndMinutes?: number | null
+): { startMinutes: number; endMinutes: number; totalCapacityMinutes: number } {
+  const rawStart =
+    workdayStartMinutes != null && Number.isFinite(workdayStartMinutes)
+      ? Math.trunc(workdayStartMinutes)
+      : DEFAULT_WORKDAY_START_MINUTES;
+  const startMinutes = Math.max(0, Math.min(23 * 60, rawStart));
+  const rawEnd =
+    workdayEndMinutes != null && Number.isFinite(workdayEndMinutes)
+      ? Math.trunc(workdayEndMinutes)
+      : DEFAULT_WORKDAY_END_MINUTES;
+  const endMinutes = Math.max(startMinutes + 60, Math.min(24 * 60, rawEnd));
+  return {
+    startMinutes,
+    endMinutes,
+    totalCapacityMinutes: endMinutes - startMinutes
+  };
+}
+
+export function computeDayCapacityBreakdown(
   tasks: readonly TaskRecord[],
   calendarEvents: readonly CalendarEventItem[] = [],
   dayStartMillis: number = startOfDayEpoch(),
-  dayEndMillis: number = dayStartMillis + 86_400_000
-): TodayCapacitySummary {
-  const effectiveEnd =
+  dayEndMillis: number = dayStartMillis + 86_400_000,
+  workdayStartMinutes: number = DEFAULT_WORKDAY_START_MINUTES,
+  workdayEndMinutes: number = DEFAULT_WORKDAY_END_MINUTES
+): {
+  plannedMinutes: number;
+  busyCalendarMinutes: number;
+  freeMinutes: number;
+  totalCapacityMinutes: number;
+} {
+  const { startMinutes, endMinutes, totalCapacityMinutes } = normalizeWorkdayBounds(
+    workdayStartMinutes,
+    workdayEndMinutes
+  );
+
+  const effectiveDayEnd =
     Number.isFinite(dayEndMillis) && dayEndMillis > dayStartMillis
       ? dayEndMillis
       : dayStartMillis + 86_400_000;
@@ -2803,24 +2849,41 @@ export function computeTodayCapacitySummary(
   let plannedMinutes = 0;
   for (const task of tasks) {
     if (task.isDeleted || task.status !== 'OPEN') continue;
-    if (task.durationMinutes != null && Number.isFinite(task.durationMinutes) && task.durationMinutes > 0) {
+    if (
+      task.durationMinutes != null &&
+      Number.isFinite(task.durationMinutes) &&
+      task.durationMinutes > 0
+    ) {
       plannedMinutes += Math.trunc(task.durationMinutes);
-    } else if (task.scheduledStartMinutes != null && Number.isFinite(task.scheduledStartMinutes)) {
+    } else if (
+      task.scheduledStartMinutes != null &&
+      Number.isFinite(task.scheduledStartMinutes)
+    ) {
       plannedMinutes += DEFAULT_TIMEBLOCK_DURATION_MINUTES;
     }
   }
 
+  const workdayStartMs = dayStartMillis + startMinutes * 60_000;
+  const rawWorkdayEndMs = dayStartMillis + endMinutes * 60_000;
+  // Preserve full minute boundary even when caller passes endOfDayEpoch() (23:59:59.999)
+  const dayCeilingMs =
+    effectiveDayEnd >= dayStartMillis + 86_399_000
+      ? Math.max(effectiveDayEnd, rawWorkdayEndMs)
+      : effectiveDayEnd;
+  const workdayEndMs =
+    dayCeilingMs > workdayStartMs ? Math.min(dayCeilingMs, rawWorkdayEndMs) : rawWorkdayEndMs;
+
   const intervals: Array<[number, number]> = [];
   for (const ev of calendarEvents) {
     if (ev.isAllDay || (ev as { allDay?: boolean }).allDay) continue;
-    const s = Math.max(dayStartMillis, ev.startMillis);
-    const e = Math.min(effectiveEnd, ev.endMillis);
+    const s = Math.max(workdayStartMs, Math.max(dayStartMillis, ev.startMillis));
+    const e = Math.min(workdayEndMs, ev.endMillis);
     if (e > s) {
       intervals.push([s, e]);
     }
   }
 
-  let calendarBusyMinutes = 0;
+  let busyCalendarMinutes = 0;
   if (intervals.length > 0) {
     intervals.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     let mergedMs = 0;
@@ -2836,18 +2899,190 @@ export function computeTodayCapacitySummary(
       }
     }
     mergedMs += curEnd - curStart;
-    calendarBusyMinutes = Math.round(mergedMs / 60_000);
+    busyCalendarMinutes = Math.max(0, Math.round(mergedMs / 60_000));
   }
 
   const freeMinutes = Math.max(
     0,
-    DEFAULT_DAILY_CAPACITY_MINUTES - plannedMinutes - calendarBusyMinutes
+    totalCapacityMinutes - busyCalendarMinutes - plannedMinutes
   );
 
   return {
     plannedMinutes,
+    busyCalendarMinutes,
+    freeMinutes,
+    totalCapacityMinutes
+  };
+}
+
+/**
+ * Computes Today's planned task duration minutes and remaining free focus minutes
+ * against the configured workday hours budget (`workdayEndMinutes - workdayStartMinutes`,
+ * defaulting to 09:00–17:00 = 480m) minus non-all-day calendar meetings clipped to workday bounds.
+ */
+export function computeTodayCapacitySummary(
+  tasks: readonly TaskRecord[],
+  calendarEvents: readonly CalendarEventItem[] = [],
+  dayStartMillis: number = startOfDayEpoch(),
+  dayEndMillis: number = dayStartMillis + 86_400_000,
+  workdayStartMinutes: number = DEFAULT_WORKDAY_START_MINUTES,
+  workdayEndMinutes: number = DEFAULT_WORKDAY_END_MINUTES
+): TodayCapacitySummary {
+  const { plannedMinutes, freeMinutes } = computeDayCapacityBreakdown(
+    tasks,
+    calendarEvents,
+    dayStartMillis,
+    dayEndMillis,
+    workdayStartMinutes,
+    workdayEndMinutes
+  );
+  return {
+    plannedMinutes,
     freeMinutes
   };
+}
+
+export function buildDayWorkloadSummary(
+  epochDay: number,
+  dayStartMillis: number,
+  dayEndMillis: number,
+  tasks: readonly TaskRecord[],
+  calendarEvents: readonly CalendarEventItem[],
+  workdayStartMinutes: number = DEFAULT_WORKDAY_START_MINUTES,
+  workdayEndMinutes: number = DEFAULT_WORKDAY_END_MINUTES
+): DayWorkloadSummary {
+  const openDayTasks = tasks.filter((t) => !t.isDeleted && t.status === 'OPEN');
+  const { plannedMinutes, busyCalendarMinutes, freeMinutes, totalCapacityMinutes } =
+    computeDayCapacityBreakdown(
+      openDayTasks,
+      calendarEvents,
+      dayStartMillis,
+      dayEndMillis,
+      workdayStartMinutes,
+      workdayEndMinutes
+    );
+  const totalUsed = plannedMinutes + busyCalendarMinutes;
+  const overloadedByMinutes = Math.max(0, totalUsed - totalCapacityMinutes);
+  const isOverloaded = overloadedByMinutes > 0;
+  const loadFraction =
+    totalCapacityMinutes <= 0
+      ? totalUsed > 0
+        ? 1
+        : 0
+      : Math.max(0, Math.min(1.5, totalUsed / totalCapacityMinutes));
+
+  return {
+    epochDay,
+    dayStartMillis,
+    plannedMinutes,
+    busyCalendarMinutes,
+    freeMinutes,
+    totalCapacityMinutes,
+    overloadedByMinutes,
+    isOverloaded,
+    loadFraction,
+    taskCount: openDayTasks.length
+  };
+}
+
+export interface MultiDayWorkloadParams {
+  todayTasks: readonly TaskRecord[];
+  allOpenTasks: readonly TaskRecord[];
+  todayCalendarEvents?: readonly CalendarEventItem[];
+  upcomingCalendarEventsByEpochDay?: ReadonlyMap<number, readonly CalendarEventItem[]>;
+  todayStartMillis?: number;
+  daysCount?: number;
+  workdayStartMinutes?: number;
+  workdayEndMinutes?: number;
+}
+
+/**
+ * Computes a 7-day (or N-day) workload forecast starting at `todayStartMillis` (`offset = 0..daysCount-1`),
+ * combining open Today & future dated tasks with calendar busy intervals against configured workday bounds.
+ */
+export function computeMultiDayWorkloadForecast(
+  todayTasksOrParams: readonly TaskRecord[] | MultiDayWorkloadParams,
+  allOpenTasksArg: readonly TaskRecord[] = [],
+  todayCalendarEventsArg: readonly CalendarEventItem[] = [],
+  upcomingCalendarEventsByEpochDayArg: ReadonlyMap<number, readonly CalendarEventItem[]> = new Map(),
+  todayStartMillisArg: number = startOfDayEpoch(),
+  daysCountArg: number = 7,
+  workdayStartMinutesArg: number = DEFAULT_WORKDAY_START_MINUTES,
+  workdayEndMinutesArg: number = DEFAULT_WORKDAY_END_MINUTES
+): DayWorkloadSummary[] {
+  const isObj = !Array.isArray(todayTasksOrParams);
+  const paramsObj = isObj ? (todayTasksOrParams as MultiDayWorkloadParams) : null;
+  const todayTasks = paramsObj ? paramsObj.todayTasks : (todayTasksOrParams as readonly TaskRecord[]);
+  const allOpenTasks = paramsObj ? paramsObj.allOpenTasks : allOpenTasksArg;
+  const todayCalendarEvents = paramsObj
+    ? (paramsObj.todayCalendarEvents ?? [])
+    : todayCalendarEventsArg;
+  const upcomingCalendarEventsByEpochDay = paramsObj
+    ? (paramsObj.upcomingCalendarEventsByEpochDay ?? new Map())
+    : upcomingCalendarEventsByEpochDayArg;
+  const baseDayStartMs = startOfDayEpoch(
+    new Date(paramsObj ? (paramsObj.todayStartMillis ?? startOfDayEpoch()) : todayStartMillisArg)
+  );
+  const safeDays = Math.max(
+    1,
+    Math.min(30, Math.trunc(paramsObj ? (paramsObj.daysCount ?? 7) : daysCountArg))
+  );
+  const { startMinutes, endMinutes } = normalizeWorkdayBounds(
+    paramsObj ? paramsObj.workdayStartMinutes : workdayStartMinutesArg,
+    paramsObj ? paramsObj.workdayEndMinutes : workdayEndMinutesArg
+  );
+
+  const todayEpochDay = localEpochDayFromMillis(baseDayStartMs);
+  const todayTaskIdSet = new Set(
+    todayTasks.filter((t) => !t.isDeleted && t.status === 'OPEN').map((t) => t.id)
+  );
+
+  const futureTasksByEpochDay = new Map<number, TaskRecord[]>();
+  for (const task of allOpenTasks) {
+    if (task.isDeleted || task.status !== 'OPEN') continue;
+    if (todayTaskIdSet.has(task.id)) continue;
+    if (task.scheduleState === 'TODAY' || task.scheduleState === 'THIS_EVENING') continue;
+    const targetMs = task.whenDate ?? task.deadline;
+    if (targetMs == null || !Number.isFinite(targetMs)) continue;
+    const targetEpochDay = localEpochDayFromMillis(targetMs);
+    if (targetEpochDay >= todayEpochDay + 1 && targetEpochDay < todayEpochDay + safeDays) {
+      let bucket = futureTasksByEpochDay.get(targetEpochDay);
+      if (!bucket) {
+        bucket = [];
+        futureTasksByEpochDay.set(targetEpochDay, bucket);
+      }
+      bucket.push(task);
+    }
+  }
+
+  const summaries: DayWorkloadSummary[] = [];
+  for (let offset = 0; offset < safeDays; offset++) {
+    const dayStartMs = addDaysLocal(baseDayStartMs, offset);
+    const dayEndMs = addDaysLocal(baseDayStartMs, offset + 1);
+    const epochDay = localEpochDayFromMillis(dayStartMs);
+    const dayTasks =
+      offset === 0
+        ? todayTasks.filter((t) => !t.isDeleted && t.status === 'OPEN')
+        : (futureTasksByEpochDay.get(epochDay) ?? []);
+    const dayEvents =
+      offset === 0
+        ? todayCalendarEvents
+        : (upcomingCalendarEventsByEpochDay.get(epochDay) ?? []);
+
+    summaries.push(
+      buildDayWorkloadSummary(
+        epochDay,
+        dayStartMs,
+        dayEndMs,
+        dayTasks,
+        dayEvents,
+        startMinutes,
+        endMinutes
+      )
+    );
+  }
+
+  return summaries;
 }
 
 

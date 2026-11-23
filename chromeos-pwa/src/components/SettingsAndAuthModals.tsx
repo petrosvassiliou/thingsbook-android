@@ -4,6 +4,7 @@ import {
   Bell,
   Calendar,
   Check,
+  Clock,
   Cloud,
   Database,
   Download,
@@ -37,6 +38,12 @@ import {
   safeParseSavedPerspectives,
   type BackupInspection
 } from '../data/backupCodec';
+import {
+  formatMinutesAsClock,
+  formatStandaloneDuration,
+  normalizeWorkdayBounds
+} from '../domain/v2Utils';
+import { normalizeAreaViewMode } from '../domain/v30Roadmap';
 import {
   cloudSync,
   formatAuthErrorMessage,
@@ -342,6 +349,23 @@ const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
         } else if (restoredPatch.savedPerspectives !== undefined) {
           restoredPatch.showPerspectives = undefined;
         }
+        if (p.workdayStartMinutes != null || p.workdayEndMinutes != null) {
+          const restoredWorkday = normalizeWorkdayBounds(
+            p.workdayStartMinutes,
+            p.workdayEndMinutes
+          );
+          restoredPatch.workdayStartMinutes = restoredWorkday.startMinutes;
+          restoredPatch.workdayEndMinutes = restoredWorkday.endMinutes;
+        }
+        if (p.areaViewModes && typeof p.areaViewModes === 'object') {
+          const nextAreaModes: Record<string, 'list' | 'roadmap'> = {};
+          for (const [k, v] of Object.entries(p.areaViewModes)) {
+            if (k.trim() && typeof v === 'string') {
+              nextAreaModes[k.trim()] = normalizeAreaViewMode(v);
+            }
+          }
+          restoredPatch.areaViewModes = nextAreaModes;
+        }
         onRestoredPrefs(restoredPatch);
       }
 
@@ -545,6 +569,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const isBetaBuild = isPrereleaseVersion(APP_VERSION);
   const effectiveIncludeBeta = Boolean(prefs.includeBetaUpdates) || isBetaBuild;
   const effectiveShowPerspectives = resolveEffectiveShowPerspectives(prefs);
+  const workdayBounds = normalizeWorkdayBounds(
+    prefs.workdayStartMinutes,
+    prefs.workdayEndMinutes
+  );
+  const workdayStartOptions: number[] = [];
+  for (let m = 5 * 60; m <= 22 * 60; m += 30) {
+    workdayStartOptions.push(m);
+  }
+  if (!workdayStartOptions.includes(workdayBounds.startMinutes)) {
+    workdayStartOptions.push(workdayBounds.startMinutes);
+    workdayStartOptions.sort((a, b) => a - b);
+  }
+  const workdayEndOptions: number[] = [];
+  for (let m = workdayBounds.startMinutes + 60; m <= 24 * 60; m += 30) {
+    workdayEndOptions.push(m);
+  }
+  if (!workdayEndOptions.includes(workdayBounds.endMinutes)) {
+    workdayEndOptions.push(workdayBounds.endMinutes);
+    workdayEndOptions.sort((a, b) => a - b);
+  }
+  const formatWorkdayOption = (mins: number) =>
+    mins >= 1440 ? '24:00' : formatMinutesAsClock(mins);
 
   const backupInputRef = useRef<HTMLInputElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
@@ -944,6 +990,107 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 <span className="toggle-switch-knob" />
               </button>
+            </div>
+
+            {/* v3.1 Workday Hours & Daily Capacity Controls */}
+            <div
+              data-testid="settings-workday-hours-section"
+              style={{
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: '1px solid var(--border-subtle)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  flexWrap: 'wrap'
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 13.3,
+                      fontWeight: 600
+                    }}
+                  >
+                    <Clock size={14} style={{ color: 'var(--things-blue)' }} />
+                    <span>{t.v31SettingsWorkdayHours}</span>
+                  </div>
+                  <div style={{ fontSize: 11.8, color: 'var(--text-secondary)', marginTop: 2 }}>
+                    {t.v31SettingsWorkdayDesc}
+                  </div>
+                </div>
+                <span
+                  className="today-capacity-pill"
+                  data-testid="settings-workday-capacity-badge"
+                >
+                  {t.v31SettingsWorkdayDailyCapacity(
+                    formatStandaloneDuration(workdayBounds.totalCapacityMinutes)
+                  )}
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    {t.v31SettingsWorkdayStart}
+                  </span>
+                  <select
+                    className="text-field"
+                    data-testid="settings-workday-start-select"
+                    value={workdayBounds.startMinutes}
+                    onChange={(e) => {
+                      const nextStart = Number(e.target.value);
+                      const next = normalizeWorkdayBounds(nextStart, workdayBounds.endMinutes);
+                      onUpdatePrefs({
+                        workdayStartMinutes: next.startMinutes,
+                        workdayEndMinutes: next.endMinutes
+                      });
+                    }}
+                  >
+                    {workdayStartOptions.map((mins) => (
+                      <option key={mins} value={mins}>
+                        {formatWorkdayOption(mins)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    {t.v31SettingsWorkdayEnd}
+                  </span>
+                  <select
+                    className="text-field"
+                    data-testid="settings-workday-end-select"
+                    value={workdayBounds.endMinutes}
+                    onChange={(e) => {
+                      const nextEnd = Number(e.target.value);
+                      const next = normalizeWorkdayBounds(workdayBounds.startMinutes, nextEnd);
+                      onUpdatePrefs({
+                        workdayStartMinutes: next.startMinutes,
+                        workdayEndMinutes: next.endMinutes
+                      });
+                    }}
+                  >
+                    {workdayEndOptions.map((mins) => (
+                      <option key={mins} value={mins}>
+                        {formatWorkdayOption(mins)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
           </div>
 

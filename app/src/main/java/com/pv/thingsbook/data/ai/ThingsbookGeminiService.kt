@@ -69,9 +69,25 @@ data class GeminiBrainDumpResponse(
 )
 
 @Serializable
+data class GeminiRoadmapTaskDto(
+    val key: String = "",
+    val title: String,
+    val notes: String = "",
+    val dayOffset: Int = 0,
+    val durationMinutes: Int = 60,
+    val effortLevel: String? = "MEDIUM",
+    val isMilestone: Boolean = false,
+    val dependsOnKeys: List<String> = emptyList(),
+    val checklist: List<String> = emptyList()
+)
+
+@Serializable
 data class GeminiProjectHeadingDto(
     val title: String,
-    val tasks: List<String> = emptyList()
+    val tasks: List<String> = emptyList(),
+    val startDayOffset: Int? = null,
+    val endDayOffset: Int? = null,
+    val richTasks: List<GeminiRoadmapTaskDto> = emptyList()
 )
 
 @Serializable
@@ -79,6 +95,30 @@ data class GeminiProjectBlueprintResponse(
     val projectTitle: String,
     val projectNotes: String = "",
     val headings: List<GeminiProjectHeadingDto> = emptyList()
+)
+
+data class GeminiDayTimeblockCandidate(
+    val taskId: String,
+    val title: String,
+    val durationMinutes: Int,
+    val effortLevel: String?,
+    val isPinned: Boolean,
+    val hasTodayDeadline: Boolean,
+    val existingStartMinutes: Int? = null
+)
+
+@Serializable
+data class GeminiDayTimeblockItemDto(
+    val taskId: String,
+    val startMinutes: Int,
+    val durationMinutes: Int,
+    val reason: String = ""
+)
+
+@Serializable
+data class GeminiDayTimeblockPlanResponse(
+    val summary: String = "",
+    val blocks: List<GeminiDayTimeblockItemDto> = emptyList()
 )
 
 @Serializable
@@ -191,7 +231,8 @@ class ThingsbookGeminiService @Inject constructor() {
     }
 
     /**
-     * 3. AI Project Architect: Generates a complete Things 3 Project with Headings and To-Dos in EN, DE, IT, FR, ES.
+     * 3. v3.1 AI Roadmap Architect: Generates a complete Thingsbook v3 Project with dated Phases,
+     *    Milestones (◆), Effort, Durations, Checklists, and Waiting-On Dependencies in EN, DE, IT, FR, ES.
      */
     suspend fun generateProjectBlueprint(
         goalPrompt: String,
@@ -200,16 +241,51 @@ class ThingsbookGeminiService @Inject constructor() {
         val safeGoal = goalPrompt.trim().take(1500)
         val langName = languageDisplayName(locale)
         val prompt = """
-            You are the Thingsbook Project Architect.
+            You are the Thingsbook v3.1 Roadmap Architect.
             Respond strictly in $langName (Locale: ${locale.language}).
-            Create a structured Things 3 GTD project for the goal: "$safeGoal".
-            Include a clear projectTitle, brief inspiring projectNotes, and 3 logical headings, each with 3 concrete tasks.
+            Create a structured GTD + Gantt project roadmap for the goal: "$safeGoal".
+            Include:
+            - projectTitle (clear outcome title in $langName)
+            - projectNotes (1–2 inspiring sentences in $langName)
+            - 3 logical phases (`headings`) spanning a realistic 2 to 4 week schedule starting at dayOffset 0:
+              - title (phase title in $langName)
+              - startDayOffset (integer >= 0)
+              - endDayOffset (integer >= startDayOffset)
+              - tasks: list of plain task titles (mirroring richTasks titles for compatibility)
+              - richTasks: 3 to 4 structured items per phase, including at least 1 milestone (`isMilestone: true`) per project:
+                - key: unique short id like "t1", "t2", ...
+                - title: concise action or milestone name in $langName
+                - notes: brief context in $langName (optional)
+                - dayOffset: integer >= phase startDayOffset
+                - durationMinutes: realistic estimate (30, 60, 120, 240, or 480; 30 for milestones)
+                - effortLevel: one of "QUICK_WIN", "MEDIUM", "DEEP_FOCUS"
+                - isMilestone: boolean (true for key phase deliverables ◆)
+                - dependsOnKeys: array of upstream task `key` strings when strictly sequential (e.g. ["t1"])
+                - checklist: 0 to 3 sub-steps in $langName
             Return ONLY valid JSON matching:
             {
               "projectTitle": "...",
               "projectNotes": "...",
               "headings": [
-                {"title": "...", "tasks": ["...", "...", "..."]}
+                {
+                  "title": "...",
+                  "startDayOffset": 0,
+                  "endDayOffset": 4,
+                  "tasks": ["..."],
+                  "richTasks": [
+                    {
+                      "key": "t1",
+                      "title": "...",
+                      "notes": "",
+                      "dayOffset": 0,
+                      "durationMinutes": 120,
+                      "effortLevel": "DEEP_FOCUS",
+                      "isMilestone": false,
+                      "dependsOnKeys": [],
+                      "checklist": ["...", "..."]
+                    }
+                  ]
+                }
               ]
             }
         """.trimIndent()
@@ -220,11 +296,265 @@ class ThingsbookGeminiService @Inject constructor() {
                 json.decodeFromString<GeminiProjectBlueprintResponse>(extractJsonObject(rawJson))
             }.getOrNull()
             if (parsed != null && parsed.projectTitle.isNotBlank() && parsed.headings.isNotEmpty()) {
-                return@withContext parsed
+                val normalizedHeadings = parsed.headings.mapIndexed { hIdx, h ->
+                    val fallbackTasks = if (h.tasks.isNotEmpty()) {
+                        h.tasks
+                    } else {
+                        h.richTasks.map { it.title }.filter { it.isNotBlank() }
+                    }
+                    val enrichedRich = if (h.richTasks.isNotEmpty()) {
+                        h.richTasks.filter { it.title.isNotBlank() }
+                    } else {
+                        fallbackTasks.mapIndexed { tIdx, tTitle ->
+                            GeminiRoadmapTaskDto(
+                                key = "h${hIdx}_t$tIdx",
+                                title = tTitle,
+                                dayOffset = hIdx * 4 + tIdx,
+                                durationMinutes = if (tIdx == fallbackTasks.lastIndex && hIdx == parsed.headings.lastIndex) 30 else 120,
+                                effortLevel = if (tIdx == 0) "DEEP_FOCUS" else "MEDIUM",
+                                isMilestone = (tIdx == fallbackTasks.lastIndex && hIdx == parsed.headings.lastIndex)
+                            )
+                        }
+                    }
+                    h.copy(
+                        tasks = fallbackTasks,
+                        startDayOffset = h.startDayOffset ?: (enrichedRich.minOfOrNull { it.dayOffset } ?: (hIdx * 4)),
+                        endDayOffset = h.endDayOffset ?: (enrichedRich.maxOfOrNull { it.dayOffset + maxOf(0, (it.durationMinutes - 1) / 480) } ?: (hIdx * 4 + 3)),
+                        richTasks = enrichedRich
+                    )
+                }
+                return@withContext parsed.copy(headings = normalizedHeadings)
             }
         }
 
         offlineLocalizedProjectBlueprint(safeGoal, locale)
+    }
+
+    /**
+     * 5. v3.1 "Plan My Day" Smart Auto-Timeblocker: Proposes conflict-free Today timeblocks around
+     *    calendar busy intervals and user workday bounds in EN, DE, IT, FR, ES.
+     */
+    suspend fun generateDailyTimeblockPlan(
+        candidates: List<GeminiDayTimeblockCandidate>,
+        busyIntervalsMinutes: List<Pair<Int, Int>>,
+        workdayStartMinutes: Int = 9 * 60,
+        workdayEndMinutes: Int = 17 * 60,
+        earliestStartMinutes: Int = workdayStartMinutes,
+        locale: Locale = Locale.getDefault()
+    ): GeminiDayTimeblockPlanResponse = withContext(Dispatchers.IO) {
+        if (candidates.isEmpty()) {
+            return@withContext GeminiDayTimeblockPlanResponse(summary = "", blocks = emptyList())
+        }
+        val safeWorkStart = workdayStartMinutes.coerceIn(0, 22 * 60)
+        val safeWorkEnd = workdayEndMinutes.coerceIn(safeWorkStart + 60, 24 * 60)
+        val effectiveStart = maxOf(safeWorkStart, earliestStartMinutes).coerceAtMost(23 * 60)
+
+        val deterministicFallback = buildDeterministicDayTimeblockPlan(
+            candidates = candidates,
+            busyIntervalsMinutes = busyIntervalsMinutes,
+            workdayStartMinutes = safeWorkStart,
+            workdayEndMinutes = safeWorkEnd,
+            earliestStartMinutes = effectiveStart,
+            locale = locale
+        )
+
+        val langName = languageDisplayName(locale)
+        val busyDesc = if (busyIntervalsMinutes.isEmpty()) {
+            "none"
+        } else {
+            busyIntervalsMinutes.joinToString(", ") { (s, e) -> "${formatClock(s)}-${formatClock(e)}" }
+        }
+        val tasksDesc = candidates.take(20).joinToString("\n") { c ->
+            """- id="${c.taskId}", title="${c.title.take(120)}", durationMin=${c.durationMinutes}, effort=${c.effortLevel ?: "MEDIUM"}, pinned=${c.isPinned}, dueToday=${c.hasTodayDeadline}"""
+        }
+        val prompt = """
+            You are the Thingsbook "Plan My Day" Focus Timeblocker.
+            Respond strictly in $langName (Locale: ${locale.language}).
+            Workday window: ${formatClock(effectiveStart)} (${effectiveStart}m) to ${formatClock(safeWorkEnd)} (${safeWorkEnd}m).
+            Busy calendar/locked intervals (DO NOT overlap): $busyDesc.
+            Open Today tasks to schedule:
+            $tasksDesc
+            Rules:
+            1. Place tasks in 15-minute aligned startMinutes (0..1425) without overlapping busy intervals or each other.
+            2. Prioritize pinned and dueToday tasks first, DEEP_FOCUS in longer uninterrupted morning/early blocks, and QUICK_WIN in short gaps.
+            3. Keep durationMinutes realistic (15..240). Include a short 3-8 word `reason` in $langName.
+            Return ONLY valid JSON matching:
+            {"summary": "...", "blocks": [{"taskId": "...", "startMinutes": 540, "durationMinutes": 60, "reason": "..."}]}
+        """.trimIndent()
+
+        val rawJson = callGeminiJson(prompt, locale)
+        if (!rawJson.isNullOrBlank()) {
+            val parsed = runCatching {
+                json.decodeFromString<GeminiDayTimeblockPlanResponse>(extractJsonObject(rawJson))
+            }.getOrNull()
+            val validCandidateIds = candidates.mapTo(HashSet()) { it.taskId }
+            val sanitized = sanitizeProposedTimeblocks(
+                proposed = parsed?.blocks.orEmpty().filter { it.taskId in validCandidateIds },
+                busyIntervalsMinutes = busyIntervalsMinutes,
+                earliestStartMinutes = effectiveStart
+            )
+            if (sanitized.isNotEmpty()) {
+                return@withContext GeminiDayTimeblockPlanResponse(
+                    summary = parsed?.summary?.takeIf { it.isNotBlank() } ?: deterministicFallback.summary,
+                    blocks = sanitized
+                )
+            }
+        }
+
+        deterministicFallback
+    }
+
+    private fun formatClock(minutesFromMidnight: Int): String {
+        val clamped = minutesFromMidnight.coerceIn(0, 1439)
+        return "%02d:%02d".format(Locale.ROOT, clamped / 60, clamped % 60)
+    }
+
+    private fun sanitizeProposedTimeblocks(
+        proposed: List<GeminiDayTimeblockItemDto>,
+        busyIntervalsMinutes: List<Pair<Int, Int>>,
+        earliestStartMinutes: Int
+    ): List<GeminiDayTimeblockItemDto> {
+        if (proposed.isEmpty()) return emptyList()
+        val occupied = busyIntervalsMinutes
+            .filter { it.second > it.first }
+            .toMutableList()
+        val result = mutableListOf<GeminiDayTimeblockItemDto>()
+        val seenIds = HashSet<String>()
+
+        for (item in proposed.sortedBy { it.startMinutes }) {
+            if (!seenIds.add(item.taskId)) continue
+            val dur = ((item.durationMinutes.coerceIn(15, 480) + 4) / 5) * 5
+            var start = ((maxOf(earliestStartMinutes, item.startMinutes).coerceIn(0, 1425) + 7) / 15) * 15
+            var guard = 0
+            while (guard < 96 && start + dur <= 24 * 60) {
+                val end = start + dur
+                val conflict = occupied.firstOrNull { (bs, be) -> start < be && bs < end }
+                if (conflict == null) break
+                start = ((conflict.second + 14) / 15) * 15
+                guard++
+            }
+            if (start + dur <= 24 * 60) {
+                occupied += start to (start + dur)
+                result += item.copy(startMinutes = start, durationMinutes = dur)
+            }
+        }
+        return result.sortedBy { it.startMinutes }
+    }
+
+    fun buildDeterministicDayTimeblockPlan(
+        candidates: List<GeminiDayTimeblockCandidate>,
+        busyIntervalsMinutes: List<Pair<Int, Int>>,
+        workdayStartMinutes: Int,
+        workdayEndMinutes: Int,
+        earliestStartMinutes: Int,
+        locale: Locale
+    ): GeminiDayTimeblockPlanResponse {
+        val lang = locale.language.lowercase(Locale.ROOT)
+        val sortedCandidates = candidates.sortedWith(
+            compareByDescending<GeminiDayTimeblockCandidate> { it.isPinned }
+                .thenByDescending { it.hasTodayDeadline }
+                .thenBy {
+                    when (it.effortLevel?.uppercase(Locale.ROOT)) {
+                        "DEEP_FOCUS" -> 0
+                        "MEDIUM" -> 1
+                        "QUICK_WIN" -> 2
+                        else -> 1
+                    }
+                }
+                .thenByDescending { it.durationMinutes }
+        )
+
+        val occupied = busyIntervalsMinutes
+            .filter { it.second > it.first }
+            .sortedBy { it.first }
+            .toMutableList()
+
+        val blocks = mutableListOf<GeminiDayTimeblockItemDto>()
+        val cursorFloor = ((earliestStartMinutes.coerceIn(0, 23 * 60) + 14) / 15) * 15
+
+        for (cand in sortedCandidates) {
+            val dur = cand.durationMinutes.coerceIn(15, 240)
+            var slotStart = cursorFloor
+            var placed = false
+            var guard = 0
+            while (guard < 96 && slotStart + dur <= 24 * 60) {
+                val slotEnd = slotStart + dur
+                val conflict = occupied.firstOrNull { (bs, be) -> slotStart < be && bs < slotEnd }
+                if (conflict == null) {
+                    placed = true
+                    break
+                }
+                slotStart = ((conflict.second + 14) / 15) * 15
+                guard++
+            }
+            if (placed) {
+                // Add 5-15m breathing buffer by snapping next slot cleanly on 15m grid
+                occupied += slotStart to (slotStart + dur)
+                occupied.sortBy { it.first }
+                val reason = localizedTimeblockReason(cand, slotStart < workdayEndMinutes, lang)
+                blocks += GeminiDayTimeblockItemDto(
+                    taskId = cand.taskId,
+                    startMinutes = slotStart,
+                    durationMinutes = dur,
+                    reason = reason
+                )
+            }
+        }
+
+        val sortedBlocks = blocks.sortedBy { it.startMinutes }
+        val summary = when (lang) {
+            "de" -> "${sortedBlocks.size} fokussierte Zeitblöcke konfliktfrei um deine Termine eingeplant."
+            "fr" -> "${sortedBlocks.size} créneaux planifiés sans conflit autour de votre agenda."
+            "it" -> "${sortedBlocks.size} blocchi orari pianificati senza conflitti attorno ai tuoi impegni."
+            "es" -> "${sortedBlocks.size} bloques de enfoque programados sin conflictos alrededor de tu agenda."
+            else -> "Scheduled ${sortedBlocks.size} conflict-free focus blocks around your calendar."
+        }
+        return GeminiDayTimeblockPlanResponse(summary = summary, blocks = sortedBlocks)
+    }
+
+    private fun localizedTimeblockReason(
+        cand: GeminiDayTimeblockCandidate,
+        withinWorkday: Boolean,
+        lang: String
+    ): String {
+        val effort = cand.effortLevel?.uppercase(Locale.ROOT)
+        return when (lang) {
+            "de" -> when {
+                cand.isPinned || cand.hasTodayDeadline -> "Top-Priorität im freien Fokusfenster"
+                effort == "DEEP_FOCUS" -> "Ungestörter Fokusblock"
+                effort == "QUICK_WIN" -> "Kompakter Quick-Win zwischen Terminen"
+                withinWorkday -> "Passendes freies Arbeitszeitfenster"
+                else -> "Abendblock nach den Kernzeiten"
+            }
+            "fr" -> when {
+                cand.isPinned || cand.hasTodayDeadline -> "Priorité placée sur le premier créneau libre"
+                effort == "DEEP_FOCUS" -> "Créneau de concentration profonde"
+                effort == "QUICK_WIN" -> "Action rapide entre deux rendez-vous"
+                withinWorkday -> "Créneau libre dans vos horaires"
+                else -> "Créneau de fin de journée"
+            }
+            "it" -> when {
+                cand.isPinned || cand.hasTodayDeadline -> "Priorità alta nel primo spazio libero"
+                effort == "DEEP_FOCUS" -> "Blocco di concentrazione profonda"
+                effort == "QUICK_WIN" -> "Attività rapida tra gli impegni"
+                withinWorkday -> "Finestra libera nell'orario di lavoro"
+                else -> "Blocco serale fuori orario"
+            }
+            "es" -> when {
+                cand.isPinned || cand.hasTodayDeadline -> "Prioridad clave en el primer hueco libre"
+                effort == "DEEP_FOCUS" -> "Bloque de concentración profunda"
+                effort == "QUICK_WIN" -> "Tarea rápida entre reuniones"
+                withinWorkday -> "Hueco libre dentro de tu jornada"
+                else -> "Bloque vespertino adicional"
+            }
+            else -> when {
+                cand.isPinned || cand.hasTodayDeadline -> "Priority slot in your earliest free window"
+                effort == "DEEP_FOCUS" -> "Uninterrupted deep-focus window"
+                effort == "QUICK_WIN" -> "Quick win fitted cleanly into free gap"
+                withinWorkday -> "Balanced slot within workday hours"
+                else -> "Overflow slot after standard workday"
+            }
+        }
     }
 
     /**
@@ -590,7 +920,57 @@ class ThingsbookGeminiService @Inject constructor() {
                     )
                 )
             )
+        }.let { base -> enrichOfflineBlueprintWithRoadmapMetadata(base) }
+    }
+
+    private fun enrichOfflineBlueprintWithRoadmapMetadata(
+        base: GeminiProjectBlueprintResponse
+    ): GeminiProjectBlueprintResponse {
+        var runningDay = 0
+        var prevMilestoneKey: String? = null
+        val enrichedHeadings = base.headings.mapIndexed { hIdx, h ->
+            val phaseStart = runningDay
+            val rich = h.tasks.mapIndexed { tIdx, title ->
+                val key = "p${hIdx + 1}_t${tIdx + 1}"
+                val isLastInPhase = tIdx == h.tasks.lastIndex
+                val isMilestone = isLastInPhase && (hIdx == 0 || hIdx == base.headings.lastIndex)
+                val dur = when {
+                    isMilestone -> 30
+                    tIdx == 0 -> 240
+                    else -> 120
+                }
+                val effort = when {
+                    isMilestone -> "QUICK_WIN"
+                    tIdx == 0 -> "DEEP_FOCUS"
+                    else -> "MEDIUM"
+                }
+                val deps = buildList {
+                    if (tIdx > 0) add("p${hIdx + 1}_t$tIdx")
+                    else if (prevMilestoneKey != null) add(prevMilestoneKey!!)
+                }
+                val itemDay = runningDay
+                runningDay += if (isMilestone) 1 else 2
+                if (isMilestone) {
+                    prevMilestoneKey = key
+                }
+                GeminiRoadmapTaskDto(
+                    key = key,
+                    title = title,
+                    dayOffset = itemDay,
+                    durationMinutes = dur,
+                    effortLevel = effort,
+                    isMilestone = isMilestone,
+                    dependsOnKeys = deps
+                )
+            }
+            val phaseEnd = maxOf(phaseStart, runningDay - 1)
+            h.copy(
+                startDayOffset = phaseStart,
+                endDayOffset = phaseEnd,
+                richTasks = rich
+            )
         }
+        return base.copy(headings = enrichedHeadings)
     }
 
     private fun offlineLocalizedLogbookReflection(completed: List<String>, locale: Locale): GeminiLogbookReviewResponse {

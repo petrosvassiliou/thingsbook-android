@@ -1297,6 +1297,46 @@ public struct ProjectRoadmapWorkspaceView: View {
         )
     }
 
+    private func computeActiveCascadePreviewMap(for layout: ProjectRoadmapLayout) -> [String: Int] {
+        guard !store.isTimelineFullScreen,
+              let drag = activeTaskDrag,
+              drag.deltaDays != 0 else {
+            return [:]
+        }
+        let todayMs = DateEpochConverter.startOfDayMillis(
+            for: DateEpochConverter.date(fromEpochDay: layout.todayEpochDay)
+        )
+        let allProjectTasks = layout.allTaskBars.map(\.task)
+        if store.selectedTaskIds.contains(drag.id) && store.selectedTaskIds.count > 1 {
+            var merged: [String: Int] = [:]
+            for bar in layout.allTaskBars where store.selectedTaskIds.contains(bar.id) {
+                let sub = ProjectRoadmapEngine.computeCascadeDeltaPreviewMap(
+                    anchorTask: bar.task,
+                    deltaDays: drag.deltaDays,
+                    projectTasks: allProjectTasks,
+                    todayMillis: todayMs
+                )
+                for (tid, d) in sub {
+                    if let existing = merged[tid] {
+                        if abs(d) > abs(existing) { merged[tid] = d }
+                    } else {
+                        merged[tid] = d
+                    }
+                }
+            }
+            return merged
+        }
+        guard let anchorBar = layout.allTaskBars.first(where: { $0.id == drag.id }) else {
+            return [drag.id: drag.deltaDays]
+        }
+        return ProjectRoadmapEngine.computeCascadeDeltaPreviewMap(
+            anchorTask: anchorBar.task,
+            deltaDays: drag.deltaDays,
+            projectTasks: allProjectTasks,
+            todayMillis: todayMs
+        )
+    }
+
     private func buildTimelineRows(for layout: ProjectRoadmapLayout) -> [RoadmapTimelineRow] {
         var rows: [RoadmapTimelineRow] = []
         if !layout.generalTaskBars.isEmpty {
@@ -1639,7 +1679,8 @@ public struct ProjectRoadmapWorkspaceView: View {
             }
             .buttonStyle(.plain)
             .fixedSize(horizontal: true, vertical: false)
-            .thingsTooltip(isFull ? "\(fullScreenLabel) (Esc)" : fullScreenLabel)
+            .keyboardShortcut("f", modifiers: [.command, .control])
+            .thingsTooltip(isFull ? "\(fullScreenLabel) (Esc)" : "\(fullScreenLabel) (⌃⌘F)")
         }
     }
 
@@ -1832,6 +1873,7 @@ public struct ProjectRoadmapWorkspaceView: View {
         totalGridWidth: CGFloat
     ) -> some View {
         let totalHeight = totalTimelineHeight(for: rows)
+        let cascadePreviewDeltas = computeActiveCascadePreviewMap(for: layout)
 
         return ZStack(alignment: .topLeading) {
             // 1. Background Day Columns + Month/Day Header + Today Vertical Line
@@ -1912,12 +1954,10 @@ public struct ProjectRoadmapWorkspaceView: View {
                         continue
                     }
 
-                    let isFromDragged = (activeTaskDrag?.id == fromBar.id)
-                        || (activeTaskDrag != nil && store.selectedTaskIds.contains(fromBar.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
-                    let isToDragged = (activeTaskDrag?.id == toBar.id)
-                        || (activeTaskDrag != nil && store.selectedTaskIds.contains(toBar.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
-                    let fromShift = isFromDragged ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
-                    let toShift = isToDragged ? CGFloat(activeTaskDrag?.deltaDays ?? 0) * dayColumnWidth : 0
+                    let fromDelta = cascadePreviewDeltas[fromBar.id] ?? 0
+                    let toDelta = cascadePreviewDeltas[toBar.id] ?? 0
+                    let fromShift = CGFloat(fromDelta) * dayColumnWidth
+                    let toShift = CGFloat(toDelta) * dayColumnWidth
 
                     let x0: CGFloat = (fromBar.isMilestone || fromBar.task.isMilestone)
                         ? ((CGFloat(fromBar.endEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth + 11 + fromShift)
@@ -1995,7 +2035,11 @@ public struct ProjectRoadmapWorkspaceView: View {
                             }
 
                         case .task(let taskBar):
-                            roadmapTaskBarView(taskBar: taskBar, layout: layout)
+                            roadmapTaskBarView(
+                                taskBar: taskBar,
+                                layout: layout,
+                                cascadePreviewDeltas: cascadePreviewDeltas
+                            )
                         }
                     }
                 }
@@ -2119,7 +2163,11 @@ public struct ProjectRoadmapWorkspaceView: View {
                                 armedPhaseDragId = nil
                                 activePhaseDrag = nil
                                 if finalDelta != 0 {
-                                    store.shiftHeadingRoadmapDates(heading, deltaDays: finalDelta)
+                                    store.shiftHeadingRoadmapDates(
+                                        heading,
+                                        deltaDays: finalDelta,
+                                        fallbackEpochDays: (phaseBar.startEpochDay, phaseBar.endEpochDay)
+                                    )
                                 }
                             }
                     )
@@ -2354,19 +2402,21 @@ public struct ProjectRoadmapWorkspaceView: View {
     @ViewBuilder
     private func roadmapTaskBarView(
         taskBar: RoadmapTaskBar,
-        layout: ProjectRoadmapLayout
+        layout: ProjectRoadmapLayout,
+        cascadePreviewDeltas: [String: Int]
     ) -> some View {
         let task = taskBar.task
         let isFullScreen = store.isTimelineFullScreen
         let isSelected = !isFullScreen && store.selectedTaskIds.contains(task.id)
         let isBlocked = store.isTaskActivelyBlocked(task)
         let isArmedThis = !isFullScreen && armedTaskDragId == task.id
+        let previewDelta = isFullScreen ? 0 : (cascadePreviewDeltas[task.id] ?? 0)
         let isDraggingThis = !isFullScreen && (
             isArmedThis
             || (activeTaskDrag?.id == task.id)
-            || (activeTaskDrag != nil && store.selectedTaskIds.contains(task.id) && store.selectedTaskIds.count > 1 && store.selectedTaskIds.contains(activeTaskDrag?.id ?? ""))
+            || previewDelta != 0
         )
-        let delta = isDraggingThis ? (activeTaskDrag?.deltaDays ?? 0) : 0
+        let delta = previewDelta
         let taskBarContent = roadmapPlottedTaskVisual(
             taskBar: taskBar,
             layout: layout,
@@ -3746,5 +3796,1544 @@ struct RoadmapExportSnapshotView: View {
         df.locale = store.preferences.language.locale
         df.setLocalizedDateFormatFromTemplate("MMM")
         return df.string(from: date)
+    }
+}
+
+// MARK: - v3.1 Soft Bento Area Mode Switcher (List | Portfolio Timeline)
+
+public struct AreaModeSegmentedSwitcher: View {
+    @ObservedObject var store: ThingsbookStore
+    let area: Area
+
+    public init(store: ThingsbookStore, area: Area) {
+        self.store = store
+        self.area = area
+    }
+
+    private var activeMode: ProjectViewMode {
+        store.areaViewMode(for: area.id)
+    }
+
+    private let supportedModes: [ProjectViewMode] = [.list, .roadmap]
+
+    private func label(for mode: ProjectViewMode) -> String {
+        switch mode {
+        case .roadmap:
+            return store.tr("v31_area_portfolio_timeline")
+        default:
+            return store.tr("v30_project_mode_list")
+        }
+    }
+
+    private func icon(for mode: ProjectViewMode) -> String {
+        switch mode {
+        case .roadmap:
+            return "calendar.day.timeline.left"
+        default:
+            return "list.bullet"
+        }
+    }
+
+    public var body: some View {
+        HStack(spacing: 3) {
+            ForEach(supportedModes) { mode in
+                let isSelected = activeMode == mode
+                Button {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.84)) {
+                        store.setAreaViewMode(area.id, mode: mode)
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon(for: mode))
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(label(for: mode))
+                            .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                            .lineLimit(1)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(isSelected ? ThingsMacPalette.accentBlue : .secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .fill(isSelected ? ThingsMacPalette.cardSurface : Color.clear)
+                            .shadow(
+                                color: Color.black.opacity(isSelected ? 0.07 : 0.0),
+                                radius: 4,
+                                y: 1
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                            .strokeBorder(
+                                isSelected ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.clear,
+                                lineWidth: 0.85
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(label(for: mode))
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                )
+        )
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+// MARK: - v3.1 Soft Bento 7-Day Workload Forecast Card
+
+public struct SevenDayWorkloadStripCard: View {
+    @ObservedObject var store: ThingsbookStore
+    public let forecast: [DayWorkloadSummary]
+    public var compact: Bool = false
+
+    public init(store: ThingsbookStore, forecast: [DayWorkloadSummary], compact: Bool = false) {
+        self.store = store
+        self.forecast = forecast
+        self.compact = compact
+    }
+
+    public var body: some View {
+        let visibleDays = Array(forecast.prefix(7))
+        let maxOverload = visibleDays.filter(\.isOverloaded).map(\.overloadedByMinutes).max() ?? 0
+        let statusTint = maxOverload > 0 ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.logbookGreen
+        let statusText = maxOverload > 0
+            ? store.trf("v31_workload_overloaded_short", TaskItem.formatCompactDuration(maxOverload))
+            : store.tr("v31_workload_balanced")
+        let statusTooltip = maxOverload > 0
+            ? store.trf("v31_workload_overloaded_by", TaskItem.formatCompactDuration(maxOverload))
+            : store.tr("v31_workload_balanced")
+
+        VStack(alignment: .leading, spacing: compact ? 8 : 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.system(size: compact ? 11.5 : 12.5, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+
+                Text(store.tr("v31_workload_7day_title"))
+                    .font(.system(size: compact ? 12 : 13, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Text(statusText)
+                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(statusTint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2.5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(statusTint.opacity(0.13))
+                    )
+                    .lineLimit(1)
+                    .thingsTooltip(statusTooltip)
+            }
+
+            HStack(alignment: .bottom, spacing: compact ? 5 : 8) {
+                ForEach(Array(visibleDays.enumerated()), id: \.element.epochDay) { idx, day in
+                    workloadDayColumn(day: day, isToday: idx == 0)
+                }
+            }
+        }
+        .padding(.horizontal, compact ? 12 : 14)
+        .padding(.vertical, compact ? 10 : 12)
+        .thingsCardSurface(cornerRadius: compact ? 12 : 14)
+    }
+
+    private func workloadDayColumn(day: DayWorkloadSummary, isToday: Bool) -> some View {
+        let maxBarHeight: CGFloat = compact ? 36 : 44
+        let clampedRatio = CGFloat(min(1.0, max(0.0, day.loadFraction)))
+        let minFill: CGFloat = day.totalUsedMinutes > 0 ? 4 : 2
+        let fillHeight = max(minFill, maxBarHeight * clampedRatio)
+        let barColor: Color = {
+            if day.isOverloaded { return ThingsMacPalette.deadlineCrimson }
+            if day.loadFraction >= 0.8 { return ThingsMacPalette.somedayAmber }
+            if day.totalUsedMinutes > 0 { return ThingsMacPalette.accentBlue }
+            return Color.primary.opacity(0.10)
+        }()
+        let plannedLabel = day.plannedTaskMinutes > 0
+            ? TaskItem.formatCompactDuration(day.plannedTaskMinutes)
+            : "0m"
+        let weekdayStr = shortWeekday(for: day.epochDay)
+        let tooltipText: String = {
+            if day.isOverloaded {
+                return "\(weekdayStr): \(store.trf("v31_workload_overloaded_by", TaskItem.formatCompactDuration(day.overloadedByMinutes)))"
+            }
+            let plannedStr = TaskItem.formatCompactDuration(day.plannedTaskMinutes)
+            let freeStr = TaskItem.formatCompactDuration(day.freeWorkdayMinutes)
+            return "\(weekdayStr): \(store.trf("v30_today_capacity_summary", plannedStr, freeStr))"
+        }()
+
+        return VStack(spacing: 3) {
+            Text(plannedLabel)
+                .font(.system(size: compact ? 9.0 : 9.5, weight: day.isOverloaded ? .bold : .medium, design: .rounded))
+                .foregroundStyle(day.isOverloaded ? ThingsMacPalette.deadlineCrimson : .secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .frame(height: maxBarHeight)
+
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(barColor)
+                    .frame(height: fillHeight)
+            }
+            .frame(maxWidth: .infinity)
+
+            Text(weekdayStr)
+                .font(.system(size: compact ? 9.5 : 10, weight: isToday ? .heavy : .medium))
+                .foregroundStyle(isToday ? ThingsMacPalette.accentBlue : .secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .thingsTooltip(tooltipText)
+    }
+
+    private func shortWeekday(for epochDay: Int) -> String {
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("EE")
+        let raw = df.string(from: DateEpochConverter.date(fromEpochDay: epochDay))
+        return String(raw.prefix(3))
+    }
+}
+
+// MARK: - v3.1 Area Portfolio Timeline Workspace
+
+public struct AreaPortfolioRoadmapWorkspaceView: View {
+    @ObservedObject var store: ThingsbookStore
+    public let area: Area
+
+    @State private var dayColumnWidth: CGFloat = 38.0
+    @State private var expandedProjectIds: Set<String> = []
+    @State private var isPDFExportSheetPresented: Bool = false
+    @State private var activePhaseDrag: (id: String, deltaDays: Int)? = nil
+    @State private var activeTaskDrag: (projectId: String, taskId: String, deltaDays: Int)? = nil
+    @State private var armedPhaseDragId: String? = nil
+    @State private var armedTaskDragId: String? = nil
+
+    private let labelColumnWidth: CGFloat = 276
+    private let headerHeight: CGFloat = 50
+    private let projectSummaryRowHeight: CGFloat = 48
+    private let subPhaseRowHeight: CGFloat = 40
+    private let subTaskRowHeight: CGFloat = 35
+    private let rowSpacing: CGFloat = 4
+
+    public init(store: ThingsbookStore, area: Area) {
+        self.store = store
+        self.area = area
+    }
+
+    private enum PortfolioDisplayRow: Identifiable {
+        case projectSummary(AreaPortfolioProjectLane, isExpanded: Bool)
+        case subPhase(projectId: String, heading: Heading?, phaseBar: RoadmapPhaseBar?, title: String)
+        case subTask(projectId: String, taskBar: RoadmapTaskBar, projectLayout: ProjectRoadmapLayout)
+
+        var id: String {
+            switch self {
+            case .projectSummary(let lane, _):
+                return "proj_\(lane.projectId)"
+            case .subPhase(let pid, let h, _, _):
+                return "phase_\(pid)_\(h?.id ?? "__general__")"
+            case .subTask(let pid, let tb, _):
+                return "task_\(pid)_\(tb.id)"
+            }
+        }
+    }
+
+    private func rowHeight(for row: PortfolioDisplayRow) -> CGFloat {
+        switch row {
+        case .projectSummary:
+            return projectSummaryRowHeight
+        case .subPhase:
+            return subPhaseRowHeight
+        case .subTask:
+            return subTaskRowHeight
+        }
+    }
+
+    private func totalTimelineHeight(for rows: [PortfolioDisplayRow]) -> CGFloat {
+        let rowsSum = rows.reduce(CGFloat(0)) { $0 + rowHeight(for: $1) }
+        let spacingsSum = rows.isEmpty ? 0 : CGFloat(rows.count) * rowSpacing
+        return headerHeight + rowsSum + spacingsSum + 10
+    }
+
+    private var portfolioLayout: AreaPortfolioRoadmapLayout {
+        let areaProjects = store.projectsForArea(area.id)
+        let allHeadings = areaProjects.flatMap { store.headingsByProject[$0.id] ?? [] }
+        let areaProjectIds = Set(areaProjects.map(\.id))
+        let scheduledCompleted = store.logbookTasks.filter {
+            guard let pid = $0.projectId, areaProjectIds.contains(pid) else { return false }
+            return $0.whenDate != nil || $0.deadline != nil
+        }
+        let openInAreaProjects = store.allOpenTasks.filter {
+            guard let pid = $0.projectId else { return false }
+            return areaProjectIds.contains(pid)
+        }
+        return ProjectRoadmapEngine.buildAreaPortfolioLayout(
+            area: area,
+            projects: areaProjects,
+            headings: allHeadings,
+            tasks: openInAreaProjects + scheduledCompleted,
+            todayMillis: DateEpochConverter.startOfDayMillis(for: Date())
+        )
+    }
+
+    private func buildDisplayRows(for layout: AreaPortfolioRoadmapLayout) -> [PortfolioDisplayRow] {
+        var list: [PortfolioDisplayRow] = []
+        let generalLabel = store.tr("v30_board_ungrouped_column")
+        for lane in layout.projectLanes {
+            let isExp = expandedProjectIds.contains(lane.projectId)
+            list.append(.projectSummary(lane, isExpanded: isExp))
+            if isExp {
+                let sub = lane.projectLayout
+                if !sub.generalTaskBars.isEmpty {
+                    list.append(.subPhase(projectId: lane.projectId, heading: nil, phaseBar: nil, title: generalLabel))
+                    for tb in sub.generalTaskBars {
+                        list.append(.subTask(projectId: lane.projectId, taskBar: tb, projectLayout: sub))
+                    }
+                }
+                let headings = (store.headingsByProject[lane.projectId] ?? [])
+                    .filter { !$0.isDeleted && !$0.isArchived }
+                    .sorted {
+                        if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                        return $0.id < $1.id
+                    }
+                for h in headings {
+                    let pBar = sub.phaseBar(for: h.id)
+                    let childBars = sub.taskBarsByHeading[h.id] ?? []
+                    if pBar != nil || !childBars.isEmpty {
+                        list.append(.subPhase(projectId: lane.projectId, heading: h, phaseBar: pBar, title: h.title))
+                        for tb in childBars {
+                            list.append(.subTask(projectId: lane.projectId, taskBar: tb, projectLayout: sub))
+                        }
+                    }
+                }
+            }
+        }
+        return list
+    }
+
+    private func computeCascadePreviewMap(for layout: AreaPortfolioRoadmapLayout) -> [String: Int] {
+        guard !store.isTimelineFullScreen,
+              let drag = activeTaskDrag,
+              drag.deltaDays != 0,
+              let pLane = layout.projectLanes.first(where: { $0.projectId == drag.projectId }),
+              let anchorBar = pLane.projectLayout.allTaskBars.first(where: { $0.id == drag.taskId }) else {
+            return [:]
+        }
+        let todayMs = DateEpochConverter.startOfDayMillis(
+            for: DateEpochConverter.date(fromEpochDay: layout.todayEpochDay)
+        )
+        return ProjectRoadmapEngine.computeCascadeDeltaPreviewMap(
+            anchorTask: anchorBar.task,
+            deltaDays: drag.deltaDays,
+            projectTasks: pLane.projectLayout.allTaskBars.map(\.task),
+            todayMillis: todayMs
+        )
+    }
+
+    public var body: some View {
+        let layout = portfolioLayout
+        let rows = buildDisplayRows(for: layout)
+        let totalGridWidth = CGFloat(max(21, layout.totalDays)) * dayColumnWidth
+
+        VStack(alignment: .leading, spacing: 14) {
+            ScrollViewReader { scrollProxy in
+                VStack(alignment: .leading, spacing: 12) {
+                    portfolioToolbar(layout: layout) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            scrollProxy.scrollTo("portfolio_day_\(layout.todayEpochDay)", anchor: .center)
+                        }
+                    }
+
+                    if layout.projectLanes.isEmpty && layout.unscheduledProjects.isEmpty {
+                        emptyPortfolioCard
+                    } else if !layout.projectLanes.isEmpty {
+                        HStack(alignment: .top, spacing: 0) {
+                            portfolioLeftColumn(rows: rows, layout: layout)
+
+                            Divider()
+
+                            ScrollView(.horizontal, showsIndicators: true) {
+                                portfolioTimelineGrid(
+                                    layout: layout,
+                                    rows: rows,
+                                    totalGridWidth: totalGridWidth
+                                )
+                            }
+                        }
+                        .background(ThingsMacPalette.cardSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.085), lineWidth: 0.9)
+                        )
+                        .shadow(color: Color.black.opacity(0.045), radius: 8, y: 2)
+                        .onAppear {
+                            DispatchQueue.main.async {
+                                scrollProxy.scrollTo("portfolio_day_\(layout.todayEpochDay)", anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !store.isTimelineFullScreen && !layout.unscheduledProjects.isEmpty {
+                unscheduledProjectsTray(layout.unscheduledProjects)
+            }
+        }
+        .onChange(of: area.id) { _, _ in
+            expandedProjectIds.removeAll()
+            activePhaseDrag = nil
+            activeTaskDrag = nil
+            armedPhaseDragId = nil
+            armedTaskDragId = nil
+        }
+        .onChange(of: store.isTimelineFullScreen) { _, fullScreen in
+            if fullScreen {
+                activePhaseDrag = nil
+                activeTaskDrag = nil
+                armedPhaseDragId = nil
+                armedTaskDragId = nil
+                isPDFExportSheetPresented = false
+            }
+        }
+        .sheet(isPresented: $isPDFExportSheetPresented) {
+            let bundle = ProjectRoadmapEngine.toExportablePortfolioLayout(
+                portfolioLayout: layout,
+                expandedProjectIds: expandedProjectIds
+            )
+            RoadmapPDFExportSheetView(
+                store: store,
+                project: bundle.project,
+                headings: bundle.headings,
+                layout: bundle.layout,
+                isPresented: $isPDFExportSheetPresented
+            ) { exportOptions in
+                DispatchQueue.main.async {
+                    exportPortfolioPDFWithOptions(bundle: bundle, options: exportOptions)
+                }
+            }
+        }
+    }
+
+    // MARK: - Portfolio Toolbar
+
+    private func portfolioToolbar(
+        layout: AreaPortfolioRoadmapLayout,
+        onJumpToday: @escaping () -> Void
+    ) -> some View {
+        let isFull = store.isTimelineFullScreen
+        let fullScreenLabel = isFull ? store.tr("v30_timeline_exit_fullscreen") : store.tr("v30_timeline_fullscreen")
+        let fullScreenIcon = isFull ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+        let allExpanded = !layout.projectLanes.isEmpty && expandedProjectIds.count >= layout.projectLanes.count
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                portfolioLeadingControls(layout: layout, allExpanded: allExpanded, onJumpToday: onJumpToday)
+                Spacer(minLength: 8)
+                portfolioTrailingControls(layout: layout, isFull: isFull, fullScreenLabel: fullScreenLabel, fullScreenIcon: fullScreenIcon)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                portfolioLeadingControls(layout: layout, allExpanded: allExpanded, onJumpToday: onJumpToday)
+                HStack(spacing: 8) {
+                    portfolioTrailingControls(layout: layout, isFull: isFull, fullScreenLabel: fullScreenLabel, fullScreenIcon: fullScreenIcon)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func portfolioLeadingControls(
+        layout: AreaPortfolioRoadmapLayout,
+        allExpanded: Bool,
+        onJumpToday: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 10) {
+            if store.isTimelineFullScreen {
+                HStack(spacing: 7) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(ThingsMacPalette.areaGreen)
+                    Text(area.title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                Text(formattedWindowLabel(startEpochDay: layout.startEpochDay, endEpochDay: layout.endEpochDay))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                    )
+            )
+
+            if !layout.projectLanes.isEmpty {
+                let toggleLabel = store.tr(allExpanded ? "v31_area_collapse_all" : "v31_area_expand_all")
+                ThingsActionChipButton(
+                    title: toggleLabel,
+                    systemImage: allExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical",
+                    helpText: toggleLabel
+                ) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.86)) {
+                        if allExpanded {
+                            expandedProjectIds.removeAll()
+                        } else {
+                            expandedProjectIds = Set(layout.projectLanes.map(\.projectId))
+                        }
+                    }
+                }
+            }
+
+            ThingsActionChipButton(
+                title: store.tr("v30_roadmap_jump_today"),
+                systemImage: "scope",
+                helpText: store.tr("v30_roadmap_jump_today"),
+                action: onJumpToday
+            )
+        }
+    }
+
+    private func portfolioTrailingControls(
+        layout: AreaPortfolioRoadmapLayout,
+        isFull: Bool,
+        fullScreenLabel: String,
+        fullScreenIcon: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        dayColumnWidth = max(26.0, dayColumnWidth - 10.0)
+                    }
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_tooltip_zoom_out"))
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        dayColumnWidth = 38.0
+                    }
+                } label: {
+                    Text("\(Int((dayColumnWidth / 38.0 * 100.0).rounded()))%")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_tooltip_zoom_reset"))
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        dayColumnWidth = min(64.0, dayColumnWidth + 10.0)
+                    }
+                } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("macos_tooltip_zoom_in"))
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(ThingsMacPalette.subtleContainer)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                    )
+            )
+            .fixedSize()
+
+            if !isFull && !layout.projectLanes.isEmpty {
+                Menu {
+                    Button {
+                        isPDFExportSheetPresented = true
+                    } label: {
+                        Label(store.tr("v30_roadmap_export_pdf"), systemImage: "doc.richtext")
+                    }
+
+                    Button {
+                        exportPortfolioPNGInteractively(layout: layout)
+                    } label: {
+                        Label(store.tr("v30_roadmap_export_png"), systemImage: "photo")
+                    }
+                } label: {
+                    HStack(spacing: 5.5) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text(store.tr("v30_roadmap_export"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .opacity(0.75)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .thingsTooltip(store.tr("v30_roadmap_export"))
+            }
+
+            Button {
+                store.toggleTimelineFullScreen()
+            } label: {
+                HStack(spacing: 5.5) {
+                    Image(systemName: fullScreenIcon)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(fullScreenLabel)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(isFull ? ThingsMacPalette.accentBlue : Color.primary.opacity(0.88))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isFull ? ThingsMacPalette.accentBlue.opacity(0.14) : ThingsMacPalette.subtleContainer)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(
+                                    isFull ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.08),
+                                    lineWidth: 0.8
+                                )
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+            .keyboardShortcut("f", modifiers: [.command, .control])
+            .thingsTooltip(isFull ? "\(fullScreenLabel) (Esc)" : "\(fullScreenLabel) (⌃⌘F)")
+        }
+    }
+
+    // MARK: - Left Column
+
+    private func portfolioLeftColumn(
+        rows: [PortfolioDisplayRow],
+        layout: AreaPortfolioRoadmapLayout
+    ) -> some View {
+        let totalHeight = totalTimelineHeight(for: rows)
+
+        return VStack(alignment: .leading, spacing: rowSpacing) {
+            HStack(spacing: 6) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.areaGreen)
+                Text(area.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(width: labelColumnWidth, height: headerHeight)
+            .background(ThingsMacPalette.subtleContainer.opacity(0.75))
+
+            ForEach(rows) { row in
+                let rHeight = rowHeight(for: row)
+                switch row {
+                case .projectSummary(let lane, let isExpanded):
+                    portfolioLeftProjectSummaryRow(lane: lane, isExpanded: isExpanded, height: rHeight)
+                case .subPhase(_, _, _, let title):
+                    portfolioLeftPhaseRow(title: title, height: rHeight)
+                case .subTask(_, let taskBar, let subLayout):
+                    portfolioLeftTaskRow(taskBar: taskBar, subLayout: subLayout, height: rHeight)
+                }
+            }
+        }
+        .padding(.bottom, 10)
+        .frame(width: labelColumnWidth, height: totalHeight, alignment: .topLeading)
+        .background(ThingsMacPalette.subtleContainer.opacity(0.45))
+    }
+
+    private func portfolioLeftProjectSummaryRow(
+        lane: AreaPortfolioProjectLane,
+        isExpanded: Bool,
+        height: CGFloat
+    ) -> some View {
+        let proj = lane.project
+        return HStack(spacing: 7) {
+            Button {
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
+                    if isExpanded {
+                        expandedProjectIds.remove(proj.id)
+                    } else {
+                        expandedProjectIds.insert(proj.id)
+                    }
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14)
+
+                    ProjectProgressRing(
+                        progress: proj.progress,
+                        size: 15,
+                        tint: ThingsMacPalette.accentBlue,
+                        isCompleted: proj.status == .completed
+                    )
+                    .fixedSize()
+
+                    VStack(alignment: .leading, spacing: 1.5) {
+                        Text(proj.title)
+                            .font(.system(size: 12.5, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text("\(proj.completedTaskCount)/\(proj.totalTaskCount)")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                if store.isTimelineFullScreen {
+                    store.isTimelineFullScreen = false
+                }
+                store.selectedDestination = .project(proj.id)
+            } label: {
+                Text("↗")
+                    .font(.system(size: 12.5, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.11))
+                    )
+            }
+            .buttonStyle(.plain)
+            .thingsTooltip(store.tr("v31_area_open_project"))
+        }
+        .padding(.horizontal, 10)
+        .frame(width: labelColumnWidth, height: height)
+        .background(ThingsMacPalette.subtleContainer.opacity(0.65))
+    }
+
+    private func portfolioLeftPhaseRow(title: String, height: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            Capsule()
+                .fill(ThingsMacPalette.inboxBlue)
+                .frame(width: 3, height: 13)
+            Text(title)
+                .font(.system(size: 11.5, weight: .bold))
+                .foregroundStyle(ThingsMacPalette.accentBlue)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.leading, 22)
+        .padding(.trailing, 8)
+        .frame(width: labelColumnWidth, height: height)
+    }
+
+    @ViewBuilder
+    private func portfolioLeftTaskRow(
+        taskBar: RoadmapTaskBar,
+        subLayout: ProjectRoadmapLayout,
+        height: CGFloat
+    ) -> some View {
+        let isFull = store.isTimelineFullScreen
+        let isMilestone = taskBar.isMilestone || taskBar.task.isMilestone
+        let isSelected = !isFull && store.selectedTaskIds.contains(taskBar.id)
+        let rowView = HStack(spacing: 6) {
+            ThingsCheckboxButton(
+                status: taskBar.task.status,
+                isSomeday: taskBar.task.scheduleState == .someday,
+                isMilestone: isMilestone,
+                helpText: isFull ? "" : store.tr("macos_checkbox_help"),
+                onToggleComplete: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.toggleTaskCompletion(taskBar.task)
+                },
+                onCancelTask: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.cancelTask(taskBar.task)
+                }
+            )
+            .disabled(isFull)
+            .allowsHitTesting(!isFull)
+
+            Text(
+                isMilestone
+                    ? "◆ \(taskBar.task.title.isEmpty ? store.tr("macos_untitled_todo") : taskBar.task.title)"
+                    : (taskBar.task.title.isEmpty ? store.tr("macos_untitled_todo") : taskBar.task.title)
+            )
+            .font(.system(size: 12, weight: (isSelected || isMilestone) ? .semibold : .regular))
+            .foregroundStyle(
+                taskBar.task.status == .completed
+                    ? .secondary
+                    : (isMilestone ? ThingsMacPalette.milestoneViolet : .primary)
+            )
+            .lineLimit(1)
+
+            Spacer(minLength: 2)
+        }
+        .padding(.leading, 30)
+        .padding(.trailing, 8)
+        .frame(width: labelColumnWidth, height: height)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.12) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .thingsTimelineMouseTooltip(
+            TimelineTaskTooltipFormatter.formatRoadmapTask(
+                taskBar: taskBar,
+                isBlocked: store.isTaskActivelyBlocked(taskBar.task),
+                language: store.preferences.language
+            ),
+            isSuppressed: armedTaskDragId == taskBar.id || activeTaskDrag?.taskId == taskBar.id
+        )
+
+        if isFull {
+            rowView
+        } else {
+            rowView
+                .thingsInstantTaskTap(
+                    onSingleClick: { modifiers in
+                        store.handleRowClick(taskId: taskBar.id, modifiers: modifiers)
+                    },
+                    onDoubleClick: {
+                        store.openTaskModal(taskBar.id)
+                    }
+                )
+        }
+    }
+
+    // MARK: - Right Synchronized Gantt Grid
+
+    private func portfolioTimelineGrid(
+        layout: AreaPortfolioRoadmapLayout,
+        rows: [PortfolioDisplayRow],
+        totalGridWidth: CGFloat
+    ) -> some View {
+        let totalHeight = totalTimelineHeight(for: rows)
+        let cascadePreviewDeltas = computeCascadePreviewMap(for: layout)
+
+        return ZStack(alignment: .topLeading) {
+            // 1. Background Day Columns & Header
+            HStack(spacing: 0) {
+                ForEach(0..<layout.totalDays, id: \.self) { dayOffset in
+                    let epochDay = layout.startEpochDay + dayOffset
+                    let isToday = epochDay == layout.todayEpochDay
+                    let isWeekend = isWeekendDay(epochDay)
+
+                    VStack(spacing: 0) {
+                        VStack(spacing: 2) {
+                            Text(monthHeaderChip(for: epochDay, isFirstColumn: dayOffset == 0))
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(isToday ? ThingsMacPalette.accentBlue : .secondary)
+                                .lineLimit(1)
+                                .frame(height: 15)
+
+                            HStack(spacing: 2) {
+                                Text("\(dayNumber(for: epochDay))")
+                                    .font(.system(size: 11.5, weight: isToday ? .bold : .semibold, design: .rounded))
+                                Text(weekdayInitial(for: epochDay))
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .opacity(0.75)
+                            }
+                            .foregroundStyle(isToday ? .white : (isWeekend ? .secondary : .primary))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(isToday ? ThingsMacPalette.accentBlue : Color.clear)
+                            )
+                        }
+                        .frame(width: dayColumnWidth, height: headerHeight)
+                        .background(ThingsMacPalette.subtleContainer.opacity(0.75))
+                        .id("portfolio_day_\(epochDay)")
+
+                        Rectangle()
+                            .fill(
+                                isToday
+                                    ? ThingsMacPalette.accentBlue.opacity(0.07)
+                                    : (isWeekend ? Color.primary.opacity(0.018) : Color.clear)
+                            )
+                            .frame(width: dayColumnWidth, height: max(40, totalHeight - headerHeight))
+                            .overlay(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.055))
+                                    .frame(width: 0.75)
+                            }
+                            .overlay {
+                                if isToday {
+                                    Rectangle()
+                                        .fill(ThingsMacPalette.accentBlue.opacity(0.65))
+                                        .frame(width: 1.6)
+                                }
+                            }
+                    }
+                }
+            }
+
+            // 2. Dependency Bézier Curves for Expanded Projects
+            Canvas { context, _ in
+                var midYByTaskId: [String: CGFloat] = [:]
+                var cursorY: CGFloat = headerHeight + rowSpacing
+                for row in rows {
+                    let rH = rowHeight(for: row)
+                    if case .subTask(_, let bar, _) = row {
+                        midYByTaskId[bar.id] = cursorY + (rH * 0.5)
+                    }
+                    cursorY += rH + rowSpacing
+                }
+
+                for pLane in layout.projectLanes where expandedProjectIds.contains(pLane.projectId) {
+                    let barById = Dictionary(uniqueKeysWithValues: pLane.projectLayout.allTaskBars.map { ($0.id, $0) })
+                    for edge in pLane.projectLayout.dependencyEdges {
+                        guard let fromBar = barById[edge.fromTaskId],
+                              let toBar = barById[edge.toTaskId],
+                              let y0 = midYByTaskId[edge.fromTaskId],
+                              let y1 = midYByTaskId[edge.toTaskId] else {
+                            continue
+                        }
+                        let fromShift = CGFloat(cascadePreviewDeltas[fromBar.id] ?? 0) * dayColumnWidth
+                        let toShift = CGFloat(cascadePreviewDeltas[toBar.id] ?? 0) * dayColumnWidth
+                        let x0: CGFloat = (fromBar.isMilestone || fromBar.task.isMilestone)
+                            ? ((CGFloat(fromBar.endEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth + 11 + fromShift)
+                            : (CGFloat(fromBar.endEpochDay - layout.startEpochDay + 1) * dayColumnWidth - 3 + fromShift)
+                        let x1: CGFloat = (toBar.isMilestone || toBar.task.isMilestone)
+                            ? ((CGFloat(toBar.startEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth - 11 + toShift)
+                            : (CGFloat(toBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3 + toShift)
+                        let p0 = CGPoint(x: x0, y: y0)
+                        let p3 = CGPoint(x: x1, y: y1)
+
+                        var curve = Path()
+                        curve.move(to: p0)
+                        if p3.x >= p0.x + 12 {
+                            let dx = max(24.0, (p3.x - p0.x) * 0.5)
+                            curve.addCurve(
+                                to: p3,
+                                control1: CGPoint(x: p0.x + dx, y: p0.y),
+                                control2: CGPoint(x: p3.x - dx, y: p3.y)
+                            )
+                        } else {
+                            let vSign: CGFloat = p3.y >= p0.y ? 1.0 : -1.0
+                            curve.addCurve(
+                                to: p3,
+                                control1: CGPoint(x: p0.x + 28.0, y: p0.y + 14.0 * vSign),
+                                control2: CGPoint(x: p3.x - 28.0, y: p3.y - 14.0 * vSign)
+                            )
+                        }
+                        let edgeColor = edge.isActivelyBlocking
+                            ? ThingsMacPalette.somedayAmber
+                            : ThingsMacPalette.accentBlue.opacity(0.45)
+                        context.stroke(
+                            curve,
+                            with: .color(edgeColor),
+                            style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
+                        )
+                        var arrow = Path()
+                        arrow.move(to: CGPoint(x: p3.x - 6.5, y: p3.y - 3.8))
+                        arrow.addLine(to: p3)
+                        arrow.addLine(to: CGPoint(x: p3.x - 6.5, y: p3.y + 3.8))
+                        context.stroke(
+                            arrow,
+                            with: .color(edgeColor),
+                            style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
+                        )
+                    }
+                }
+            }
+            .frame(width: totalGridWidth, height: totalHeight)
+            .allowsHitTesting(false)
+
+            // 3. Project Summary Bars + Collapsed Milestone Diamonds + Expanded Phase/Task Bars
+            VStack(alignment: .leading, spacing: rowSpacing) {
+                Color.clear
+                    .frame(width: totalGridWidth, height: headerHeight)
+
+                ForEach(rows) { row in
+                    ZStack(alignment: .leading) {
+                        Color.clear
+                            .frame(width: totalGridWidth, height: rowHeight(for: row))
+
+                        switch row {
+                        case .projectSummary(let lane, let isExpanded):
+                            portfolioProjectSummaryBar(
+                                lane: lane,
+                                isExpanded: isExpanded,
+                                layout: layout
+                            )
+
+                        case .subPhase(_, let heading, let phaseBar, _):
+                            if let heading, let phaseBar {
+                                portfolioSubPhaseBar(
+                                    heading: heading,
+                                    phaseBar: phaseBar,
+                                    layout: layout
+                                )
+                            }
+
+                        case .subTask(let projectId, let taskBar, _):
+                            portfolioSubTaskBar(
+                                projectId: projectId,
+                                taskBar: taskBar,
+                                layout: layout,
+                                cascadePreviewDeltas: cascadePreviewDeltas
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: totalGridWidth, height: totalHeight, alignment: .topLeading)
+        .coordinateSpace(name: "portfolioTimelineGrid")
+    }
+
+    @ViewBuilder
+    private func portfolioProjectSummaryBar(
+        lane: AreaPortfolioProjectLane,
+        isExpanded: Bool,
+        layout: AreaPortfolioRoadmapLayout
+    ) -> some View {
+        let clampedStart = max(layout.startEpochDay, lane.summaryStartEpochDay)
+        let clampedEnd = min(layout.endEpochDay, lane.summaryEndEpochDay)
+        let span = max(1, clampedEnd - clampedStart + 1)
+        let barX = CGFloat(clampedStart - layout.startEpochDay) * dayColumnWidth + 2
+        let barW = max(20.0, CGFloat(span) * dayColumnWidth - 4)
+
+        ZStack(alignment: .leading) {
+            HStack(spacing: 6) {
+                ProjectProgressRing(
+                    progress: lane.project.progress,
+                    size: 13,
+                    tint: ThingsMacPalette.accentBlue,
+                    isCompleted: lane.project.status == .completed
+                )
+                Text(lane.project.title)
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9)
+            .frame(width: barW, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                    .fill(ThingsMacPalette.accentBlue.opacity(0.15))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                    .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.52), lineWidth: 1.15)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8.5, style: .continuous))
+            .onTapGesture {
+                if store.isTimelineFullScreen {
+                    store.isTimelineFullScreen = false
+                }
+                store.selectedDestination = .project(lane.projectId)
+            }
+            .offset(x: barX)
+
+            // Overlaid 45° Royal-Violet Milestone Diamonds (◆) when collapsed!
+            if !isExpanded {
+                ForEach(lane.milestoneBars) { mb in
+                    if mb.startEpochDay >= layout.startEpochDay && mb.startEpochDay <= layout.endEpochDay {
+                        let centerX = (CGFloat(mb.startEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth
+                        let msTitle = mb.task.title.isEmpty ? store.tr("macos_untitled_todo") : mb.task.title
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 3.0, style: .continuous)
+                                .fill(ThingsMacPalette.milestoneViolet)
+                                .frame(width: 14, height: 14)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 3.0, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.95), lineWidth: 1.35)
+                                )
+                                .rotationEffect(.degrees(45))
+                                .shadow(color: ThingsMacPalette.milestoneViolet.opacity(0.38), radius: 3.5, y: 1)
+                        }
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                        .thingsTooltip("◆ \(msTitle)")
+                        .onTapGesture {
+                            if !store.isTimelineFullScreen {
+                                store.openTaskModal(mb.id)
+                            }
+                        }
+                        .offset(x: centerX - 10)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func portfolioSubPhaseBar(
+        heading: Heading,
+        phaseBar: RoadmapPhaseBar,
+        layout: AreaPortfolioRoadmapLayout
+    ) -> some View {
+        let isFull = store.isTimelineFullScreen
+        let isArmed = !isFull && armedPhaseDragId == heading.id
+        let delta = (!isFull && activePhaseDrag?.id == heading.id) ? (activePhaseDrag?.deltaDays ?? 0) : 0
+        let rawStart = phaseBar.startEpochDay + delta
+        let rawEnd = phaseBar.endEpochDay + delta
+
+        if rawEnd >= layout.startEpochDay && rawStart <= layout.endEpochDay {
+            let clampedStart = max(layout.startEpochDay, rawStart)
+            let clampedEnd = min(layout.endEpochDay, rawEnd)
+            let span = max(1, clampedEnd - clampedStart + 1)
+            let barX = CGFloat(clampedStart - layout.startEpochDay) * dayColumnWidth + 2
+            let barW = max(dayColumnWidth - 4, CGFloat(span) * dayColumnWidth - 4)
+
+            let capsule = HStack(spacing: 5) {
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.95))
+                Text(heading.title)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(width: barW, height: 23)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [ThingsMacPalette.inboxBlue, ThingsMacPalette.accentBlue],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .opacity(phaseBar.hasExplicitDates ? 0.94 : 0.72)
+            )
+            .scaleEffect(isArmed ? 1.02 : 1.0)
+            .offset(x: barX)
+
+            if isFull {
+                capsule
+            } else {
+                capsule
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
+                            .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("portfolioTimelineGrid")))
+                            .onChanged { value in
+                                switch value {
+                                case .second(true, nil):
+                                    armedPhaseDragId = heading.id
+                                case .second(true, let drag?):
+                                    armedPhaseDragId = heading.id
+                                    let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
+                                    activePhaseDrag = (heading.id, snapped)
+                                default:
+                                    break
+                                }
+                            }
+                            .onEnded { value in
+                                let finalDelta: Int = {
+                                    if case .second(true, let drag?) = value {
+                                        return Int((drag.translation.width / dayColumnWidth).rounded())
+                                    }
+                                    return 0
+                                }()
+                                armedPhaseDragId = nil
+                                activePhaseDrag = nil
+                                if finalDelta != 0 {
+                                    store.shiftHeadingRoadmapDates(
+                                        heading,
+                                        deltaDays: finalDelta,
+                                        fallbackEpochDays: (phaseBar.startEpochDay, phaseBar.endEpochDay)
+                                    )
+                                }
+                            }
+                    )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func portfolioSubTaskBar(
+        projectId: String,
+        taskBar: RoadmapTaskBar,
+        layout: AreaPortfolioRoadmapLayout,
+        cascadePreviewDeltas: [String: Int]
+    ) -> some View {
+        let task = taskBar.task
+        let isFull = store.isTimelineFullScreen
+        let isSelected = !isFull && store.selectedTaskIds.contains(task.id)
+        let isBlocked = store.isTaskActivelyBlocked(task)
+        let isArmed = !isFull && armedTaskDragId == task.id
+        let delta = isFull ? 0 : (cascadePreviewDeltas[task.id] ?? 0)
+        let isDragging = !isFull && (isArmed || activeTaskDrag?.taskId == task.id || delta != 0)
+        let dragX = CGFloat(delta) * dayColumnWidth
+        let displayTitle = task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title
+
+        let barVisual: some View = Group {
+            if taskBar.isMilestone || task.isMilestone {
+                let isCompleted = task.status == .completed
+                let isOverdue = !isCompleted && (taskBar.endEpochDay + delta) < layout.todayEpochDay
+                let tint: Color = isCompleted
+                    ? ThingsMacPalette.logbookGreen
+                    : (isOverdue ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.milestoneViolet)
+                let colCenterX = (CGFloat(taskBar.startEpochDay - layout.startEpochDay) + 0.5) * dayColumnWidth
+
+                HStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 3.2, style: .continuous)
+                        .fill(tint)
+                        .frame(width: 15, height: 15)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3.2, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.94), lineWidth: 1.4)
+                        )
+                        .rotationEffect(.degrees(45))
+                        .frame(width: 22, height: 24)
+
+                    Text("◆ \(displayTitle)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(isCompleted ? .secondary : tint)
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3.5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(isSelected ? tint.opacity(0.16) : ThingsMacPalette.cardSurface.opacity(0.96))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(tint.opacity((isArmed || isSelected) ? 0.95 : 0.45), lineWidth: 1.1)
+                        )
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .offset(x: colCenterX - 11 + dragX)
+            } else {
+                let baseX = CGFloat(taskBar.startEpochDay - layout.startEpochDay) * dayColumnWidth + 3
+                let barW = max(dayColumnWidth - 6, CGFloat(taskBar.spanDays) * dayColumnWidth - 6)
+                let borderTint: Color = (isArmed || isSelected)
+                    ? ThingsMacPalette.accentBlue
+                    : (isBlocked ? ThingsMacPalette.somedayAmber : ThingsMacPalette.accentBlue.opacity(0.45))
+
+                HStack(spacing: 5) {
+                    if isBlocked {
+                        Image(systemName: "hourglass")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                    }
+                    Text(displayTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .frame(width: barW, height: 25)
+                .background(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(isSelected ? ThingsMacPalette.accentBlue.opacity(0.16) : ThingsMacPalette.cardSurface)
+                        .shadow(color: Color.black.opacity(isDragging ? 0.14 : 0.04), radius: isDragging ? 5 : 2, y: 1)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .strokeBorder(borderTint, lineWidth: (isArmed || isSelected) ? 1.5 : 1.0)
+                )
+                .offset(x: baseX + dragX)
+            }
+        }
+        .contentShape(Rectangle())
+        .thingsTimelineMouseTooltip(
+            TimelineTaskTooltipFormatter.formatRoadmapTask(
+                taskBar: taskBar,
+                isBlocked: isBlocked,
+                language: store.preferences.language
+            ),
+            isSuppressed: isDragging
+        )
+
+        if isFull {
+            barVisual
+        } else {
+            barVisual
+                .thingsInstantTaskTap(
+                    onSingleClick: { modifiers in
+                        store.handleRowClick(taskId: task.id, modifiers: modifiers)
+                    },
+                    onDoubleClick: {
+                        store.openTaskModal(task.id)
+                    }
+                )
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.28, maximumDistance: 8)
+                        .sequenced(before: DragGesture(minimumDistance: 2, coordinateSpace: .named("portfolioTimelineGrid")))
+                        .onChanged { value in
+                            switch value {
+                            case .second(true, nil):
+                                armedTaskDragId = task.id
+                            case .second(true, let drag?):
+                                armedTaskDragId = task.id
+                                let snapped = Int((drag.translation.width / dayColumnWidth).rounded())
+                                activeTaskDrag = (projectId, task.id, snapped)
+                            default:
+                                break
+                            }
+                        }
+                        .onEnded { value in
+                            let finalDelta: Int = {
+                                if case .second(true, let drag?) = value {
+                                    return Int((drag.translation.width / dayColumnWidth).rounded())
+                                }
+                                return 0
+                            }()
+                            armedTaskDragId = nil
+                            activeTaskDrag = nil
+                            if finalDelta != 0 {
+                                store.shiftTaskRoadmapDates(task, deltaDays: finalDelta)
+                            }
+                        }
+                )
+        }
+    }
+
+    // MARK: - Empty Card & Unscheduled Projects Tray
+
+    private var emptyPortfolioCard: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "calendar.day.timeline.left")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(ThingsMacPalette.areaGreen.opacity(0.75))
+            Text(store.tr("v31_area_no_projects_timeline"))
+                .font(.system(size: 13.5))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+        .thingsCardSurface(cornerRadius: 14)
+    }
+
+    private func unscheduledProjectsTray(_ unscheduledProjects: [Project]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "tray.full")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+
+                Text(store.tr("v31_area_unscheduled_projects"))
+                    .font(.system(size: 13.5, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                Text("\(unscheduledProjects.count)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+
+                Spacer()
+            }
+
+            ThingsFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                ForEach(unscheduledProjects) { proj in
+                    Button {
+                        store.selectedDestination = .project(proj.id)
+                    } label: {
+                        HStack(spacing: 7) {
+                            ProjectProgressRing(
+                                progress: proj.progress,
+                                size: 14,
+                                tint: ThingsMacPalette.accentBlue,
+                                isCompleted: proj.status == .completed
+                            )
+                            Text(proj.title)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text("↗")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(ThingsMacPalette.accentBlue)
+                        }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6.5)
+                        .thingsCardSurface(cornerRadius: 9)
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("v31_area_open_project"))
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer.opacity(0.75))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.85)
+                )
+        )
+    }
+
+    // MARK: - Date Helpers
+
+    private func formattedWindowLabel(startEpochDay: Int, endEpochDay: Int) -> String {
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.dateStyle = .medium
+        let start = DateEpochConverter.date(fromEpochDay: startEpochDay)
+        let end = DateEpochConverter.date(fromEpochDay: endEpochDay)
+        return "\(df.string(from: start)) – \(df.string(from: end))"
+    }
+
+    private func dayNumber(for epochDay: Int) -> Int {
+        Calendar.current.component(.day, from: DateEpochConverter.date(fromEpochDay: epochDay))
+    }
+
+    private func weekdayInitial(for epochDay: Int) -> String {
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("EEEEE")
+        return df.string(from: DateEpochConverter.date(fromEpochDay: epochDay))
+    }
+
+    private func monthHeaderChip(for epochDay: Int, isFirstColumn: Bool) -> String {
+        let date = DateEpochConverter.date(fromEpochDay: epochDay)
+        let dom = Calendar.current.component(.day, from: date)
+        guard isFirstColumn || dom == 1 else { return "" }
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.setLocalizedDateFormatFromTemplate("MMM")
+        return df.string(from: date)
+    }
+
+    private func isWeekendDay(_ epochDay: Int) -> Bool {
+        let iso = DateEpochConverter.isoWeekday(for: DateEpochConverter.date(fromEpochDay: epochDay))
+        return iso == 6 || iso == 7
+    }
+
+    // MARK: - Portfolio PDF & PNG Export
+
+    private var sanitizedPortfolioExportBaseName: String {
+        let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+        let cleaned = area.title
+            .components(separatedBy: invalid)
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "Portfolio-Roadmap" : "\(cleaned)-Portfolio"
+    }
+
+    @MainActor
+    private func exportPortfolioPDFWithOptions(
+        bundle: (project: Project, headings: [Heading], layout: ProjectRoadmapLayout),
+        options: RoadmapPDFExportOptions
+    ) {
+        let panel = NSSavePanel()
+        panel.title = store.tr("v30_roadmap_export_pdf")
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [UTType.pdf]
+        panel.nameFieldStringValue = "\(sanitizedPortfolioExportBaseName)-Roadmap.pdf"
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        if let data = ProjectRoadmapExporter.exportRoadmapPDFData(
+            project: bundle.project,
+            headings: bundle.headings,
+            layout: bundle.layout,
+            options: options,
+            generalLabel: store.tr("v30_board_ungrouped_column"),
+            todayLabel: store.tr("view_today"),
+            locale: store.preferences.language.locale
+        ) {
+            try? data.write(to: destinationURL, options: .atomic)
+        }
+    }
+
+    @MainActor
+    private func exportPortfolioPNGInteractively(layout: AreaPortfolioRoadmapLayout) {
+        let panel = NSSavePanel()
+        panel.title = store.tr("v30_roadmap_export_png")
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [UTType.png]
+        panel.nameFieldStringValue = "\(sanitizedPortfolioExportBaseName)-Roadmap.png"
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        let bundle = ProjectRoadmapEngine.toExportablePortfolioLayout(
+            portfolioLayout: layout,
+            expandedProjectIds: expandedProjectIds
+        )
+        let rawSnapshot = RoadmapExportSnapshotView(
+            store: store,
+            project: bundle.project,
+            headings: bundle.headings,
+            layout: bundle.layout,
+            dayColumnWidth: max(36.0, dayColumnWidth)
+        )
+        let proposed = rawSnapshot.exportCanvasSize
+        let snapshotView = rawSnapshot.environment(\.colorScheme, .light)
+        let exportedData = ProjectRoadmapExporter.renderViewToPNGData(snapshotView, scale: 2.0, proposedSize: proposed)
+            ?? ProjectRoadmapExporter.exportRoadmapPNGData(
+                project: bundle.project,
+                headings: bundle.headings,
+                layout: bundle.layout,
+                generalLabel: store.tr("v30_board_ungrouped_column"),
+                todayLabel: store.tr("view_today"),
+                locale: store.preferences.language.locale,
+                dayColumnWidth: max(36.0, dayColumnWidth),
+                scale: 2.0
+            )
+
+        if let data = exportedData {
+            try? data.write(to: destinationURL, options: .atomic)
+        }
     }
 }

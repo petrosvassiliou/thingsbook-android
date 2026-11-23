@@ -24,6 +24,12 @@ public struct GeminiAssistantSheet: View {
     // Logbook Reflection state
     @State private var reflection: LogbookReflectionResponse? = nil
 
+    // Plan My Day Auto-Timeblocker state
+    @State private var includeScheduledInDayPlan = false
+    @State private var dayPlanPreview: DayTimeblockPlanResponse? = nil
+    @State private var editablePlanBlocks: [DayTimeblockItemDTO] = []
+    @State private var selectedPlanTaskIds: Set<String> = []
+
     public init(store: ThingsbookStore) {
         self.store = store
     }
@@ -89,6 +95,7 @@ public struct GeminiAssistantSheet: View {
                 Text(store.tr("gemini_brain_dump_title")).tag(GeminiSheetTab.brainDump)
                 Text(store.tr("gemini_project_architect_title")).tag(GeminiSheetTab.projectArchitect)
                 Text(store.tr("gemini_logbook_review_title")).tag(GeminiSheetTab.logbookReview)
+                Text(store.tr("v31_gemini_plan_day_tab")).tag(GeminiSheetTab.planMyDay)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -115,10 +122,12 @@ public struct GeminiAssistantSheet: View {
                 projectArchitectTab
             case .logbookReview:
                 logbookReviewTab
+            case .planMyDay:
+                planMyDayTab
             }
         }
         .padding(20)
-        .frame(width: 600, height: 500)
+        .frame(width: 660, height: 540)
         .background(ThingsMacPalette.canvasBackground)
         .onAppear {
             selectedTab = store.geminiInitialTab
@@ -199,10 +208,14 @@ public struct GeminiAssistantSheet: View {
         }
     }
 
-    // MARK: - Tab 2: AI Project Architect
+    // MARK: - Tab 2: v3-Aware AI Roadmap Architect
 
     private var projectArchitectTab: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Text(store.tr("v31_gemini_architect_v3_hint"))
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+
             HStack(spacing: 8) {
                 TextField(store.tr("gemini_project_architect_placeholder"), text: $architectGoal)
                     .textFieldStyle(.roundedBorder)
@@ -237,13 +250,31 @@ public struct GeminiAssistantSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                         ForEach(bp.headings) { h in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(h.title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(ThingsMacPalette.accentBlue)
-                                ForEach(h.tasks, id: \.self) { t in
-                                    Text("• \(t)")
-                                        .font(.system(size: 12.5))
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Text(h.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                                    Spacer()
+                                    if let s = h.startDayOffset, let e = h.endDayOffset {
+                                        Text("D+\(s) – D+\(e)")
+                                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 2)
+                                            .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.11)))
+                                    }
+                                }
+
+                                if !h.richTasks.isEmpty {
+                                    ForEach(h.richTasks) { rt in
+                                        architectRichTaskPreviewRow(rt)
+                                    }
+                                } else {
+                                    ForEach(h.tasks, id: \.self) { t in
+                                        Text("• \(t)")
+                                            .font(.system(size: 12.5))
+                                    }
                                 }
                             }
                             .padding(10)
@@ -263,6 +294,61 @@ public struct GeminiAssistantSheet: View {
             } else {
                 Spacer()
             }
+        }
+    }
+
+    private func architectRichTaskPreviewRow(_ rt: RoadmapTaskBlueprintDTO) -> some View {
+        let effortEnum = TaskEffortLevel.normalized(rt.effortLevel)
+        return HStack(alignment: .center, spacing: 6) {
+            if rt.isMilestone {
+                Text("◆")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.milestoneViolet)
+            } else {
+                Text("•")
+                    .font(.system(size: 12.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(rt.title)
+                .font(.system(size: 12.5, weight: rt.isMilestone ? .semibold : .regular))
+                .foregroundStyle(rt.isMilestone ? ThingsMacPalette.milestoneViolet : .primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            if !rt.dependsOnKeys.isEmpty {
+                Text("↳ \(rt.dependsOnKeys.count)")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(ThingsMacPalette.somedayAmber)
+                    .padding(.horizontal, 5.5)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+            }
+
+            if let effortEnum {
+                Text(localizedEffortTitle(effortEnum))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(ThingsMacPalette.accentBlue.opacity(0.11)))
+            }
+
+            Text(TaskItem.formatCompactDuration(rt.durationMinutes))
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1.5)
+                .background(Capsule().fill(ThingsMacPalette.anytimeTeal.opacity(0.12)))
+        }
+    }
+
+    private func localizedEffortTitle(_ effort: TaskEffortLevel) -> String {
+        switch effort {
+        case .quickWin: return store.tr("v30_effort_quick_win")
+        case .medium: return store.tr("v30_effort_medium")
+        case .deepFocus: return store.tr("v30_effort_deep_focus")
         }
     }
 
@@ -315,6 +401,134 @@ public struct GeminiAssistantSheet: View {
                 }
             }
             Spacer()
+        }
+    }
+
+    // MARK: - Tab 4: "Plan My Day" Auto-Timeblocker
+
+    private var planMyDayTab: some View {
+        let todayTasksById = Dictionary(
+            uniqueKeysWithValues: (store.todayDaytimeTasks + store.thisEveningTasks + store.allOpenTasks).map { ($0.id, $0) }
+        )
+        let chosenBlocks = editablePlanBlocks.filter { selectedPlanTaskIds.contains($0.taskId) }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(store.tr("v31_gemini_plan_day_desc"))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Toggle(store.tr("v31_gemini_plan_day_replan"), isOn: $includeScheduledInDayPlan)
+                    .font(.system(size: 12.5))
+
+                Spacer()
+
+                Button {
+                    runPlanMyDay()
+                } label: {
+                    Label(store.tr("v31_gemini_plan_day_generate"), systemImage: "sparkles")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isWorking)
+            }
+
+            if let preview = dayPlanPreview {
+                if editablePlanBlocks.isEmpty {
+                    Text(store.tr("v31_gemini_plan_day_empty"))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .thingsCardSurface(cornerRadius: 10)
+                    Spacer()
+                } else {
+                    if !preview.summary.isEmpty {
+                        Text(preview.summary)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                    }
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(editablePlanBlocks.enumerated()), id: \.element.taskId) { idx, block in
+                                let isChecked = selectedPlanTaskIds.contains(block.taskId)
+                                let rawTitle = todayTasksById[block.taskId]?.title ?? block.taskId
+                                let taskTitle = rawTitle.isEmpty ? store.tr("macos_untitled_todo") : rawTitle
+                                let startStr = TaskItem.formatMinutesOfDay(block.startMinutes)
+                                let endMins = min(1440, block.startMinutes + block.durationMinutes)
+                                let endStr = endMins >= 1440 ? "24:00" : TaskItem.formatMinutesOfDay(endMins)
+
+                                HStack(spacing: 10) {
+                                    Toggle(
+                                        "",
+                                        isOn: Binding(
+                                            get: { isChecked },
+                                            set: { checked in
+                                                if checked {
+                                                    selectedPlanTaskIds.insert(block.taskId)
+                                                } else {
+                                                    selectedPlanTaskIds.remove(block.taskId)
+                                                }
+                                            }
+                                        )
+                                    )
+                                    .labelsHidden()
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(startStr) – \(endStr) · \(taskTitle)")
+                                            .font(.system(size: 12.5, weight: .semibold))
+                                            .foregroundStyle(isChecked ? .primary : .secondary)
+                                            .lineLimit(1)
+                                        if !block.reason.isEmpty {
+                                            Text(block.reason)
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+
+                                    Spacer()
+
+                                    HStack(spacing: 4) {
+                                        Button("-15m") {
+                                            editablePlanBlocks[idx].startMinutes = max(0, block.startMinutes - 15)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.mini)
+
+                                        Button("+15m") {
+                                            editablePlanBlocks[idx].startMinutes = min(23 * 60 + 45, block.startMinutes + 15)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.mini)
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .opacity(isChecked ? 1.0 : 0.58)
+                                .thingsCardSurface(cornerRadius: 9)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            store.applyGeminiDayPlan(chosenBlocks)
+                            dismiss()
+                        } label: {
+                            Label(
+                                store.trf("v31_gemini_plan_day_apply", chosenBlocks.count),
+                                systemImage: "checkmark.circle.fill"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isWorking || chosenBlocks.isEmpty)
+                    }
+                }
+            } else {
+                Spacer()
+            }
         }
     }
 
@@ -408,27 +622,7 @@ public struct GeminiAssistantSheet: View {
     }
 
     private func createProjectFromBlueprint(_ bp: ProjectBlueprintResponse) {
-        guard let proj = try? store.database.createProject(
-            title: bp.projectTitle,
-            notes: bp.projectNotes,
-            areaId: architectAreaId,
-            scheduleState: .today,
-            whenDate: DateEpochConverter.startOfDayMillis(for: Date())
-        ) else { return }
-
-        for h in bp.headings {
-            let createdH = try? store.database.createHeading(projectId: proj.id, title: h.title)
-            for t in h.tasks {
-                _ = try? store.database.createTask(
-                    title: t,
-                    scheduleState: .anytime,
-                    projectId: proj.id,
-                    headingId: createdH?.id,
-                    areaId: architectAreaId
-                )
-            }
-        }
-        store.selectedDestination = .project(proj.id)
+        guard store.createProjectFromBlueprint(bp, areaId: architectAreaId) != nil else { return }
         dismiss()
     }
 
@@ -444,6 +638,28 @@ public struct GeminiAssistantSheet: View {
                 )
                 await MainActor.run {
                     self.reflection = res
+                    self.isWorking = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isWorking = false
+                }
+            }
+        }
+    }
+
+    private func runPlanMyDay() {
+        isWorking = true
+        errorMessage = nil
+        let includeScheduled = includeScheduledInDayPlan
+        Task {
+            do {
+                let plan = try await store.generateGeminiDayPlan(includeAlreadyScheduled: includeScheduled)
+                await MainActor.run {
+                    self.dayPlanPreview = plan
+                    self.editablePlanBlocks = plan.blocks
+                    self.selectedPlanTaskIds = Set(plan.blocks.map(\.taskId))
                     self.isWorking = false
                 }
             } catch {

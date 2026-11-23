@@ -30,9 +30,20 @@ import {
   type ThingsbookStatistics
 } from '../domain/types.ts';
 import {
+  DEFAULT_WORKDAY_END_MINUTES,
+  DEFAULT_WORKDAY_START_MINUTES,
   buildProjectTemplateBlueprint,
+  normalizeWorkdayBounds,
   wouldCreateDependencyCycle
 } from '../domain/v2Utils.ts';
+import {
+  computeSmartDependencyCascade,
+  normalizeAreaViewMode
+} from '../domain/v30Roadmap.ts';
+import type {
+  ProjectBlueprintResponse,
+  RoadmapTaskBlueprintDto
+} from './geminiService.ts';
 import {
   buildBackupPayloadFromEntities,
   decodeThingsBackup,
@@ -179,14 +190,40 @@ export const DEFAULT_PREFS: AppPreferences = {
   appLockWebAuthnCredId: '',
   tagSortMode: 'alpha',
   viewSortMode: 'manual',
-  savedPerspectives: []
+  savedPerspectives: [],
+  areaViewModes: {},
+  workdayStartMinutes: DEFAULT_WORKDAY_START_MINUTES,
+  workdayEndMinutes: DEFAULT_WORKDAY_END_MINUTES
 };
+
+function safeParseAreaViewModes(
+  raw: unknown
+): Record<string, 'list' | 'roadmap'> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, 'list' | 'roadmap'> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const cleanKey = k.trim();
+    if (!cleanKey || typeof v !== 'string') continue;
+    out[cleanKey] = normalizeAreaViewMode(v);
+  }
+  return out;
+}
 
 export function loadPreferences(): AppPreferences {
   try {
     const raw = localStorage.getItem(PREFS_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_PREFS, savedPerspectives: [] };
+    if (!raw) {
+      return {
+        ...DEFAULT_PREFS,
+        savedPerspectives: [],
+        areaViewModes: {}
+      };
+    }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const workday = normalizeWorkdayBounds(
+      typeof parsed?.workdayStartMinutes === 'number' ? parsed.workdayStartMinutes : undefined,
+      typeof parsed?.workdayEndMinutes === 'number' ? parsed.workdayEndMinutes : undefined
+    );
     return {
       ...DEFAULT_PREFS,
       ...(parsed as Partial<AppPreferences>),
@@ -194,10 +231,17 @@ export function loadPreferences(): AppPreferences {
         typeof parsed?.showPerspectives === 'boolean' ? parsed.showPerspectives : undefined,
       tagSortMode: normalizeTagSortMode(parsed?.tagSortMode),
       viewSortMode: normalizeViewSortMode(parsed?.viewSortMode),
-      savedPerspectives: safeParseSavedPerspectives(parsed?.savedPerspectives)
+      savedPerspectives: safeParseSavedPerspectives(parsed?.savedPerspectives),
+      areaViewModes: safeParseAreaViewModes(parsed?.areaViewModes),
+      workdayStartMinutes: workday.startMinutes,
+      workdayEndMinutes: workday.endMinutes
     };
   } catch {
-    return { ...DEFAULT_PREFS, savedPerspectives: [] };
+    return {
+      ...DEFAULT_PREFS,
+      savedPerspectives: [],
+      areaViewModes: {}
+    };
   }
 }
 
@@ -215,7 +259,10 @@ export type UndoEventKind =
   | 'task_completed'
   | 'task_deleted'
   | 'project_deleted'
-  | 'tasks_updated';
+  | 'tasks_updated'
+  | 'roadmap_rescheduled'
+  | 'roadmap_cascade'
+  | 'day_plan_applied';
 
 export interface UndoEventPayload {
   kind: UndoEventKind;
@@ -588,14 +635,14 @@ export class ThingsLocalDb {
         await tx.objectStore('projects').put({
           ...proj,
           purgedFromTrash: false,
-          updatedAt: now,
+          updatedAt: Math.max(now, proj.updatedAt + 1),
           isDirty: true
         });
       }
       for (const h of snap.headings) {
         await tx.objectStore('headings').put({
           ...h,
-          updatedAt: now,
+          updatedAt: Math.max(now, h.updatedAt + 1),
           isDirty: true
         });
       }
@@ -603,21 +650,21 @@ export class ThingsLocalDb {
         await tx.objectStore('tasks').put({
           ...tk,
           purgedFromTrash: false,
-          updatedAt: now,
+          updatedAt: Math.max(now, tk.updatedAt + 1),
           isDirty: true
         });
       }
       for (const chk of snap.checklistItems) {
         await tx.objectStore('checklist_items').put({
           ...chk,
-          updatedAt: now,
+          updatedAt: Math.max(now, chk.updatedAt + 1),
           isDirty: true
         });
       }
       for (const att of snap.attachments) {
         await tx.objectStore('attachments').put({
           ...att,
-          updatedAt: now,
+          updatedAt: Math.max(now, att.updatedAt + 1),
           isDirty: true
         });
       }
@@ -2770,6 +2817,450 @@ export class ThingsLocalDb {
   }
 
   /**
+   * v3.1 AI Roadmap Architect: Instantiates a full v3 Gantt project (`viewMode: 'roadmap'`)
+   * with dated headings, tasks (`whenDate`, milestone `deadline`, `durationMinutes`, `effortLevel`,
+   * `isMilestone`, cycle-safe `blockedByTaskIds` resolved from `dependsOnKeys`), and checklist items.
+   */
+  async createV3RoadmapProjectWithBlueprint(
+    blueprint: ProjectBlueprintResponse,
+    areaId: string | null = null
+  ): Promise<string> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const todayEpoch = startOfDayEpoch(new Date(now));
+      const projectId = crypto.randomUUID();
+      const validAreaId = areaId && areaId.trim().length > 0 ? areaId.trim() : null;
+
+      const dayOffsetMillis = (offsetDays: number): number =>
+        addDaysLocal(todayEpoch, Math.max(0, Math.min(365, Math.trunc(offsetDays))));
+
+      let maxEndOffset = 10;
+      for (const h of blueprint.headings) {
+        if (h.endDayOffset != null && Number.isFinite(h.endDayOffset)) {
+          maxEndOffset = Math.max(maxEndOffset, Math.trunc(h.endDayOffset));
+        } else if (Array.isArray(h.richTasks) && h.richTasks.length > 0) {
+          for (const rt of h.richTasks) {
+            maxEndOffset = Math.max(maxEndOffset, Math.trunc(rt.dayOffset || 0));
+          }
+        }
+      }
+
+      const tx = db.transaction(
+        ['projects', 'headings', 'tasks', 'checklist_items'],
+        'readwrite'
+      );
+
+      await tx.objectStore('projects').put({
+        id: projectId,
+        areaId: validAreaId,
+        title: blueprint.projectTitle.trim() || 'New Project',
+        notes: blueprint.projectNotes || '',
+        status: 'ACTIVE',
+        scheduleState: 'TODAY',
+        whenDate: todayEpoch,
+        deadline: dayOffsetMillis(Math.max(1, maxEndOffset)),
+        completedAt: null,
+        lastReviewedAt: now,
+        sortOrder: now,
+        tagIds: [],
+        viewMode: 'roadmap',
+        createdAt: now,
+        updatedAt: now,
+        isDeleted: false,
+        isDirty: true
+      } satisfies ProjectRecord);
+
+      const taskIdByKey = new Map<string, string>();
+      interface PendingBlueprintTask {
+        id: string;
+        headingId: string;
+        hIdx: number;
+        tIdx: number;
+        dto: RoadmapTaskBlueprintDto;
+      }
+      const pendingTasks: PendingBlueprintTask[] = [];
+
+      for (let hIdx = 0; hIdx < blueprint.headings.length; hIdx++) {
+        const h = blueprint.headings[hIdx];
+        const headingId = crypto.randomUUID();
+        const richList: RoadmapTaskBlueprintDto[] =
+          Array.isArray(h.richTasks) && h.richTasks.length > 0
+            ? h.richTasks.filter((rt) => rt.title && rt.title.trim().length > 0)
+            : (h.tasks || [])
+                .map((t) => t.trim())
+                .filter(Boolean)
+                .map((tTitle, tIdx, arr) => {
+                  const isMs =
+                    hIdx === blueprint.headings.length - 1 && tIdx === arr.length - 1;
+                  return {
+                    key: `h${hIdx}_t${tIdx}`,
+                    title: tTitle,
+                    notes: '',
+                    dayOffset: hIdx * 4 + tIdx,
+                    durationMinutes: isMs ? 30 : 120,
+                    effortLevel: isMs ? 'QUICK_WIN' : tIdx === 0 ? 'DEEP_FOCUS' : 'MEDIUM',
+                    isMilestone: isMs,
+                    dependsOnKeys: tIdx > 0 ? [`h${hIdx}_t${tIdx - 1}`] : [],
+                    checklist: []
+                  };
+                });
+
+        const minChildDay =
+          richList.length > 0
+            ? richList.reduce((m, r) => Math.min(m, r.dayOffset), Infinity)
+            : hIdx * 4;
+        const maxChildDay =
+          richList.length > 0
+            ? richList.reduce(
+                (m, r) =>
+                  Math.max(
+                    m,
+                    r.dayOffset + Math.max(0, Math.ceil((r.durationMinutes || 30) / 480) - 1)
+                  ),
+                -Infinity
+              )
+            : minChildDay + 3;
+
+        const startOffset =
+          h.startDayOffset != null && Number.isFinite(h.startDayOffset)
+            ? Math.max(0, Math.trunc(h.startDayOffset))
+            : minChildDay;
+        const endOffset = Math.max(
+          startOffset,
+          h.endDayOffset != null && Number.isFinite(h.endDayOffset)
+            ? Math.trunc(h.endDayOffset)
+            : maxChildDay
+        );
+
+        await tx.objectStore('headings').put({
+          id: headingId,
+          projectId,
+          title: h.title.trim() || `Phase ${hIdx + 1}`,
+          startDate: dayOffsetMillis(startOffset),
+          endDate: dayOffsetMillis(endOffset),
+          sortOrder: (hIdx + 1) * 1000,
+          isArchived: false,
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: false,
+          isDirty: true
+        } satisfies HeadingRecord);
+
+        for (let tIdx = 0; tIdx < richList.length; tIdx++) {
+          const dto = richList[tIdx];
+          const taskId = crypto.randomUUID();
+          const cleanKey = (dto.key || '').trim();
+          if (cleanKey) {
+            taskIdByKey.set(cleanKey, taskId);
+          }
+          pendingTasks.push({
+            id: taskId,
+            headingId,
+            hIdx,
+            tIdx,
+            dto
+          });
+        }
+      }
+
+      const blockedByMap = new Map<string, string[]>();
+      for (let i = 0; i < pendingTasks.length; i++) {
+        const pt = pendingTasks[i];
+        const r = pt.dto;
+        const cleanTitle = r.title.trim();
+        if (!cleanTitle) continue;
+
+        const safeDayOffset = Math.max(0, Math.min(365, Math.trunc(r.dayOffset || 0)));
+        const itemMillis = dayOffsetMillis(safeDayOffset);
+        const scheduleState: ScheduleState = safeDayOffset <= 0 ? 'TODAY' : 'UPCOMING';
+        const isMs = Boolean(r.isMilestone);
+        const safeDur = isMs
+          ? 30
+          : Math.max(5, Math.min(48_000, Math.trunc(r.durationMinutes || 60)));
+        const normEffort = normalizeEffortLevel(r.effortLevel);
+
+        const resolvedBlockers: string[] = [];
+        for (const rawKey of r.dependsOnKeys ?? []) {
+          const mappedId = taskIdByKey.get(String(rawKey || '').trim());
+          if (!mappedId || mappedId === pt.id || resolvedBlockers.includes(mappedId)) continue;
+          if (!wouldCreateDependencyCycle(pt.id, mappedId, blockedByMap)) {
+            resolvedBlockers.push(mappedId);
+            blockedByMap.set(pt.id, resolvedBlockers);
+          }
+        }
+        blockedByMap.set(pt.id, resolvedBlockers);
+
+        await tx.objectStore('tasks').put({
+          id: pt.id,
+          title: cleanTitle,
+          notes: (r.notes || '').trim(),
+          status: 'OPEN',
+          scheduleState,
+          whenDate: itemMillis,
+          deadline: isMs ? itemMillis : null,
+          reminderTime: null,
+          durationMinutes: safeDur,
+          isPinned: false,
+          isMilestone: isMs,
+          effortLevel: normEffort,
+          blockedByTaskIds: resolvedBlockers,
+          completedAt: null,
+          projectId,
+          headingId: pt.headingId,
+          areaId: null,
+          recurrenceRule: null,
+          sortOrder: (pt.hIdx + 1) * 1000 + (pt.tIdx + 1) * 100,
+          tagIds: [],
+          createdAt: now,
+          updatedAt: now + i,
+          isDeleted: false,
+          isDirty: true,
+          purgedFromTrash: false
+        } satisfies TaskRecord);
+
+        const checklist = Array.isArray(r.checklist) ? r.checklist : [];
+        for (let cIdx = 0; cIdx < checklist.length; cIdx++) {
+          const cTitle = String(checklist[cIdx] || '').trim();
+          if (!cTitle) continue;
+          await tx.objectStore('checklist_items').put({
+            id: crypto.randomUUID(),
+            taskId: pt.id,
+            title: cTitle,
+            isCompleted: false,
+            sortOrder: (cIdx + 1) * 100,
+            createdAt: now,
+            updatedAt: now,
+            isDeleted: false,
+            isDirty: true
+          } satisfies ChecklistItemRecord);
+        }
+      }
+
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return projectId;
+    });
+  }
+
+  /**
+   * v3.1 Smart Push-on-Conflict Auto-Cascading Reschedule with atomic Undo snapshot.
+   */
+  async rescheduleRoadmapTaskWithCascade(
+    task: TaskRecord,
+    deltaDays: number,
+    todayEpoch?: number
+  ): Promise<{ shiftedCount: number; cascadedCount: number }> {
+    const step = Math.trunc(deltaDays);
+    if (!Number.isFinite(step) || step === 0) {
+      return { shiftedCount: 0, cascadedCount: 0 };
+    }
+
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const effectiveToday = todayEpoch ?? startOfDayEpoch(new Date(now));
+      const tx = db.transaction('tasks', 'readwrite');
+      const allTasks = (await tx.store.getAll()) as TaskRecord[];
+      const liveAnchor = allTasks.find((t) => t.id === task.id && !t.isDeleted) ?? task;
+      const scopeTasks = liveAnchor.projectId
+        ? allTasks.filter((t) => !t.isDeleted && t.projectId === liveAnchor.projectId)
+        : allTasks.filter((t) => !t.isDeleted);
+
+      const shifts = computeSmartDependencyCascade(
+        liveAnchor,
+        step,
+        scopeTasks,
+        effectiveToday
+      );
+
+      if (shifts.length === 0) {
+        await tx.done;
+        return { shiftedCount: 0, cascadedCount: 0 };
+      }
+
+      const taskById = new Map(allTasks.map((t) => [t.id, t]));
+      const priorTasks: TaskRecord[] = [];
+      let idx = 0;
+      for (const s of shifts) {
+        const existing = taskById.get(s.task.id);
+        if (!existing || existing.isDeleted) continue;
+        priorTasks.push({ ...existing });
+        await tx.store.put({
+          ...existing,
+          whenDate: s.whenDate,
+          deadline: s.deadline,
+          scheduleState: s.scheduleState,
+          updatedAt: Math.max(now + idx, existing.updatedAt + 1),
+          isDirty: true
+        } satisfies TaskRecord);
+        idx++;
+      }
+
+      await tx.done;
+
+      const cascadedCount = shifts.filter((s) => !s.isAnchor).length;
+      if (priorTasks.length > 0) {
+        this.lastUndoSnapshot = {
+          tasks: priorTasks,
+          checklistItems: [],
+          projects: [],
+          headings: [],
+          attachments: [],
+          spawnedTaskIds: []
+        };
+        this.emitUndoEvent({
+          kind: cascadedCount > 0 ? 'roadmap_cascade' : 'roadmap_rescheduled',
+          entityTitle: liveAnchor.title,
+          count: cascadedCount > 0 ? cascadedCount : 1
+        });
+      }
+
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return { shiftedCount: priorTasks.length, cascadedCount };
+    });
+  }
+
+  /**
+   * v3.1 Gantt Phase (Heading) reschedule with atomic Undo snapshot.
+   */
+  async rescheduleRoadmapHeading(
+    headingId: string,
+    nextStart: number | null,
+    nextEnd: number | null,
+    fallbackTitle: string = ''
+  ): Promise<boolean> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('headings', 'readwrite');
+      const existing = (await tx.store.get(headingId)) as HeadingRecord | undefined;
+      if (!existing || existing.isDeleted) {
+        await tx.done;
+        return false;
+      }
+
+      const clampedEnd =
+        nextStart != null && nextEnd != null && nextEnd < nextStart ? nextStart : nextEnd;
+
+      this.lastUndoSnapshot = {
+        tasks: [],
+        checklistItems: [],
+        projects: [],
+        headings: [{ ...existing }],
+        attachments: [],
+        spawnedTaskIds: []
+      };
+
+      await tx.store.put({
+        ...existing,
+        startDate: nextStart,
+        endDate: clampedEnd,
+        updatedAt: Math.max(now, existing.updatedAt + 1),
+        isDirty: true
+      } satisfies HeadingRecord);
+
+      await tx.done;
+
+      this.emitUndoEvent({
+        kind: 'roadmap_rescheduled',
+        entityTitle: existing.title || fallbackTitle,
+        count: 1
+      });
+
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return true;
+    });
+  }
+
+  /**
+   * v3.1 "Plan My Day" batch timeblock application with atomic Undo snapshot.
+   */
+  async applyBatchTaskTimeblocks(
+    updates: ReadonlyArray<{
+      taskId: string;
+      scheduledStartMinutes: number | null;
+      durationMinutes?: number | null;
+    }>
+  ): Promise<number> {
+    if (updates.length === 0) return 0;
+
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const todayEpoch = startOfDayEpoch(new Date(now));
+      const tx = db.transaction('tasks', 'readwrite');
+      const priorTasks: TaskRecord[] = [];
+
+      for (let i = 0; i < updates.length; i++) {
+        const u = updates[i];
+        const existing = (await tx.store.get(u.taskId)) as TaskRecord | undefined;
+        if (!existing || existing.isDeleted) continue;
+
+        priorTasks.push({ ...existing });
+
+        const cleanStart =
+          u.scheduledStartMinutes != null && Number.isFinite(u.scheduledStartMinutes)
+            ? Math.max(0, Math.min(1439, Math.trunc(u.scheduledStartMinutes)))
+            : null;
+        const cleanDur =
+          u.durationMinutes !== undefined
+            ? u.durationMinutes != null &&
+              Number.isFinite(u.durationMinutes) &&
+              u.durationMinutes > 0
+              ? Math.max(5, Math.min(48_000, Math.trunc(u.durationMinutes)))
+              : null
+            : (existing.durationMinutes ?? null);
+
+        const nextSchedule: ScheduleState =
+          cleanStart != null &&
+          (existing.scheduleState === 'INBOX' ||
+            existing.scheduleState === 'ANYTIME' ||
+            existing.scheduleState === 'SOMEDAY')
+            ? 'TODAY'
+            : existing.scheduleState;
+        const nextWhen =
+          cleanStart != null && existing.whenDate == null ? todayEpoch : existing.whenDate;
+
+        await tx.store.put({
+          ...existing,
+          scheduleState: nextSchedule,
+          whenDate: nextWhen,
+          scheduledStartMinutes: cleanStart,
+          durationMinutes: cleanDur,
+          updatedAt: Math.max(now + i, existing.updatedAt + 1),
+          isDirty: true
+        } satisfies TaskRecord);
+      }
+
+      await tx.done;
+
+      if (priorTasks.length > 0) {
+        this.lastUndoSnapshot = {
+          tasks: priorTasks,
+          checklistItems: [],
+          projects: [],
+          headings: [],
+          attachments: [],
+          spawnedTaskIds: []
+        };
+        this.emitUndoEvent({
+          kind: 'day_plan_applied',
+          entityTitle: priorTasks[0].title,
+          count: priorTasks.length
+        });
+      }
+
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return priorTasks.length;
+    });
+  }
+
+  /**
    * Soft-deletes a project and its headings.
    * - When `deleteAssociatedTasks === true` (default): cascade soft-deletes all non-deleted tasks
    *   in the project (keeping `projectId` & `headingId` intact), their checklists, and attachments.
@@ -4505,7 +4996,10 @@ export class ThingsLocalDb {
         ...(typeof prefs.showPerspectives === 'boolean'
           ? { showPerspectives: prefs.showPerspectives }
           : {}),
-        savedPerspectivesJson: JSON.stringify(prefs.savedPerspectives ?? [])
+        savedPerspectivesJson: JSON.stringify(prefs.savedPerspectives ?? []),
+        workdayStartMinutes: prefs.workdayStartMinutes ?? DEFAULT_WORKDAY_START_MINUTES,
+        workdayEndMinutes: prefs.workdayEndMinutes ?? DEFAULT_WORKDAY_END_MINUTES,
+        areaViewModes: prefs.areaViewModes ?? {}
       },
       appVersionName: `${APP_VERSION}-chromeos`
     });

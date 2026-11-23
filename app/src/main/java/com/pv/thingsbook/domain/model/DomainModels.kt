@@ -454,12 +454,44 @@ fun filterTasksForPerspective(
     }
 }
 
-fun computeTodayCapacitySummary(
+const val DEFAULT_WORKDAY_START_MINUTES = 9 * 60
+const val DEFAULT_WORKDAY_END_MINUTES = 17 * 60
+
+data class DayWorkloadSummary(
+    val epochDay: Long,
+    val dayStartMillis: Long,
+    val plannedTaskMinutes: Int,
+    val busyCalendarMinutes: Int,
+    val freeWorkdayMinutes: Int,
+    val totalWorkdayMinutes: Int,
+    val taskCount: Int
+) {
+    val totalUsedMinutes: Int get() = plannedTaskMinutes + busyCalendarMinutes
+    val overloadedByMinutes: Int get() = (totalUsedMinutes - totalWorkdayMinutes).coerceAtLeast(0)
+    val isOverloaded: Boolean get() = overloadedByMinutes > 0
+    val loadFraction: Float
+        get() = if (totalWorkdayMinutes <= 0) {
+            if (totalUsedMinutes > 0) 1f else 0f
+        } else {
+            (totalUsedMinutes.toFloat() / totalWorkdayMinutes.toFloat()).coerceIn(0f, 1.5f)
+        }
+}
+
+fun normalizeWorkdayBounds(startMinutes: Int, endMinutes: Int): Pair<Int, Int> {
+    val safeStart = startMinutes.coerceIn(0, 23 * 60)
+    val safeEnd = endMinutes.coerceIn(safeStart + 60, 24 * 60)
+    return safeStart to safeEnd
+}
+
+fun computeDayCapacityBreakdown(
     tasks: List<TaskItem>,
     calendarEvents: List<CalendarEventItem>,
     dayStartMillis: Long,
-    dayEndMillis: Long
-): Pair<Int, Int> {
+    dayEndMillis: Long,
+    workdayStartMinutes: Int = DEFAULT_WORKDAY_START_MINUTES,
+    workdayEndMinutes: Int = DEFAULT_WORKDAY_END_MINUTES
+): Triple<Int, Int, Int> {
+    val (normStartMins, normEndMins) = normalizeWorkdayBounds(workdayStartMinutes, workdayEndMinutes)
     val plannedTaskMinutes = tasks
         .asSequence()
         .filter { !it.isDeleted && it.status == TaskStatus.OPEN }
@@ -473,14 +505,14 @@ fun computeTodayCapacitySummary(
         }
         .coerceAtLeast(0)
 
-    val workdayStartMs = dayStartMillis + 9L * 60L * 60_000L
-    val rawWorkdayEndMs = dayStartMillis + 17L * 60L * 60_000L
+    val workdayStartMs = dayStartMillis + normStartMins.toLong() * 60_000L
+    val rawWorkdayEndMs = dayStartMillis + normEndMins.toLong() * 60_000L
     val workdayEndMs = if (dayEndMillis > workdayStartMs) {
         minOf(dayEndMillis, rawWorkdayEndMs)
     } else {
         rawWorkdayEndMs
     }
-    val totalWorkdayMinutes = ((workdayEndMs - workdayStartMs) / 60_000L).toInt().coerceIn(0, 480)
+    val totalWorkdayMinutes = ((workdayEndMs - workdayStartMs) / 60_000L).toInt().coerceIn(0, 24 * 60)
 
     val clippedIntervals = calendarEvents
         .asSequence()
@@ -511,7 +543,86 @@ fun computeTodayCapacitySummary(
     }
     val busyCalendarMinutes = (busyCalendarMillis / 60_000L).toInt().coerceAtLeast(0)
     val freeWorkdayMinutes = (totalWorkdayMinutes - busyCalendarMinutes - plannedTaskMinutes).coerceAtLeast(0)
-    return plannedTaskMinutes to freeWorkdayMinutes
+    return Triple(plannedTaskMinutes, busyCalendarMinutes, freeWorkdayMinutes)
+}
+
+fun computeTodayCapacitySummary(
+    tasks: List<TaskItem>,
+    calendarEvents: List<CalendarEventItem>,
+    dayStartMillis: Long,
+    dayEndMillis: Long,
+    workdayStartMinutes: Int = DEFAULT_WORKDAY_START_MINUTES,
+    workdayEndMinutes: Int = DEFAULT_WORKDAY_END_MINUTES
+): Pair<Int, Int> {
+    val (planned, _, free) = computeDayCapacityBreakdown(
+        tasks = tasks,
+        calendarEvents = calendarEvents,
+        dayStartMillis = dayStartMillis,
+        dayEndMillis = dayEndMillis,
+        workdayStartMinutes = workdayStartMinutes,
+        workdayEndMinutes = workdayEndMinutes
+    )
+    return planned to free
+}
+
+fun computeMultiDayWorkloadForecast(
+    todayTasks: List<TaskItem>,
+    allOpenTasks: List<TaskItem>,
+    todayCalendarEvents: List<CalendarEventItem>,
+    upcomingCalendarEventsByEpochDay: Map<Long, List<CalendarEventItem>>,
+    todayEpochDay: Long,
+    daysCount: Int = 7,
+    workdayStartMinutes: Int = DEFAULT_WORKDAY_START_MINUTES,
+    workdayEndMinutes: Int = DEFAULT_WORKDAY_END_MINUTES,
+    zoneId: java.time.ZoneId = java.time.ZoneId.systemDefault()
+): List<DayWorkloadSummary> {
+    val safeDays = daysCount.coerceIn(1, 30)
+    val (normStartMins, normEndMins) = normalizeWorkdayBounds(workdayStartMinutes, workdayEndMinutes)
+    val totalWorkdayMinutes = (normEndMins - normStartMins).coerceAtLeast(60)
+
+    val futureTasksByDay = HashMap<Long, MutableList<TaskItem>>()
+    for (task in allOpenTasks) {
+        if (task.isDeleted || task.status != TaskStatus.OPEN) continue
+        if (task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING) continue
+        val targetMs = task.whenDate ?: task.deadline ?: continue
+        val targetDay = java.time.Instant.ofEpochMilli(targetMs).atZone(zoneId).toLocalDate().toEpochDay()
+        if (targetDay in (todayEpochDay + 1L) until (todayEpochDay + safeDays.toLong())) {
+            futureTasksByDay.getOrPut(targetDay) { mutableListOf() }.add(task)
+        }
+    }
+
+    return (0 until safeDays).map { offset ->
+        val dayEpoch = todayEpochDay + offset.toLong()
+        val dayStartMs = java.time.LocalDate.ofEpochDay(dayEpoch).atStartOfDay(zoneId).toInstant().toEpochMilli()
+        val dayEndMs = java.time.LocalDate.ofEpochDay(dayEpoch + 1L).atStartOfDay(zoneId).toInstant().toEpochMilli()
+        val dayTasks = if (offset == 0) {
+            todayTasks.filter { !it.isDeleted && it.status == TaskStatus.OPEN }
+        } else {
+            futureTasksByDay[dayEpoch].orEmpty()
+        }
+        val dayEvents = if (offset == 0) {
+            todayCalendarEvents
+        } else {
+            upcomingCalendarEventsByEpochDay[dayEpoch].orEmpty()
+        }
+        val (planned, busy, free) = computeDayCapacityBreakdown(
+            tasks = dayTasks,
+            calendarEvents = dayEvents,
+            dayStartMillis = dayStartMs,
+            dayEndMillis = dayEndMs,
+            workdayStartMinutes = normStartMins,
+            workdayEndMinutes = normEndMins
+        )
+        DayWorkloadSummary(
+            epochDay = dayEpoch,
+            dayStartMillis = dayStartMs,
+            plannedTaskMinutes = planned,
+            busyCalendarMinutes = busy,
+            freeWorkdayMinutes = free,
+            totalWorkdayMinutes = totalWorkdayMinutes,
+            taskCount = dayTasks.size
+        )
+    }
 }
 
 data class DeviceCalendarInfo(

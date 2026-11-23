@@ -407,6 +407,12 @@ class ThingsbookViewModel @Inject constructor(
     private val _isGeminiModalOpen = MutableStateFlow(false)
     val isGeminiModalOpen: StateFlow<Boolean> = _isGeminiModalOpen.asStateFlow()
 
+    private val _geminiInitialTab = MutableStateFlow(0)
+    val geminiInitialTab: StateFlow<Int> = _geminiInitialTab.asStateFlow()
+
+    private val _geminiDayPlanPreview = MutableStateFlow<com.pv.thingsbook.data.ai.GeminiDayTimeblockPlanResponse?>(null)
+    val geminiDayPlanPreview: StateFlow<com.pv.thingsbook.data.ai.GeminiDayTimeblockPlanResponse?> = _geminiDayPlanPreview.asStateFlow()
+
     private val _isGeminiBusy = MutableStateFlow(false)
     val isGeminiBusy: StateFlow<Boolean> = _isGeminiBusy.asStateFlow()
 
@@ -836,9 +842,18 @@ class ThingsbookViewModel @Inject constructor(
         _quickFindFilter.value = filter
     }
 
-    fun setGeminiModalOpen(open: Boolean) {
-        if (!open) _geminiErrorMessage.value = null
+    fun setGeminiModalOpen(open: Boolean, initialTab: Int = 0) {
+        if (!open) {
+            _geminiErrorMessage.value = null
+            _geminiDayPlanPreview.value = null
+        } else {
+            _geminiInitialTab.value = initialTab.coerceIn(0, 2)
+        }
         _isGeminiModalOpen.value = open
+    }
+
+    fun openGeminiDayPlanner() {
+        setGeminiModalOpen(open = true, initialTab = 2)
     }
 
     fun updateGeminiApiKey(key: String) {
@@ -1488,6 +1503,33 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    private val _areaViewModes = MutableStateFlow<Map<String, ProjectWorkspaceMode>>(
+        runCatching {
+            val raw = coreSettingsPrefs.getString(PREF_AREA_VIEW_MODES_JSON, null)
+            if (raw.isNullOrBlank()) {
+                emptyMap()
+            } else {
+                val decoded = vmJson.decodeFromString<Map<String, String>>(raw)
+                decoded.mapValues { ProjectWorkspaceMode.fromRaw(it.value) }
+            }
+        }.getOrDefault(emptyMap())
+    )
+    val areaViewModes: StateFlow<Map<String, ProjectWorkspaceMode>> = _areaViewModes.asStateFlow()
+
+    fun updateAreaViewMode(areaId: String, mode: ProjectWorkspaceMode) {
+        if (areaId.isBlank()) return
+        val effective = if (mode == ProjectWorkspaceMode.ROADMAP) ProjectWorkspaceMode.ROADMAP else ProjectWorkspaceMode.LIST
+        if (effective != ProjectWorkspaceMode.ROADMAP) {
+            _isTimelineFullScreen.value = false
+        }
+        val next = _areaViewModes.value.toMutableMap().apply { put(areaId, effective) }
+        _areaViewModes.value = next
+        runCatching {
+            val encoded = vmJson.encodeToString(next.mapValues { it.value.storageKey })
+            coreSettingsPrefs.edit().putString(PREF_AREA_VIEW_MODES_JSON, encoded).apply()
+        }
+    }
+
     fun updateProjectViewMode(projectId: String, mode: ProjectWorkspaceMode) {
         if (projectId.isBlank()) return
         if (mode != ProjectWorkspaceMode.ROADMAP) {
@@ -1526,32 +1568,65 @@ class ThingsbookViewModel @Inject constructor(
     fun shiftTaskRoadmapDates(task: TaskItem, deltaDays: Long) {
         val zone = ZoneId.systemDefault()
         val todayEpochDay = LocalDate.now(zone).toEpochDay()
-        val (nextState, nextWhenMillis, nextDeadlineMillis) = ProjectRoadmapEngine.shiftTaskDatesByDays(
-            task = task,
-            deltaDays = deltaDays,
-            todayEpochDay = todayEpochDay,
-            zoneId = zone
-        )
-        val prevState = task.scheduleState
+        val peerTasks = if (task.projectId != null) {
+            allOpenTasks.value.filter { it.projectId == task.projectId }
+        } else {
+            listOf(task)
+        }
+        val cascadeUpdates = if (deltaDays != 0L) {
+            ProjectRoadmapEngine.computeSmartDependencyCascade(
+                anchorTask = task,
+                deltaDays = deltaDays,
+                projectTasks = peerTasks,
+                todayEpochDay = todayEpochDay,
+                zoneId = zone
+            )
+        } else {
+            val (nextState, nextWhenMillis, nextDeadlineMillis) = ProjectRoadmapEngine.shiftTaskDatesByDays(
+                task = task,
+                deltaDays = 0L,
+                todayEpochDay = todayEpochDay,
+                zoneId = zone
+            )
+            listOf(
+                com.pv.thingsbook.domain.model.CascadedTaskShift(
+                    task = task,
+                    deltaDays = 0L,
+                    nextScheduleState = nextState,
+                    nextWhenMillis = nextWhenMillis,
+                    nextDeadlineMillis = nextDeadlineMillis,
+                    isAnchor = true
+                )
+            )
+        }
+        if (cascadeUpdates.isEmpty()) return
+
+        val beforeRestores = cascadeUpdates.map { u ->
+            com.pv.thingsbook.domain.model.CascadedTaskShift(
+                task = u.task,
+                deltaDays = 0L,
+                nextScheduleState = u.task.scheduleState,
+                nextWhenMillis = u.task.whenDate,
+                nextDeadlineMillis = u.task.deadline,
+                isAnchor = u.isAnchor
+            )
+        }
+        val cascadedCount = cascadeUpdates.count { !it.isAnchor }
         val prevWhen = task.whenDate
         val prevDeadline = task.deadline
+
         safeVmScope.launch {
-            repository.updateTaskScheduleAndDeadline(
-                taskId = task.id,
-                newState = nextState,
-                newWhenDate = nextWhenMillis,
-                newDeadline = nextDeadlineMillis
-            )
+            repository.applyBatchTaskSchedulesAndDeadlines(cascadeUpdates)
             if (deltaDays != 0L || (prevWhen == null && prevDeadline == null)) {
-                val label = task.title.ifBlank { getLocalizedString(R.string.entity_todo) }
-                val sign = if (deltaDays > 0) "+$deltaDays" else "$deltaDays"
-                registerUndoAction(message = "$label ($sign d)") {
-                    repository.updateTaskScheduleAndDeadline(
-                        taskId = task.id,
-                        newState = prevState,
-                        newWhenDate = prevWhen,
-                        newDeadline = prevDeadline
-                    )
+                val undoMsg = if (cascadedCount > 0) {
+                    getLocalizedString(R.string.v31_roadmap_cascade_undo, cascadedCount)
+                } else {
+                    val label = task.title.ifBlank { getLocalizedString(R.string.entity_todo) }
+                    val sign = if (deltaDays > 0) "+$deltaDays" else "$deltaDays"
+                    "$label ($sign d)"
+                }
+                registerUndoAction(message = undoMsg) {
+                    repository.applyBatchTaskSchedulesAndDeadlines(beforeRestores)
                 }
             }
         }
@@ -1924,19 +1999,19 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     /**
-     * Feature 3: Gemini AI Project Architect -> Generates Project + Headings + To-Dos and navigates to it.
+     * Feature 3: Gemini v3.1 Roadmap Architect -> Generates dated Phases, Milestones, Effort, Duration & Dependencies.
      */
     fun submitGeminiProjectArchitect(goalPrompt: String, locale: Locale = Locale.getDefault()) {
         if (goalPrompt.isBlank()) return
+        val activeAreaId = (_navigationTarget.value as? ActiveNavigationTarget.AreaDetail)?.areaId
         safeVmScope.launch {
             _isGeminiBusy.value = true
             _geminiErrorMessage.value = null
             try {
                 val blueprint = geminiService.generateProjectBlueprint(goalPrompt, locale)
-                val projectId = repository.createProjectFromBlueprint(
-                    title = blueprint.projectTitle,
-                    notes = blueprint.projectNotes,
-                    headingsWithTasks = blueprint.headings.map { it.title to it.tasks }
+                val projectId = repository.createV3RoadmapProjectFromBlueprint(
+                    blueprint = blueprint,
+                    areaId = activeAreaId
                 )
                 _isGeminiModalOpen.value = false
                 _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
@@ -1955,6 +2030,110 @@ class ThingsbookViewModel @Inject constructor(
                 _uiErrorMessage.value = msg
             } finally {
                 _isGeminiBusy.value = false
+            }
+        }
+    }
+
+    fun clearGeminiDayTimeblockPlan() {
+        _geminiDayPlanPreview.value = null
+    }
+
+    fun requestGeminiDayTimeblockPlan(
+        includeAlreadyScheduled: Boolean = false,
+        locale: Locale = Locale.getDefault()
+    ) {
+        safeVmScope.launch {
+            _isGeminiBusy.value = true
+            _geminiErrorMessage.value = null
+            try {
+                val zone = ZoneId.systemDefault()
+                val todayDate = LocalDate.now(zone)
+                val dayStartMs = todayDate.atStartOfDay(zone).toInstant().toEpochMilli()
+                val dayEndMs = todayDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                val nowTime = java.time.LocalTime.now(zone)
+                val nowMins = nowTime.hour * 60 + nowTime.minute
+
+                val allTodayOpen = (todayDaytimeTasks.value + thisEveningTasks.value)
+                    .distinctBy { it.id }
+                    .filter { !it.isDeleted && it.status == TaskStatus.OPEN }
+
+                val candidates = allTodayOpen
+                    .filter { includeAlreadyScheduled || it.scheduledStartMinutes == null }
+                    .map { task ->
+                        val deadlineDay = task.deadline?.let {
+                            java.time.Instant.ofEpochMilli(it).atZone(zone).toLocalDate()
+                        }
+                        com.pv.thingsbook.data.ai.GeminiDayTimeblockCandidate(
+                            taskId = task.id,
+                            title = task.title,
+                            durationMinutes = (task.durationMinutes?.takeIf { it > 0 } ?: 30).coerceIn(15, 240),
+                            effortLevel = task.effortLevel,
+                            isPinned = task.isPinned,
+                            hasTodayDeadline = deadlineDay != null && !deadlineDay.isAfter(todayDate),
+                            existingStartMinutes = task.scheduledStartMinutes
+                        )
+                    }
+
+                val busyIntervals = mutableListOf<Pair<Int, Int>>()
+                if (_calendarEventsEnabled.value) {
+                    for (ev in _todayCalendarEvents.value) {
+                        if (!ev.isAllDay && ev.endMillis > ev.startMillis) {
+                            val s = ((maxOf(ev.startMillis, dayStartMs) - dayStartMs) / 60_000L).toInt().coerceIn(0, 1440)
+                            val e = ((minOf(ev.endMillis, dayEndMs) - dayStartMs) / 60_000L).toInt().coerceIn(0, 1440)
+                            if (e > s) busyIntervals += s to e
+                        }
+                    }
+                }
+                if (!includeAlreadyScheduled) {
+                    for (task in allTodayOpen) {
+                        val s = task.scheduledStartMinutes ?: continue
+                        val d = (task.durationMinutes?.takeIf { it > 0 } ?: 30).coerceIn(15, 480)
+                        busyIntervals += s to minOf(1440, s + d)
+                    }
+                }
+
+                val workStart = _workdayStartMinutes.value
+                val workEnd = _workdayEndMinutes.value
+                val earliest = maxOf(workStart, ((nowMins + 14) / 15) * 15).coerceAtMost(22 * 60)
+
+                val plan = geminiService.generateDailyTimeblockPlan(
+                    candidates = candidates,
+                    busyIntervalsMinutes = busyIntervals,
+                    workdayStartMinutes = workStart,
+                    workdayEndMinutes = workEnd,
+                    earliestStartMinutes = earliest,
+                    locale = locale
+                )
+                _geminiDayPlanPreview.value = plan
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                Log.w(TAG, "Gemini Plan My Day failed", t)
+                _geminiErrorMessage.value = t.localizedMessage ?: t.message
+            } finally {
+                _isGeminiBusy.value = false
+            }
+        }
+    }
+
+    fun applyGeminiDayTimeblockPlan(blocks: List<com.pv.thingsbook.data.ai.GeminiDayTimeblockItemDto>) {
+        if (blocks.isEmpty()) return
+        val allTodayOpen = (todayDaytimeTasks.value + thisEveningTasks.value + allOpenTasks.value)
+            .associateBy { it.id }
+        val beforeSnapshots = blocks.mapNotNull { item ->
+            val prev = allTodayOpen[item.taskId] ?: return@mapNotNull null
+            Triple(prev.id, prev.scheduledStartMinutes, prev.durationMinutes)
+        }
+        val nextUpdates = blocks.map { Triple(it.taskId, it.startMinutes as Int?, it.durationMinutes as Int?) }
+        safeVmScope.launch {
+            repository.applyBatchTaskTimeblocks(nextUpdates)
+            setTodayTimelineMode(true)
+            _geminiDayPlanPreview.value = null
+            _isGeminiModalOpen.value = false
+            _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
+            val undoMsg = getLocalizedString(R.string.v31_gemini_plan_day_applied_undo, nextUpdates.size)
+            registerUndoAction(message = undoMsg) {
+                repository.applyBatchTaskTimeblocks(beforeSnapshots)
             }
         }
     }
@@ -2796,7 +2975,9 @@ class ThingsbookViewModel @Inject constructor(
             includeBetaUpdates = _includeBetaUpdates.value,
             tagSortMode = _tagSortMode.value,
             viewSortMode = _viewSortMode.value,
-            savedPerspectivesJson = vmJson.encodeToString(_savedPerspectives.value)
+            savedPerspectivesJson = vmJson.encodeToString(_savedPerspectives.value),
+            workdayStartMinutes = _workdayStartMinutes.value,
+            workdayEndMinutes = _workdayEndMinutes.value
         )
     }
 
@@ -3018,6 +3199,12 @@ class ThingsbookViewModel @Inject constructor(
                     restoredPrefs.tagSortMode?.let { setTagSortMode(it) }
                     restoredPrefs.viewSortMode?.let { setViewSortMode(it) }
                     restoredPrefs.savedPerspectivesJson?.let { restoreSavedPerspectivesFromJson(it) }
+                    if (restoredPrefs.workdayStartMinutes != null || restoredPrefs.workdayEndMinutes != null) {
+                        setWorkdayBounds(
+                            startMinutes = restoredPrefs.workdayStartMinutes ?: _workdayStartMinutes.value,
+                            endMinutes = restoredPrefs.workdayEndMinutes ?: _workdayEndMinutes.value
+                        )
+                    }
                     if (
                         restoredPrefs.dailyDigestEnabled != null &&
                         restoredPrefs.dailyDigestHour != null &&
@@ -4184,6 +4371,35 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    // Configurable Workday Hours & Daily Capacity (v3.1)
+    private val _workdayStartMinutes = MutableStateFlow(
+        coreSettingsPrefs.getInt(
+            PREF_WORKDAY_START_MINUTES,
+            com.pv.thingsbook.domain.model.DEFAULT_WORKDAY_START_MINUTES
+        ).coerceIn(0, 23 * 60)
+    )
+    val workdayStartMinutes: StateFlow<Int> = _workdayStartMinutes.asStateFlow()
+
+    private val _workdayEndMinutes = MutableStateFlow(
+        coreSettingsPrefs.getInt(
+            PREF_WORKDAY_END_MINUTES,
+            com.pv.thingsbook.domain.model.DEFAULT_WORKDAY_END_MINUTES
+        ).coerceIn(60, 24 * 60)
+    )
+    val workdayEndMinutes: StateFlow<Int> = _workdayEndMinutes.asStateFlow()
+
+    fun setWorkdayBounds(startMinutes: Int, endMinutes: Int) {
+        val (safeStart, safeEnd) = com.pv.thingsbook.domain.model.normalizeWorkdayBounds(startMinutes, endMinutes)
+        _workdayStartMinutes.value = safeStart
+        _workdayEndMinutes.value = safeEnd
+        runCatching {
+            coreSettingsPrefs.edit()
+                .putInt(PREF_WORKDAY_START_MINUTES, safeStart)
+                .putInt(PREF_WORKDAY_END_MINUTES, safeEnd)
+                .apply()
+        }
+    }
+
     // Biometric / PIN App Lock
     private val _biometricAppLockEnabled = MutableStateFlow(
         coreSettingsPrefs.getBoolean(PREF_BIOMETRIC_APP_LOCK_ENABLED, false)
@@ -4727,6 +4943,9 @@ class ThingsbookViewModel @Inject constructor(
         private const val PREF_TAG_SORT_MODE = "tag_sort_mode"
         private const val PREF_VIEW_SORT_MODE = "view_sort_mode"
         private const val PREF_SAVED_PERSPECTIVES_JSON = "saved_perspectives_json"
+        private const val PREF_WORKDAY_START_MINUTES = "workday_start_minutes"
+        private const val PREF_WORKDAY_END_MINUTES = "workday_end_minutes"
+        private const val PREF_AREA_VIEW_MODES_JSON = "area_view_modes_json"
         private const val UPCOMING_CALENDAR_HORIZON_DAYS = 30L
     }
 }

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +50,8 @@ import androidx.compose.material.icons.outlined.SystemUpdateAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +63,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -121,6 +128,9 @@ fun ThingsSettingsModal(
     onSetGroupTodayByProjectOrArea: (Boolean) -> Unit = {},
     showPerspectivesInSidebar: Boolean = false,
     onSetShowPerspectivesInSidebar: (Boolean) -> Unit = {},
+    workdayStartMinutes: Int = com.pv.thingsbook.domain.model.DEFAULT_WORKDAY_START_MINUTES,
+    workdayEndMinutes: Int = com.pv.thingsbook.domain.model.DEFAULT_WORKDAY_END_MINUTES,
+    onSetWorkdayBounds: (Int, Int) -> Unit = { _, _ -> },
     biometricAppLockEnabled: Boolean = false,
     onSetBiometricAppLockEnabled: (Boolean) -> Unit = {},
     autoCheckUpdatesEnabled: Boolean = true,
@@ -713,6 +723,149 @@ fun ThingsSettingsModal(
                                     checkedTrackColor = colors.thingsBlue
                                 )
                             )
+                        }
+
+                        HorizontalDivider(color = colors.hairlineDivider)
+
+                        // v3.1 Configurable Workday Hours & Daily Capacity
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val (normStart, normEnd) = com.pv.thingsbook.domain.model.normalizeWorkdayBounds(
+                                workdayStartMinutes,
+                                workdayEndMinutes
+                            )
+                            val dailyCapFmt = com.pv.thingsbook.domain.model.formatDurationCompact(normEnd - normStart)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stringResource(R.string.v31_settings_workday_hours),
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.primaryText
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.v31_settings_workday_desc),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                        color = colors.secondaryText
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = colors.thingsBlue.copy(alpha = 0.12f)
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.v31_settings_workday_daily_capacity, dailyCapFmt),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.thingsBlue,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                var startExpanded by remember { mutableStateOf(false) }
+                                var endExpanded by remember { mutableStateOf(false) }
+                                val startOptions = remember { (5..14).flatMap { h -> listOf(h * 60, h * 60 + 30) } }
+                                val endOptions = remember(normStart) {
+                                    (10..23).flatMap { h -> listOf(h * 60, h * 60 + 30) }
+                                        .filter { it >= normStart + 60 && it <= 24 * 60 } + listOf(24 * 60)
+                                }
+
+                                Box(modifier = Modifier.weight(1f)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(9.dp),
+                                        color = colors.cardSurface,
+                                        border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { startExpanded = true }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.v31_settings_workday_start),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.secondaryText
+                                            )
+                                            Text(
+                                                text = "%02d:%02d".format(normStart / 60, normStart % 60),
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = colors.primaryText
+                                            )
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = startExpanded,
+                                        onDismissRequest = { startExpanded = false }
+                                    ) {
+                                        startOptions.forEach { mins ->
+                                            DropdownMenuItem(
+                                                text = { Text("%02d:%02d".format(mins / 60, mins % 60)) },
+                                                onClick = {
+                                                    startExpanded = false
+                                                    onSetWorkdayBounds(mins, maxOf(normEnd, mins + 60))
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Box(modifier = Modifier.weight(1f)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(9.dp),
+                                        color = colors.cardSurface,
+                                        border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { endExpanded = true }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.v31_settings_workday_end),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.secondaryText
+                                            )
+                                            Text(
+                                                text = if (normEnd >= 1440) "24:00" else "%02d:%02d".format(normEnd / 60, normEnd % 60),
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = colors.primaryText
+                                            )
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = endExpanded,
+                                        onDismissRequest = { endExpanded = false }
+                                    ) {
+                                        endOptions.distinct().forEach { mins ->
+                                            val lbl = if (mins >= 1440) "24:00" else "%02d:%02d".format(mins / 60, mins % 60)
+                                            DropdownMenuItem(
+                                                text = { Text(lbl) },
+                                                onClick = {
+                                                    endExpanded = false
+                                                    onSetWorkdayBounds(normStart, mins)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         HorizontalDivider(color = colors.hairlineDivider)

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+   BarChart3,
   Calendar,
   CalendarDays,
   Check,
@@ -37,15 +38,19 @@ import {
   type TaskRecord
 } from '../domain/types';
 import {
-  DEFAULT_DAILY_CAPACITY_MINUTES,
   DEFAULT_TIMEBLOCK_DURATION_MINUTES,
+  DEFAULT_WORKDAY_END_MINUTES,
+  DEFAULT_WORKDAY_START_MINUTES,
   STANDALONE_DURATION_PRESETS,
   TIMEBLOCK_QUICK_START_MINUTES,
   buildDailyTimeline,
+  computeMultiDayWorkloadForecast,
   computeTodayCapacitySummary,
   formatMinutesAsClock,
   formatStandaloneDuration,
-  formatTimeblockRange
+  formatTimeblockRange,
+  normalizeWorkdayBounds,
+  type DayWorkloadSummary
 } from '../domain/v2Utils';
 import { extractDetectedLinksFromNotes } from '../domain/powerUtils';
 import { localDb } from '../data/localDb';
@@ -128,11 +133,132 @@ function nextCycledEffort(cur: EffortLevel | null | undefined): EffortLevel | nu
   return null;
 }
 
+export interface SevenDayWorkloadCardProps {
+  forecast: readonly DayWorkloadSummary[];
+  lang: SupportedLang;
+  t: TranslationStrings;
+  compact?: boolean;
+}
+
+export const SevenDayWorkloadCard: React.FC<SevenDayWorkloadCardProps> = ({
+  forecast,
+  lang,
+  t,
+  compact = false
+}) => {
+  if (forecast.length === 0) return null;
+
+  const weekdayShortFmt = new Intl.DateTimeFormat(lang, { weekday: compact ? 'narrow' : 'short' });
+  const dateFmt = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' });
+  const maxOverloadedMinutes = forecast.reduce(
+    (m, d) => (d.isOverloaded ? Math.max(m, d.overloadedByMinutes) : m),
+    0
+  );
+
+  return (
+    <section
+      className={compact ? 'inspector-bento-card' : 'v31-workload-bento-card'}
+      data-testid={compact ? 'inspector-overview-workload-card' : 'upcoming-7day-workload-card'}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="inspector-card-header-between">
+        <span className="inspector-card-label">
+          <BarChart3
+            size={compact ? 12.5 : 14}
+            style={{ color: 'var(--things-blue)', flexShrink: 0 }}
+          />
+          <span>{t.v31Workload7DayTitle}</span>
+        </span>
+
+        {maxOverloadedMinutes > 0 ? (
+          <span
+            className="v31-workload-status-pill overloaded"
+            data-testid="workload-status-pill"
+          >
+            {compact
+              ? t.v31WorkloadOverloadedShort(formatStandaloneDuration(maxOverloadedMinutes))
+              : t.v31WorkloadOverloadedBy(formatStandaloneDuration(maxOverloadedMinutes))}
+          </span>
+        ) : (
+          <span
+            className="v31-workload-status-pill balanced"
+            data-testid="workload-status-pill"
+          >
+            {t.v31WorkloadBalanced}
+          </span>
+        )}
+      </div>
+
+      <div className={`v31-workload-bars-grid ${compact ? 'compact' : ''}`}>
+        {forecast.map((day, idx) => {
+          const dObj = new Date(day.dayStartMillis);
+          const totalUsed = day.plannedMinutes + day.busyCalendarMinutes;
+          const cap = Math.max(60, day.totalCapacityMinutes);
+          const fillPct = Math.min(100, Math.round((totalUsed / cap) * 100));
+          const busyPct =
+            totalUsed > 0
+              ? Math.min(fillPct, Math.round((day.busyCalendarMinutes / cap) * 100))
+              : 0;
+          const plannedPct = Math.max(0, fillPct - busyPct);
+          const topText = day.isOverloaded
+            ? `+${formatStandaloneDuration(day.overloadedByMinutes)}`
+            : totalUsed > 0
+              ? formatStandaloneDuration(totalUsed)
+              : '—';
+          const tip = day.isOverloaded
+            ? `${dateFmt.format(dObj)} · ${t.v31WorkloadOverloadedBy(
+                formatStandaloneDuration(day.overloadedByMinutes)
+              )}`
+            : `${dateFmt.format(dObj)} · ${t.todayCapacitySummary(
+                formatStandaloneDuration(day.plannedMinutes),
+                formatStandaloneDuration(day.freeMinutes)
+              )}`;
+
+          return (
+            <div
+              key={day.epochDay}
+              className={`v31-workload-day-col ${idx === 0 ? 'today' : ''} ${
+                day.isOverloaded ? 'overloaded' : ''
+              }`}
+              title={tip}
+            >
+              <span className="v31-workload-day-top">{topText}</span>
+              <div className="v31-workload-bar-track" aria-hidden="true">
+                {busyPct > 0 && (
+                  <div
+                    className="v31-workload-bar-busy"
+                    style={{ height: `${busyPct}%` }}
+                  />
+                )}
+                {plannedPct > 0 && (
+                  <div
+                    className={`v31-workload-bar-planned ${
+                      day.isOverloaded ? 'overloaded' : ''
+                    }`}
+                    style={{ height: `${plannedPct}%` }}
+                  />
+                )}
+              </div>
+              <span className="v31-workload-day-dow">{weekdayShortFmt.format(dObj)}</span>
+              {!compact && (
+                <span className="v31-workload-day-num">{dObj.getDate()}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
+
 export interface WorkspaceInspectorPanelProps {
   selectedTask: TaskRecord | null;
   todayTasks: TaskRecord[];
   todayCompletedCount: number;
   todayCalendarEvents: CalendarEventItem[];
+  upcomingCalendarEventsByEpochDay?: ReadonlyMap<number, readonly CalendarEventItem[]>;
+  workdayStartMinutes?: number;
+  workdayEndMinutes?: number;
   todayStartMs: number;
   endOfTodayMs: number;
   allOpenTasks: TaskRecord[];
@@ -163,6 +289,9 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
   todayTasks,
   todayCompletedCount,
   todayCalendarEvents,
+  upcomingCalendarEventsByEpochDay,
+  workdayStartMinutes = DEFAULT_WORKDAY_START_MINUTES,
+  workdayEndMinutes = DEFAULT_WORKDAY_END_MINUTES,
   todayStartMs,
   endOfTodayMs,
   allOpenTasks,
@@ -233,6 +362,11 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
   const formatShortDate = (ms: number) =>
     new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' }).format(new Date(ms));
 
+  const workdayBounds = useMemo(
+    () => normalizeWorkdayBounds(workdayStartMinutes, workdayEndMinutes),
+    [workdayStartMinutes, workdayEndMinutes]
+  );
+
   // Mode B derived metrics
   const todayCapacity = useMemo(
     () =>
@@ -240,9 +374,41 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
         todayTasks,
         todayCalendarEvents,
         todayStartMs,
-        endOfTodayMs
+        endOfTodayMs,
+        workdayBounds.startMinutes,
+        workdayBounds.endMinutes
       ),
-    [todayTasks, todayCalendarEvents, todayStartMs, endOfTodayMs]
+    [
+      todayTasks,
+      todayCalendarEvents,
+      todayStartMs,
+      endOfTodayMs,
+      workdayBounds.startMinutes,
+      workdayBounds.endMinutes
+    ]
+  );
+
+  const sevenDayWorkload = useMemo(
+    () =>
+      computeMultiDayWorkloadForecast({
+        todayTasks,
+        allOpenTasks,
+        todayCalendarEvents,
+        upcomingCalendarEventsByEpochDay,
+        todayStartMillis: todayStartMs,
+        daysCount: 7,
+        workdayStartMinutes: workdayBounds.startMinutes,
+        workdayEndMinutes: workdayBounds.endMinutes
+      }),
+    [
+      todayTasks,
+      allOpenTasks,
+      todayCalendarEvents,
+      upcomingCalendarEventsByEpochDay,
+      todayStartMs,
+      workdayBounds.startMinutes,
+      workdayBounds.endMinutes
+    ]
   );
 
   const dailyTimeline = useMemo(
@@ -925,15 +1091,18 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
   }
 
   // ==================== MODE B: DAY & WORKSPACE OVERVIEW ====================
-  const busyMinutes = Math.max(
-    0,
-    DEFAULT_DAILY_CAPACITY_MINUTES - todayCapacity.freeMinutes
+  const dailyCapacityMinutes = Math.max(
+    60,
+    workdayBounds.endMinutes - workdayBounds.startMinutes
   );
+  const busyMinutes = Math.max(0, dailyCapacityMinutes - todayCapacity.freeMinutes);
   const capacityPct = Math.min(
     100,
-    Math.round((busyMinutes / DEFAULT_DAILY_CAPACITY_MINUTES) * 100)
+    Math.round((busyMinutes / dailyCapacityMinutes) * 100)
   );
-  const isOverCapacity = todayCapacity.plannedMinutes > DEFAULT_DAILY_CAPACITY_MINUTES;
+  const isOverCapacity =
+    (sevenDayWorkload[0]?.isOverloaded ?? false) ||
+    todayCapacity.plannedMinutes > dailyCapacityMinutes;
 
   return (
     <aside
@@ -988,6 +1157,14 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             />
           </div>
         </section>
+
+        {/* 1b. v3.1 Compact 7-Day Workload Forecast Bar Strip Card */}
+        <SevenDayWorkloadCard
+          forecast={sevenDayWorkload}
+          lang={lang}
+          t={t}
+          compact
+        />
 
         {/* 2. Today's Schedule Mini-Timeline Card */}
         <section

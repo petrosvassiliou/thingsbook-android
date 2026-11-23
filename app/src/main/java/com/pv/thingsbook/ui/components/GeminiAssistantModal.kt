@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,20 +18,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.RocketLaunch
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -49,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.pv.thingsbook.R
 import com.pv.thingsbook.data.ai.GeminiLogbookReviewResponse
+import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.ui.theme.ThingsTheme
 
 /**
@@ -61,19 +69,31 @@ import com.pv.thingsbook.ui.theme.ThingsTheme
 fun GeminiAssistantModal(
     isProcessing: Boolean,
     currentApiKey: String,
+    initialTab: Int = 0,
     errorMessage: String? = null,
+    dayPlanPreview: com.pv.thingsbook.data.ai.GeminiDayTimeblockPlanResponse? = null,
+    todayOpenTasksById: Map<String, TaskItem> = emptyMap(),
     onClearError: (() -> Unit)? = null,
     onUpdateApiKey: (String) -> Unit,
     onSubmitBrainDump: (String) -> Unit,
     onSubmitProjectArchitect: (String) -> Unit,
+    onGenerateDayPlan: (Boolean) -> Unit = {},
+    onApplyDayPlan: (List<com.pv.thingsbook.data.ai.GeminiDayTimeblockItemDto>) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Brain Dump, 1 = Project Architect
+    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 2)) }
     var brainDumpInput by remember { mutableStateOf("") }
     var projectGoalInput by remember { mutableStateOf("") }
+    var includeScheduledInDayPlan by remember { mutableStateOf(false) }
+    var editablePlanBlocks by remember(dayPlanPreview) {
+        mutableStateOf(dayPlanPreview?.blocks.orEmpty())
+    }
+    var selectedPlanTaskIds by remember(dayPlanPreview) {
+        mutableStateOf(dayPlanPreview?.blocks?.mapTo(linkedSetOf()) { it.taskId } ?: emptySet())
+    }
     var apiKeyInput by remember(currentApiKey) { mutableStateOf(currentApiKey) }
     var showApiKeyField by remember { mutableStateOf(false) }
 
@@ -191,7 +211,8 @@ fun GeminiAssistantModal(
                 ) {
                     val tabs = listOf(
                         stringResource(R.string.gemini_brain_dump_title) to Icons.Outlined.Psychology,
-                        stringResource(R.string.gemini_project_architect_title) to Icons.Outlined.RocketLaunch
+                        stringResource(R.string.gemini_project_architect_title) to Icons.Outlined.RocketLaunch,
+                        stringResource(R.string.v31_gemini_plan_day_tab) to Icons.Outlined.Schedule
                     )
                     tabs.forEachIndexed { idx, (label, icon) ->
                         val active = selectedTab == idx
@@ -293,7 +314,13 @@ fun GeminiAssistantModal(
                             Text(stringResource(R.string.gemini_brain_dump_action), color = Color.White)
                         }
                     }
-                } else {
+                } else if (selectedTab == 1) {
+                    Text(
+                        text = stringResource(R.string.v31_gemini_architect_v3_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.secondaryText,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                     OutlinedTextField(
                         value = projectGoalInput,
                         onValueChange = { projectGoalInput = it },
@@ -340,6 +367,200 @@ fun GeminiAssistantModal(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(stringResource(R.string.gemini_project_architect_action), color = Color.White)
+                        }
+                    }
+                } else {
+                    Text(
+                        text = stringResource(R.string.v31_gemini_plan_day_desc),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.secondaryText
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { includeScheduledInDayPlan = !includeScheduledInDayPlan }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = includeScheduledInDayPlan,
+                            onCheckedChange = { includeScheduledInDayPlan = it },
+                            colors = CheckboxDefaults.colors(checkedColor = colors.thingsBlue)
+                        )
+                        Text(
+                            text = stringResource(R.string.v31_gemini_plan_day_replan),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.primaryText
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onGenerateDayPlan(includeScheduledInDayPlan)
+                        },
+                        enabled = !isProcessing,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isProcessing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(15.dp),
+                                strokeWidth = 2.dp,
+                                color = colors.thingsBlue
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.gemini_generating))
+                        } else {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(7.dp))
+                            Text(stringResource(R.string.v31_gemini_plan_day_generate))
+                        }
+                    }
+
+                    if (dayPlanPreview != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (editablePlanBlocks.isEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = colors.tagPillBg,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.v31_gemini_plan_day_empty),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.secondaryText,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        } else {
+                            if (dayPlanPreview.summary.isNotBlank()) {
+                                Text(
+                                    text = dayPlanPreview.summary,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.thingsBlue,
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                )
+                            }
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                editablePlanBlocks.forEachIndexed { idx, block ->
+                                    val taskTitle = todayOpenTasksById[block.taskId]?.title ?: block.taskId
+                                    val isChecked = block.taskId in selectedPlanTaskIds
+                                    val startStr = "%02d:%02d".format(block.startMinutes / 60, block.startMinutes % 60)
+                                    val endMins = (block.startMinutes + block.durationMinutes).coerceAtMost(1440)
+                                    val endStr = "%02d:%02d".format(endMins / 60, endMins % 60)
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = colors.tagPillBg.copy(alpha = if (isChecked) 0.85f else 0.4f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Checkbox(
+                                                checked = isChecked,
+                                                onCheckedChange = { checked ->
+                                                    selectedPlanTaskIds = if (checked) {
+                                                        selectedPlanTaskIds + block.taskId
+                                                    } else {
+                                                        selectedPlanTaskIds - block.taskId
+                                                    }
+                                                },
+                                                colors = CheckboxDefaults.colors(checkedColor = colors.thingsBlue)
+                                            )
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "$startStr – $endStr · $taskTitle",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                    color = colors.primaryText,
+                                                    maxLines = 1
+                                                )
+                                                if (block.reason.isNotBlank()) {
+                                                    Text(
+                                                        text = block.reason,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = colors.secondaryText,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                            }
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                TextButton(
+                                                    onClick = {
+                                                        val next = editablePlanBlocks.toMutableList()
+                                                        next[idx] = block.copy(
+                                                            startMinutes = (block.startMinutes - 15).coerceAtLeast(0)
+                                                        )
+                                                        editablePlanBlocks = next
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                                    modifier = Modifier.height(26.dp)
+                                                ) {
+                                                    Text("-15m", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                                TextButton(
+                                                    onClick = {
+                                                        val next = editablePlanBlocks.toMutableList()
+                                                        next[idx] = block.copy(
+                                                            startMinutes = (block.startMinutes + 15).coerceAtMost(23 * 60 + 45)
+                                                        )
+                                                        editablePlanBlocks = next
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                                    modifier = Modifier.height(26.dp)
+                                                ) {
+                                                    Text("+15m", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            val chosenBlocks = editablePlanBlocks.filter { it.taskId in selectedPlanTaskIds }
+                            Button(
+                                onClick = {
+                                    if (chosenBlocks.isNotEmpty()) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onApplyDayPlan(chosenBlocks)
+                                    }
+                                },
+                                enabled = !isProcessing && chosenBlocks.isNotEmpty(),
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.thingsBlue),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.v31_gemini_plan_day_apply, chosenBlocks.size),
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }

@@ -8,6 +8,7 @@ public enum GeminiSheetTab: String, CaseIterable, Identifiable {
     case brainDump
     case projectArchitect
     case logbookReview
+    case planMyDay
 
     public var id: String { rawValue }
 }
@@ -408,16 +409,17 @@ public final class ThingsbookStore: ObservableObject {
         let todayTasks = (todayDaytimeTasks + thisEveningTasks).filter { seen.insert($0.id).inserted }
         let cal = Calendar.current
         let sod = cal.startOfDay(for: Date())
-        let dayStart = cal.date(byAdding: .hour, value: 9, to: sod) ?? sod
-        let dayEnd = cal.date(byAdding: .hour, value: 17, to: sod) ?? sod.addingTimeInterval(8 * 3600)
-        let dayStartMs = Int64(dayStart.timeIntervalSince1970 * 1000.0)
-        let dayEndMs = Int64(dayEnd.timeIntervalSince1970 * 1000.0)
+        let nextSod = cal.date(byAdding: .day, value: 1, to: sod) ?? sod.addingTimeInterval(86_400)
+        let dayStartMs = DateEpochConverter.startOfDayMillis(for: sod, calendar: cal)
+        let dayEndMs = DateEpochConverter.startOfDayMillis(for: nextSod, calendar: cal)
 
         let cap = TodayCapacityCalculator.compute(
             tasks: todayTasks,
             calendarEvents: todayTimelineCalendarEvents(),
             dayStartMillis: dayStartMs,
-            dayEndMillis: dayEndMs
+            dayEndMillis: dayEndMs,
+            workdayStartMinutes: preferences.workdayStartMinutes,
+            workdayEndMinutes: preferences.workdayEndMinutes
         )
         guard cap.plannedMinutes > 0 else { return nil }
         let plannedStr = TodayCapacityCalculator.formatMinutes(cap.plannedMinutes)
@@ -432,6 +434,33 @@ public final class ThingsbookStore: ObservableObject {
             pillText = trf("v30_today_planned_only", plannedStr)
         }
         return (cap.plannedMinutes, cap.freeMinutes, pillText)
+    }
+
+    public func setWorkdayBounds(startMinutes: Int, endMinutes: Int) {
+        let normalized = TodayCapacityCalculator.normalizeWorkdayBounds(
+            startMinutes: startMinutes,
+            endMinutes: endMinutes
+        )
+        var nextPrefs = preferences
+        nextPrefs.workdayStartMinutes = normalized.startMinutes
+        nextPrefs.workdayEndMinutes = normalized.endMinutes
+        preferences = nextPrefs
+    }
+
+    public func sevenDayWorkloadForecast() -> [DayWorkloadSummary] {
+        var seen = Set<String>()
+        let todayTasks = (todayDaytimeTasks + thisEveningTasks).filter { seen.insert($0.id).inserted }
+        let activeEvents = preferences.calendarEventsEnabled ? calendarEvents : []
+        let todayMs = DateEpochConverter.startOfDayMillis(for: Date())
+        return TodayCapacityCalculator.computeSevenDayForecast(
+            todayTasks: todayTasks,
+            allOpenTasks: allOpenTasks,
+            calendarEvents: activeEvents,
+            todayMillis: todayMs,
+            daysCount: 7,
+            workdayStartMinutes: preferences.workdayStartMinutes,
+            workdayEndMinutes: preferences.workdayEndMinutes
+        )
     }
 
     public var tagUsageCounts: [String: Int] {
@@ -1100,6 +1129,26 @@ public final class ThingsbookStore: ObservableObject {
         try? database.setProjectViewMode(projectId: projectId, viewMode: mode.rawValue)
     }
 
+    public func areaViewMode(for areaId: String) -> ProjectViewMode {
+        ProjectViewMode.normalized(preferences.areaViewModes[areaId]) == .roadmap ? .roadmap : .list
+    }
+
+    public func setAreaViewMode(_ areaId: String, mode: ProjectViewMode) {
+        guard !areaId.isEmpty else { return }
+        let effective: ProjectViewMode = (mode == .roadmap) ? .roadmap : .list
+        if effective != .roadmap, isTimelineFullScreen {
+            isTimelineFullScreen = false
+        }
+        var nextPrefs = preferences
+        nextPrefs.areaViewModes[areaId] = effective.rawValue
+        preferences = nextPrefs
+    }
+
+    public func openGeminiPlanMyDay() {
+        geminiInitialTab = .planMyDay
+        isGeminiSheetPresented = true
+    }
+
     public func toggleTimelineFullScreen() {
         withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
             let next = !isTimelineFullScreen
@@ -1124,50 +1173,134 @@ public final class ThingsbookStore: ObservableObject {
         try? database.updateHeadingDates(headingId, startDate: startDate, endDate: endDate)
     }
 
-    public func shiftHeadingRoadmapDates(_ heading: Heading, deltaDays: Int) {
+    public func shiftHeadingRoadmapDates(
+        _ heading: Heading,
+        deltaDays: Int,
+        fallbackEpochDays: (startEpochDay: Int, endEpochDay: Int)? = nil
+    ) {
         guard deltaDays != 0 else { return }
+        let previousStart = heading.startDate
+        let previousEnd = heading.endDate
         var effectiveHeading = heading
         if effectiveHeading.startDate == nil && effectiveHeading.endDate == nil {
-            let open = allOpenTasks.filter { $0.projectId == heading.projectId && !$0.isDeleted }
-            if let proj = project(byId: heading.projectId) {
-                let layout = ProjectRoadmapEngine.buildLayout(
-                    project: proj,
-                    headings: headingsByProject[proj.id] ?? [heading],
-                    tasks: open,
-                    todayMillis: DateEpochConverter.startOfDayMillis(for: Date())
+            if let fallbackEpochDays {
+                effectiveHeading.startDate = DateEpochConverter.startOfDayMillis(
+                    for: DateEpochConverter.date(fromEpochDay: fallbackEpochDays.startEpochDay)
                 )
-                if let inferred = layout.phaseBar(for: heading.id) {
-                    effectiveHeading.startDate = DateEpochConverter.startOfDayMillis(
-                        for: DateEpochConverter.date(fromEpochDay: inferred.startEpochDay)
+                effectiveHeading.endDate = DateEpochConverter.startOfDayMillis(
+                    for: DateEpochConverter.date(fromEpochDay: fallbackEpochDays.endEpochDay)
+                )
+            } else {
+                let open = allOpenTasks.filter { $0.projectId == heading.projectId && !$0.isDeleted }
+                if let proj = project(byId: heading.projectId) {
+                    let layout = ProjectRoadmapEngine.buildLayout(
+                        project: proj,
+                        headings: headingsByProject[proj.id] ?? [heading],
+                        tasks: open,
+                        todayMillis: DateEpochConverter.startOfDayMillis(for: Date())
                     )
-                    effectiveHeading.endDate = DateEpochConverter.startOfDayMillis(
-                        for: DateEpochConverter.date(fromEpochDay: inferred.endEpochDay)
-                    )
+                    if let inferred = layout.phaseBar(for: heading.id) {
+                        effectiveHeading.startDate = DateEpochConverter.startOfDayMillis(
+                            for: DateEpochConverter.date(fromEpochDay: inferred.startEpochDay)
+                        )
+                        effectiveHeading.endDate = DateEpochConverter.startOfDayMillis(
+                            for: DateEpochConverter.date(fromEpochDay: inferred.endEpochDay)
+                        )
+                    }
                 }
             }
         }
         let shifted = ProjectRoadmapEngine.shiftHeadingDates(heading: effectiveHeading, deltaDays: deltaDays)
         updateHeadingDates(heading.id, startDate: shifted.startDate, endDate: shifted.endDate)
+        presentUndo(
+            message: tr("v31_roadmap_rescheduled_undo"),
+            action: .headingDatesChanged(
+                headingId: heading.id,
+                previousStart: previousStart,
+                previousEnd: previousEnd
+            )
+        )
     }
 
     public func shiftTaskRoadmapDates(_ task: TaskItem, deltaDays: Int) {
         guard deltaDays != 0 else { return }
         let todayMs = DateEpochConverter.startOfDayMillis(for: Date())
-        let targetIds: [String]
-        if selectedTaskIds.contains(task.id) && selectedTaskIds.count > 1 {
-            targetIds = orderedTaskIds(matching: selectedTaskIds)
-        } else {
-            targetIds = [task.id]
-        }
         let byId = Dictionary(uniqueKeysWithValues: (allOpenTasks + logbookTasks).map { ($0.id, $0) })
-        for tid in targetIds {
-            guard var current = byId[tid] ?? (tid == task.id ? task : nil) else { continue }
-            let shifted = ProjectRoadmapEngine.shiftTaskDates(task: current, deltaDays: deltaDays, todayMillis: todayMs)
-            current.scheduleState = shifted.scheduleState
-            current.whenDate = shifted.whenDate
-            current.deadline = shifted.deadline
-            updateTask(current)
+
+        var shiftsToApply: [CascadedTaskShift] = []
+        if selectedTaskIds.contains(task.id) && selectedTaskIds.count > 1 {
+            let targetIds = orderedTaskIds(matching: selectedTaskIds)
+            var mergedByTaskId: [String: CascadedTaskShift] = [:]
+            var orderedIds: [String] = []
+            for tid in targetIds {
+                guard let current = byId[tid] ?? (tid == task.id ? task : nil) else { continue }
+                let peerTasks = current.projectId != nil
+                    ? allOpenTasks.filter { $0.projectId == current.projectId }
+                    : [current]
+                let cascaded = ProjectRoadmapEngine.computeSmartDependencyCascade(
+                    anchorTask: current,
+                    deltaDays: deltaDays,
+                    projectTasks: peerTasks,
+                    todayMillis: todayMs
+                )
+                for item in cascaded {
+                    let isSelectedAnchor = selectedTaskIds.contains(item.task.id)
+                    if let prev = mergedByTaskId[item.task.id] {
+                        if abs(item.deltaDays) > abs(prev.deltaDays) || (isSelectedAnchor && !prev.isAnchor) {
+                            mergedByTaskId[item.task.id] = CascadedTaskShift(
+                                task: item.task,
+                                deltaDays: item.deltaDays,
+                                nextScheduleState: item.nextScheduleState,
+                                nextWhenMillis: item.nextWhenMillis,
+                                nextDeadlineMillis: item.nextDeadlineMillis,
+                                isAnchor: isSelectedAnchor
+                            )
+                        }
+                    } else {
+                        orderedIds.append(item.task.id)
+                        mergedByTaskId[item.task.id] = CascadedTaskShift(
+                            task: item.task,
+                            deltaDays: item.deltaDays,
+                            nextScheduleState: item.nextScheduleState,
+                            nextWhenMillis: item.nextWhenMillis,
+                            nextDeadlineMillis: item.nextDeadlineMillis,
+                            isAnchor: isSelectedAnchor
+                        )
+                    }
+                }
+            }
+            shiftsToApply = orderedIds.compactMap { mergedByTaskId[$0] }
+        } else {
+            let current = byId[task.id] ?? task
+            let peerTasks = current.projectId != nil
+                ? allOpenTasks.filter { $0.projectId == current.projectId }
+                : [current]
+            shiftsToApply = ProjectRoadmapEngine.computeSmartDependencyCascade(
+                anchorTask: current,
+                deltaDays: deltaDays,
+                projectTasks: peerTasks,
+                todayMillis: todayMs
+            )
         }
+
+        guard !shiftsToApply.isEmpty,
+              let snapshots = try? database.applyCascadedTaskShifts(shiftsToApply),
+              !snapshots.isEmpty else {
+            return
+        }
+        reloadSnapshot()
+        NotificationReminderService.shared.syncAllTaskReminders(
+            openTasks: allOpenTasks,
+            lang: preferences.language
+        )
+        let cascadedCount = shiftsToApply.filter { !$0.isAnchor }.count
+        let undoMessage = cascadedCount > 0
+            ? trf("v31_roadmap_cascade_undo", cascadedCount)
+            : tr("v31_roadmap_rescheduled_undo")
+        presentUndo(
+            message: undoMessage,
+            action: .tasksMoved(snapshots: snapshots, spawnedRecurringTaskIds: [])
+        )
     }
 
     @discardableResult
@@ -2108,6 +2241,9 @@ public final class ThingsbookStore: ObservableObject {
                 openTasks: allOpenTasks,
                 lang: preferences.language
             )
+        case .headingDatesChanged(let headingId, let previousStart, let previousEnd):
+            try? database.updateHeadingDates(headingId, startDate: previousStart, endDate: previousEnd)
+            reloadSnapshot()
         case .projectDeleted(let projectId, _, let previousTasks, let deletedTaskIds):
             try? database.restoreDeletedProject(
                 projectId: projectId,
@@ -2333,6 +2469,14 @@ public final class ThingsbookStore: ObservableObject {
             }
             if let tag = payload.preferences.languageTag {
                 prefs.language = tag.isEmpty ? .system : (AppLanguage(rawValue: tag) ?? .system)
+            }
+            if payload.preferences.workdayStartMinutes != nil || payload.preferences.workdayEndMinutes != nil {
+                let normalized = TodayCapacityCalculator.normalizeWorkdayBounds(
+                    startMinutes: payload.preferences.workdayStartMinutes ?? prefs.workdayStartMinutes,
+                    endMinutes: payload.preferences.workdayEndMinutes ?? prefs.workdayEndMinutes
+                )
+                prefs.workdayStartMinutes = normalized.startMinutes
+                prefs.workdayEndMinutes = normalized.endMinutes
             }
             if case .perspective(let activePid) = selectedDestination,
                !prefs.savedPerspectives.contains(where: { $0.id == activePid }) {
@@ -2825,6 +2969,116 @@ public final class ThingsbookStore: ObservableObject {
             previewingAttachment = nil
         }
         try? database.deleteAttachment(attachment.id)
+    }
+
+    @discardableResult
+    public func createProjectFromBlueprint(
+        _ blueprint: ProjectBlueprintResponse,
+        areaId: String? = nil
+    ) -> Project? {
+        guard let project = try? database.createProjectFromBlueprint(
+            blueprint,
+            areaId: areaId,
+            languageCode: preferences.language.resolvedCode
+        ) else {
+            return nil
+        }
+        reloadSnapshot()
+        NotificationReminderService.shared.syncAllTaskReminders(
+            openTasks: allOpenTasks,
+            lang: preferences.language
+        )
+        selectedDestination = .project(project.id)
+        return project
+    }
+
+    public func generateGeminiDayPlan(
+        includeAlreadyScheduled: Bool
+    ) async throws -> DayTimeblockPlanResponse {
+        let cal = Calendar.current
+        let now = Date()
+        let sod = cal.startOfDay(for: now)
+        let nextSod = cal.date(byAdding: .day, value: 1, to: sod) ?? sod.addingTimeInterval(86_400)
+        let dayStartMs = DateEpochConverter.startOfDayMillis(for: sod, calendar: cal)
+        let dayEndMs = DateEpochConverter.startOfDayMillis(for: nextSod, calendar: cal)
+        let todayEpochDay = DateEpochConverter.epochDay(for: sod, calendar: cal)
+        let nowComps = cal.dateComponents([.hour, .minute], from: now)
+        let nowMins = (nowComps.hour ?? 9) * 60 + (nowComps.minute ?? 0)
+
+        var seen = Set<String>()
+        let allTodayOpen = (todayDaytimeTasks + thisEveningTasks).filter {
+            !$0.isDeleted && $0.status == .open && seen.insert($0.id).inserted
+        }
+
+        let candidates: [DayTimeblockCandidate] = allTodayOpen
+            .filter { includeAlreadyScheduled || $0.scheduledStartMinutes == nil }
+            .map { task in
+                let hasTodayDeadline: Bool = {
+                    guard let dl = task.deadline else { return false }
+                    return DateEpochConverter.epochDay(forMillis: dl, calendar: cal) <= todayEpochDay
+                }()
+                let dur = min(240, max(15, (task.durationMinutes ?? 0) > 0 ? task.durationMinutes! : 30))
+                return DayTimeblockCandidate(
+                    taskId: task.id,
+                    title: task.title,
+                    durationMinutes: dur,
+                    effortLevel: task.effortLevel,
+                    isPinned: task.isPinned,
+                    hasTodayDeadline: hasTodayDeadline,
+                    existingStartMinutes: task.scheduledStartMinutes
+                )
+            }
+
+        var busyIntervals: [(Int, Int)] = []
+        if preferences.calendarEventsEnabled {
+            for ev in todayTimelineCalendarEvents() where !ev.isAllDay && ev.endMillis > ev.startMillis {
+                let s = min(1440, max(0, Int((max(ev.startMillis, dayStartMs) - dayStartMs) / 60_000)))
+                let e = min(1440, max(0, Int((min(ev.endMillis, dayEndMs) - dayStartMs) / 60_000)))
+                if e > s {
+                    busyIntervals.append((s, e))
+                }
+            }
+        }
+        if !includeAlreadyScheduled {
+            for task in allTodayOpen {
+                guard let s = task.scheduledStartMinutes else { continue }
+                let d = min(480, max(15, (task.durationMinutes ?? 0) > 0 ? task.durationMinutes! : 30))
+                busyIntervals.append((s, min(1440, s + d)))
+            }
+        }
+
+        let (workStart, workEnd) = TodayCapacityCalculator.normalizeWorkdayBounds(
+            startMinutes: preferences.workdayStartMinutes,
+            endMinutes: preferences.workdayEndMinutes
+        )
+        let earliest = min(22 * 60, max(workStart, ((nowMins + 14) / 15) * 15))
+
+        return try await ThingsbookGeminiService.generateDailyTimeblockPlan(
+            candidates: candidates,
+            busyIntervalsMinutes: busyIntervals,
+            workdayStartMinutes: workStart,
+            workdayEndMinutes: workEnd,
+            earliestStartMinutes: earliest,
+            lang: preferences.language
+        )
+    }
+
+    public func applyGeminiDayPlan(_ blocks: [DayTimeblockItemDTO]) {
+        guard !blocks.isEmpty else { return }
+        let updates: [(taskId: String, startMinutes: Int?, durationMinutes: Int?)] = blocks.map {
+            (taskId: $0.taskId, startMinutes: Optional($0.startMinutes), durationMinutes: Optional($0.durationMinutes))
+        }
+        guard let snapshots = try? database.applyBatchTaskTimeblocks(updates),
+              !snapshots.isEmpty else {
+            return
+        }
+        todayViewMode = .timeline
+        selectedDestination = .smartView(.today)
+        reloadSnapshot()
+        presentUndo(
+            message: trf("v31_gemini_plan_day_applied_undo", snapshots.count),
+            action: .tasksMoved(snapshots: snapshots, spawnedRecurringTaskIds: [])
+        )
     }
 
     @discardableResult

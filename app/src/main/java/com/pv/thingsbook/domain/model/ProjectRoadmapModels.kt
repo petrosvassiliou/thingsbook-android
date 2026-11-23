@@ -93,6 +93,38 @@ data class RoadmapPdfExportConfig(
     val orientation: PdfPageOrientation = PdfPageOrientation.LANDSCAPE
 )
 
+data class CascadedTaskShift(
+    val task: TaskItem,
+    val deltaDays: Long,
+    val nextScheduleState: ScheduleState,
+    val nextWhenMillis: Long?,
+    val nextDeadlineMillis: Long?,
+    val isAnchor: Boolean
+)
+
+data class AreaPortfolioProjectLane(
+    val project: Project,
+    val projectLayout: ProjectRoadmapLayout,
+    val summaryStartEpochDay: Long,
+    val summaryEndEpochDay: Long,
+    val milestoneBars: List<RoadmapTaskBar>
+) {
+    val projectId: String get() = project.id
+    val spanDays: Int get() = (summaryEndEpochDay - summaryStartEpochDay + 1L).coerceAtLeast(1L).toInt()
+}
+
+data class AreaPortfolioRoadmapLayout(
+    val area: Area,
+    val startEpochDay: Long,
+    val endEpochDay: Long,
+    val todayEpochDay: Long,
+    val projectLanes: List<AreaPortfolioProjectLane>,
+    val unscheduledProjects: List<Project>
+) {
+    val totalDays: Int
+        get() = (endEpochDay - startEpochDay + 1L).coerceAtLeast(1L).toInt()
+}
+
 object ProjectRoadmapEngine {
 
     const val MIN_TIMELINE_DAYS: Long = 21L
@@ -510,5 +542,337 @@ object ProjectRoadmapEngine {
             ScheduleState.THIS_EVENING
         newWhenDay <= todayEpochDay -> ScheduleState.TODAY
         else -> ScheduleState.UPCOMING
+    }
+
+    private fun resolveRawTaskSpanEpochDays(
+        task: TaskItem,
+        zoneId: ZoneId
+    ): Pair<Long, Long>? {
+        if (task.isMilestone) {
+            val targetMillis = task.deadline ?: task.whenDate ?: return null
+            val targetDay = epochMillisToEpochDay(targetMillis, zoneId)
+            return targetDay to targetDay
+        }
+        val whenDay = task.whenDate?.let { epochMillisToEpochDay(it, zoneId) }
+        val deadlineDay = task.deadline?.let { epochMillisToEpochDay(it, zoneId) }
+        return when {
+            whenDay != null && deadlineDay != null -> whenDay to maxOf(whenDay, deadlineDay)
+            whenDay != null && deadlineDay == null -> {
+                val durDays = durationMinutesToDays(task.durationMinutes)
+                whenDay to (whenDay + durDays - 1L)
+            }
+            whenDay == null && deadlineDay != null -> {
+                val durDays = durationMinutesToDays(task.durationMinutes)
+                (deadlineDay - (durDays - 1L)) to deadlineDay
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Smart Push-on-Conflict Dependency Cascade:
+     * Shifts [anchorTask] by [deltaDays] and pushes open downstream tasks (whose `blockedByTaskIds`
+     * reference an upstream shifted task) forward ONLY when the blocker's new end date overlaps or
+     * passes the dependent task's start date (`blockerEndDay >= depStartDay`), preserving existing slack.
+     */
+    fun computeSmartDependencyCascade(
+        anchorTask: TaskItem,
+        deltaDays: Long,
+        projectTasks: List<TaskItem>,
+        todayEpochDay: Long = LocalDate.now().toEpochDay(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): List<CascadedTaskShift> {
+        if (deltaDays == 0L) return emptyList()
+
+        val taskById = LinkedHashMap<String, TaskItem>()
+        taskById[anchorTask.id] = anchorTask
+        for (t in projectTasks) {
+            if (!t.isDeleted && t.status != TaskStatus.CANCELED) {
+                taskById[t.id] = t
+            }
+        }
+
+        val dependentsByBlocker = HashMap<String, MutableList<TaskItem>>()
+        for (t in taskById.values) {
+            if (t.status != TaskStatus.OPEN) continue
+            for (blockerId in t.blockedByTaskIds) {
+                val clean = blockerId.trim()
+                if (clean.isNotEmpty() && clean != t.id) {
+                    dependentsByBlocker.getOrPut(clean) { mutableListOf() }.add(t)
+                }
+            }
+        }
+
+        val appliedDeltaByTaskId = LinkedHashMap<String, Long>()
+        appliedDeltaByTaskId[anchorTask.id] = deltaDays
+
+        // Only forward shifts or newly scheduled anchors can push downstream tasks later
+        val baseSpanByTaskId = HashMap<String, Pair<Long, Long>>()
+        for (t in taskById.values) {
+            val span = resolveRawTaskSpanEpochDays(t, zoneId)
+            if (span != null) {
+                baseSpanByTaskId[t.id] = span
+            }
+        }
+        if (anchorTask.id !in baseSpanByTaskId) {
+            val durDays = if (anchorTask.isMilestone) 1L else durationMinutesToDays(anchorTask.durationMinutes)
+            baseSpanByTaskId[anchorTask.id] = todayEpochDay to (todayEpochDay + durDays - 1L)
+        }
+
+        val queue = ArrayDeque<String>()
+        queue.addLast(anchorTask.id)
+        var guard = 0
+        val maxIterations = (taskById.size * 4).coerceAtLeast(16)
+
+        while (queue.isNotEmpty() && guard < maxIterations) {
+            guard++
+            val currentId = queue.removeFirst()
+            val curBase = baseSpanByTaskId[currentId] ?: continue
+            val curDelta = appliedDeltaByTaskId[currentId] ?: 0L
+            val curShiftedEnd = curBase.second + curDelta
+
+            val dependents = dependentsByBlocker[currentId].orEmpty()
+            for (dep in dependents) {
+                if (dep.id == anchorTask.id) continue
+                val depBase = baseSpanByTaskId[dep.id] ?: continue
+                val existingDepDelta = appliedDeltaByTaskId[dep.id] ?: 0L
+                val depEffectiveStart = depBase.first + existingDepDelta
+                // Conflict occurs when blocker ends on or after dependent's start day
+                if (curShiftedEnd >= depEffectiveStart) {
+                    val pushNeeded = (curShiftedEnd + 1L) - depEffectiveStart
+                    val nextDepDelta = existingDepDelta + pushNeeded
+                    if (nextDepDelta > existingDepDelta) {
+                        appliedDeltaByTaskId[dep.id] = nextDepDelta
+                        queue.addLast(dep.id)
+                    }
+                }
+            }
+        }
+
+        val results = mutableListOf<CascadedTaskShift>()
+        for ((taskId, taskDelta) in appliedDeltaByTaskId) {
+            if (taskDelta == 0L) continue
+            val targetTask = taskById[taskId] ?: continue
+            val (nextState, nextWhen, nextDeadline) = shiftTaskDatesByDays(
+                task = targetTask,
+                deltaDays = taskDelta,
+                todayEpochDay = todayEpochDay,
+                zoneId = zoneId
+            )
+            results += CascadedTaskShift(
+                task = targetTask,
+                deltaDays = taskDelta,
+                nextScheduleState = nextState,
+                nextWhenMillis = nextWhen,
+                nextDeadlineMillis = nextDeadline,
+                isAnchor = taskId == anchorTask.id
+            )
+        }
+        return results
+    }
+
+    fun computeCascadeDeltaPreviewMap(
+        anchorTask: TaskItem,
+        deltaDays: Long,
+        projectTasks: List<TaskItem>,
+        todayEpochDay: Long = LocalDate.now().toEpochDay(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): Map<String, Long> {
+        if (deltaDays == 0L) return emptyMap()
+        return computeSmartDependencyCascade(
+            anchorTask = anchorTask,
+            deltaDays = deltaDays,
+            projectTasks = projectTasks,
+            todayEpochDay = todayEpochDay,
+            zoneId = zoneId
+        ).associate { "task_${it.task.id}" to it.deltaDays }
+    }
+
+    fun buildAreaPortfolioRoadmapLayout(
+        area: Area,
+        projectsInArea: List<Project>,
+        allHeadings: List<Heading>,
+        allTasks: List<TaskItem>,
+        todayEpochDay: Long = LocalDate.now().toEpochDay(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): AreaPortfolioRoadmapLayout {
+        val activeProjects = projectsInArea
+            .filter { !it.isDeleted && it.status == ProjectStatus.ACTIVE && it.areaId == area.id }
+            .sortedWith(compareBy<Project> { it.sortOrder }.thenBy { it.createdAt }.thenBy { it.id })
+
+        val headingsByProject = allHeadings
+            .filter { !it.isDeleted && !it.isArchived }
+            .groupBy { it.projectId }
+        val tasksByProject = allTasks
+            .filter { !it.isDeleted && it.status != TaskStatus.CANCELED && it.projectId != null }
+            .groupBy { it.projectId!! }
+
+        val projectLanes = mutableListOf<AreaPortfolioProjectLane>()
+        val unscheduledProjects = mutableListOf<Project>()
+
+        for (proj in activeProjects) {
+            val projHeadings = headingsByProject[proj.id].orEmpty()
+            val projTasks = tasksByProject[proj.id].orEmpty()
+            val subLayout = buildRoadmapLayout(
+                project = proj,
+                headings = projHeadings,
+                tasks = projTasks,
+                todayEpochDay = todayEpochDay,
+                zoneId = zoneId
+            )
+
+            val candidateStarts = mutableListOf<Long>()
+            val candidateEnds = mutableListOf<Long>()
+            subLayout.phaseBars.forEach {
+                candidateStarts += it.startEpochDay
+                candidateEnds += it.endEpochDay
+            }
+            subLayout.taskBars.forEach {
+                candidateStarts += it.startEpochDay
+                candidateEnds += it.endEpochDay
+            }
+            proj.whenDate?.let { candidateStarts += epochMillisToEpochDay(it, zoneId) }
+            proj.deadline?.let { candidateEnds += epochMillisToEpochDay(it, zoneId) }
+
+            if (candidateStarts.isEmpty() && candidateEnds.isEmpty()) {
+                unscheduledProjects += proj
+            } else {
+                val rawMin = (candidateStarts + candidateEnds).minOrNull() ?: todayEpochDay
+                val rawMax = (candidateEnds + candidateStarts).maxOrNull() ?: rawMin
+                val startDay = minOf(rawMin, rawMax)
+                val endDay = maxOf(startDay, rawMax)
+                val milestones = subLayout.taskBars.filter { it.isMilestone }
+                projectLanes += AreaPortfolioProjectLane(
+                    project = proj,
+                    projectLayout = subLayout,
+                    summaryStartEpochDay = startDay,
+                    summaryEndEpochDay = endDay,
+                    milestoneBars = milestones
+                )
+            }
+        }
+
+        val minScheduled = projectLanes.minOfOrNull { it.summaryStartEpochDay }
+        val maxScheduled = projectLanes.maxOfOrNull { it.summaryEndEpochDay }
+        val defaultStart = todayEpochDay - LEADING_BUFFER_DAYS
+        val windowStart = if (minScheduled != null && minScheduled < defaultStart) {
+            minScheduled - 1L
+        } else {
+            defaultStart
+        }
+        val minRequiredEnd = windowStart + MIN_TIMELINE_DAYS - 1L
+        val rawEnd = if (maxScheduled != null) {
+            maxOf(minRequiredEnd, maxScheduled + TRAILING_BUFFER_DAYS)
+        } else {
+            minRequiredEnd
+        }
+        val maxAllowedEnd = maxOf(
+            minRequiredEnd,
+            LocalDate.ofEpochDay(maxScheduled ?: todayEpochDay).plusMonths(2).toEpochDay()
+        )
+        val windowEnd = minOf(rawEnd, maxAllowedEnd)
+
+        return AreaPortfolioRoadmapLayout(
+            area = area,
+            startEpochDay = windowStart,
+            endEpochDay = windowEnd,
+            todayEpochDay = todayEpochDay,
+            projectLanes = projectLanes,
+            unscheduledProjects = unscheduledProjects
+        )
+    }
+
+    /**
+     * Converts an [AreaPortfolioRoadmapLayout] into a standard [ProjectRoadmapLayout] so multi-page
+     * Vector PDF and High-DPI PNG export (`RoadmapExporter`) render all scheduled Area projects,
+     * milestones (◆), task spans, and dependencies seamlessly.
+     */
+    fun toExportablePortfolioLayout(
+        portfolioLayout: AreaPortfolioRoadmapLayout,
+        expandedProjectIds: Set<String> = emptySet(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): Triple<Project, List<Heading>, ProjectRoadmapLayout> {
+        val totalTasks = portfolioLayout.projectLanes.sumOf { it.project.totalTaskCount }
+        val doneTasks = portfolioLayout.projectLanes.sumOf { it.project.completedTaskCount }
+        val maxDeadline = portfolioLayout.projectLanes.mapNotNull { it.project.deadline }.maxOrNull()
+
+        val syntheticProject = Project(
+            id = "area_export_${portfolioLayout.area.id}",
+            areaId = portfolioLayout.area.id,
+            title = portfolioLayout.area.title,
+            notes = "",
+            status = ProjectStatus.ACTIVE,
+            scheduleState = ScheduleState.ANYTIME,
+            whenDate = epochDayToStartOfDayMillis(portfolioLayout.startEpochDay, zoneId),
+            deadline = maxDeadline,
+            completedAt = null,
+            sortOrder = portfolioLayout.area.sortOrder,
+            tagIds = portfolioLayout.area.tagIds,
+            viewMode = "roadmap",
+            totalTaskCount = totalTasks,
+            completedTaskCount = doneTasks,
+            createdAt = portfolioLayout.area.createdAt,
+            updatedAt = portfolioLayout.area.updatedAt
+        )
+
+        val syntheticHeadings = ArrayList<Heading>(portfolioLayout.projectLanes.size)
+        val lanes = ArrayList<RoadmapLane>(portfolioLayout.projectLanes.size)
+        val phaseBars = ArrayList<RoadmapPhaseBar>(portfolioLayout.projectLanes.size)
+        val taskBars = ArrayList<RoadmapTaskBar>()
+        val depEdges = ArrayList<RoadmapDependencyEdge>()
+
+        portfolioLayout.projectLanes.forEachIndexed { idx, pLane ->
+            val hStartMs = epochDayToStartOfDayMillis(pLane.summaryStartEpochDay, zoneId)
+            val hEndMs = epochDayToStartOfDayMillis(pLane.summaryEndEpochDay, zoneId)
+            val synHeading = Heading(
+                id = pLane.projectId,
+                projectId = syntheticProject.id,
+                title = pLane.project.title,
+                startDate = hStartMs,
+                endDate = hEndMs,
+                sortOrder = (idx + 1) * 100.0,
+                createdAt = pLane.project.createdAt,
+                updatedAt = pLane.project.updatedAt
+            )
+            syntheticHeadings += synHeading
+
+            val pb = RoadmapPhaseBar(
+                heading = synHeading,
+                startEpochDay = pLane.summaryStartEpochDay,
+                endEpochDay = pLane.summaryEndEpochDay,
+                hasExplicitDates = true
+            )
+            phaseBars += pb
+
+            val isExpanded = pLane.projectId in expandedProjectIds
+            val sourceBars = if (isExpanded) pLane.projectLayout.taskBars else pLane.milestoneBars
+            val remappedBars = sourceBars.map { tb ->
+                tb.copy(headingId = synHeading.id)
+            }
+            taskBars += remappedBars
+            if (isExpanded) {
+                depEdges += pLane.projectLayout.dependencyEdges
+            }
+            lanes += RoadmapLane(
+                heading = synHeading,
+                phaseBar = pb,
+                taskBars = remappedBars,
+                unscheduledTasks = emptyList()
+            )
+        }
+
+        val exportLayout = ProjectRoadmapLayout(
+            project = syntheticProject,
+            startEpochDay = portfolioLayout.startEpochDay,
+            endEpochDay = portfolioLayout.endEpochDay,
+            todayEpochDay = portfolioLayout.todayEpochDay,
+            lanes = lanes,
+            phaseBars = phaseBars,
+            taskBars = taskBars,
+            dependencyEdges = depEdges,
+            unscheduledHeadings = emptyList(),
+            unscheduledTasks = emptyList()
+        )
+        return Triple(syntheticProject, syntheticHeadings, exportLayout)
     }
 }

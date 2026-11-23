@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  ArrowUpRight,
   Calendar,
   CalendarDays,
   Check,
   CheckCircle2,
   CheckSquare,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -23,6 +25,7 @@ import {
   Link2,
   Maximize2,
   Minimize2,
+  Minus,
   Moon,
   Pin,
   PinOff,
@@ -39,6 +42,7 @@ import {
   fromIsoDateInputValue,
   startOfDayEpoch,
   toIsoDateInputValue,
+  type AreaRecord,
   type ChecklistItemRecord,
   type HeadingRecord,
   type ProjectRecord,
@@ -59,6 +63,7 @@ import {
   ROADMAP_MOUSE_DRAG_ACTIVATE_PX,
   ROADMAP_TOUCH_HOLD_SLOP_PX,
   attachMultiTaskDragPreview,
+  computeCascadeDeltaPreviewMap,
   downloadBlob,
   extractDraggedTaskIds,
   generateRoadmapPdfBytes,
@@ -69,11 +74,12 @@ import {
   renderRoadmapToPngDataUrl,
   resolveRoadmapHoldDurationMs,
   shiftPhaseDatesByDays,
-  shiftTaskDatesByDays,
   shouldActivateMouseRoadmapDrag,
   shouldCancelUnarmedRoadmapDrag,
   slugifyFilename,
+  toExportablePortfolioLayout,
   wrapTextLines,
+  type AreaPortfolioRoadmapLayout,
   type ProjectRoadmapLayout,
   type RoadmapPdfOrientation
 } from '../domain/v30Roadmap';
@@ -1586,10 +1592,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
               startEpoch: lane.startEpoch,
               endEpoch: lane.endEpoch
             });
-            void localDb.updateHeadingDates(
+            void localDb.rescheduleRoadmapHeading(
               lane.heading.id,
               shifted.startDate,
-              shifted.endDate
+              shifted.endDate,
+              lane.heading.title || t.entityHeading
             );
           }
         } else {
@@ -1597,17 +1604,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
             (p) => p.task.id === finished.id
           );
           if (plotted) {
-            const shifted = shiftTaskDatesByDays(
+            void localDb.rescheduleRoadmapTaskWithCascade(
               plotted.task,
               finished.deltaDays,
               currentLayout.todayEpoch
             );
-            void localDb.upsertTask({
-              id: plotted.task.id,
-              whenDate: shifted.whenDate,
-              deadline: shifted.deadline,
-              scheduleState: shifted.scheduleState
-            });
           }
         }
       }
@@ -1659,19 +1660,39 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       startEpoch: lane.startEpoch,
       endEpoch: lane.endEpoch
     });
-    void localDb.updateHeadingDates(lane.heading.id, shifted.startDate, shifted.endDate);
+    void localDb.rescheduleRoadmapHeading(
+      lane.heading.id,
+      shifted.startDate,
+      shifted.endDate,
+      lane.heading.title || t.entityHeading
+    );
   };
 
   const stepTaskByDays = (task: TaskRecord, delta: number) => {
     if (isFullScreen) return;
-    const shifted = shiftTaskDatesByDays(task, delta, layout.todayEpoch);
-    void localDb.upsertTask({
-      id: task.id,
-      whenDate: shifted.whenDate,
-      deadline: shifted.deadline,
-      scheduleState: shifted.scheduleState
-    });
+    void localDb.rescheduleRoadmapTaskWithCascade(task, delta, layout.todayEpoch);
   };
+
+  // v3.1 Live Smart Push-on-Conflict cascade preview map during active task bar drag
+  const cascadePreviewMap = useMemo(() => {
+    if (
+      isFullScreen ||
+      !barDrag ||
+      barDrag.kind !== 'task' ||
+      !barDrag.armed ||
+      barDrag.deltaDays === 0
+    ) {
+      return new Map<string, number>();
+    }
+    const anchor = layout.plottedTasks.find((p) => p.task.id === barDrag.id);
+    if (!anchor) return new Map<string, number>();
+    return computeCascadeDeltaPreviewMap(
+      anchor.task,
+      barDrag.deltaDays,
+      layout.plottedTasks.map((p) => p.task),
+      layout.todayEpoch
+    );
+  }, [isFullScreen, barDrag, layout.plottedTasks, layout.todayEpoch]);
 
   // Precompute synchronized lane header heights, exact Y-coordinates, and bar X-coordinates for SVG dependency connectors
   const { laneHeightsById, totalBodyHeight, svgConnectorPaths } = useMemo(() => {
@@ -1694,14 +1715,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
       yCursor += laneH;
 
       for (const pt of lane.plottedTasks) {
-        const offsetDays =
-          !isFullScreen &&
-          barDrag &&
-          barDrag.kind === 'task' &&
-          barDrag.id === pt.task.id &&
-          barDrag.armed
-            ? barDrag.deltaDays
-            : 0;
+        const offsetDays = !isFullScreen ? (cascadePreviewMap.get(pt.task.id) ?? 0) : 0;
         const clampedS = Math.max(
           0,
           Math.min(layout.totalDays - 1, pt.startDayIndex + offsetDays)
@@ -1770,7 +1784,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
     layout.totalDays,
     dayWidth,
     timelineWidthPx,
-    barDrag,
+    cascadePreviewMap,
     isFullScreen,
     t.projectUngroupedColumn,
     t.entityHeading
@@ -2678,13 +2692,12 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                   {lane.plottedTasks.map((pt) => {
                     const tk = pt.task;
                     const isSelected = !isFullScreen && selectedTaskIds.includes(tk.id);
-                    const taskDragDelta =
-                      !isFullScreen &&
-                      barDrag?.kind === 'task' &&
-                      barDrag.id === tk.id &&
-                      barDrag.armed
-                        ? barDrag.deltaDays
-                        : 0;
+                    const taskDragDelta = !isFullScreen
+                      ? (cascadePreviewMap.get(tk.id) ?? 0)
+                      : 0;
+                    const isCascadedDownstream =
+                      taskDragDelta !== 0 &&
+                      !(barDrag?.kind === 'task' && barDrag.id === tk.id);
                     const clampedTaskS = Math.max(
                       0,
                       Math.min(layout.totalDays - 1, pt.startDayIndex + taskDragDelta)
@@ -2907,7 +2920,9 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                               barDrag.armed
                                 ? 'armed'
                                 : ''
-                            } ${taskDragDelta !== 0 ? 'dragging' : ''}`}
+                            } ${taskDragDelta !== 0 ? 'dragging' : ''} ${
+                              isCascadedDownstream ? 'cascaded' : ''
+                            }`}
                             data-testid={`roadmap-task-bar-${tk.id}`}
                             data-milestone={isMilestoneTask ? 'true' : undefined}
                             data-timeline-mouse-tip={taskMouseTooltip}
@@ -3474,3 +3489,1547 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
 };
 
 export const ProjectRoadmapView = ProjectRoadmapWorkspace;
+
+// ==================== 3. v3.1 Area Portfolio Timeline (AreaPortfolioRoadmapWorkspace) ====================
+
+const PORTFOLIO_PROJECT_ROW_HEIGHT_PX = 48;
+const PORTFOLIO_PHASE_ROW_HEIGHT_PX = 40;
+const PORTFOLIO_ZOOM_ORDER: RoadmapZoom[] = ['compact', 'standard', 'wide'];
+
+interface PortfolioBarDragState {
+  projectId: string;
+  kind: 'phase' | 'task';
+  id: string;
+  pointerId: number;
+  pointerType: string;
+  startClientX: number;
+  startClientY: number;
+  armed: boolean;
+  deltaDays: number;
+  moved: boolean;
+}
+
+export interface AreaPortfolioRoadmapWorkspaceProps {
+  area: AreaRecord;
+  layout: AreaPortfolioRoadmapLayout;
+  allTasks?: readonly TaskRecord[];
+  selectedTaskIds: string[];
+  isMultiSelectMode?: boolean;
+  lang: SupportedLang;
+  isDark?: boolean;
+  isFullScreen?: boolean;
+  onToggleFullScreen?: () => void;
+  t: TranslationStrings;
+  onToast?: (message: string) => void;
+  onOpenProject: (projectId: string) => void;
+  onSelectTask: (taskId: string, multiToggle: boolean, shiftRange: boolean) => void;
+  onOpenTaskEditor: (taskId: string) => void;
+  onOpenProjectDeadlineModal?: (projectId: string) => void;
+}
+
+export const AreaPortfolioRoadmapWorkspace: React.FC<AreaPortfolioRoadmapWorkspaceProps> = ({
+  area,
+  layout,
+  allTasks = [],
+  selectedTaskIds,
+  isMultiSelectMode = false,
+  lang,
+  isDark = false,
+  isFullScreen = false,
+  onToggleFullScreen,
+  t,
+  onToast,
+  onOpenProject,
+  onSelectTask,
+  onOpenTaskEditor,
+  onOpenProjectDeadlineModal
+}) => {
+  const [zoom, setZoom] = useState<RoadmapZoom>('standard');
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set());
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
+  const [pdfSelectedLaneIds, setPdfSelectedLaneIds] = useState<string[]>([]);
+  const [pdfTimelinePreset, setPdfTimelinePreset] = useState<RoadmapPdfTimelinePreset>('auto');
+  const [pdfCustomStartIso, setPdfCustomStartIso] = useState('');
+  const [pdfCustomEndIso, setPdfCustomEndIso] = useState('');
+  const [pdfOrientation, setPdfOrientation] = useState<RoadmapPdfOrientation>('landscape');
+  const [barDrag, setBarDrag] = useState<PortfolioBarDragState | null>(null);
+  const barDragRef = useRef<PortfolioBarDragState | null>(null);
+  const barDragTargetRef = useRef<HTMLElement | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const dayWidth = ZOOM_DAY_WIDTH_PX[zoom];
+  const dayWidthRef = useRef(dayWidth);
+  dayWidthRef.current = dayWidth;
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const timelineWidthPx = layout.totalDays * dayWidth;
+
+  const beginPortfolioBarDrag = useCallback(
+    (target: HTMLElement, next: PortfolioBarDragState) => {
+      barDragTargetRef.current = target;
+      barDragRef.current = next;
+      setBarDrag(next);
+    },
+    []
+  );
+
+  const clearPortfolioBarDrag = useCallback(() => {
+    const prev = barDragRef.current;
+    const target = barDragTargetRef.current;
+    if (prev && target) {
+      try {
+        target.releasePointerCapture?.(prev.pointerId);
+      } catch {
+        // ignore synthetic capture error
+      }
+    }
+    barDragRef.current = null;
+    barDragTargetRef.current = null;
+    setBarDrag(null);
+  }, []);
+
+  const jumpToToday = useCallback(
+    (smooth: boolean = true) => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const targetLeft = Math.max(
+        0,
+        layout.todayDayIndex * dayWidth -
+          Math.max(80, (el.clientWidth - LABEL_COL_WIDTH_PX) * 0.22)
+      );
+      el.scrollTo({
+        left: targetLeft,
+        behavior: smooth ? 'smooth' : 'auto'
+      });
+    },
+    [layout.todayDayIndex, dayWidth]
+  );
+
+  useEffect(() => {
+    jumpToToday(false);
+  }, [area.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeSessionKey = barDrag
+    ? `${barDrag.projectId}:${barDrag.kind}:${barDrag.id}:${barDrag.pointerId}`
+    : null;
+
+  useEffect(() => {
+    if (!barDrag || isFullScreen) return;
+    const initial = barDragRef.current ?? barDrag;
+    barDragRef.current = initial;
+
+    let holdTimer: number | null = !initial.armed
+      ? window.setTimeout(() => {
+          holdTimer = null;
+          const cur = barDragRef.current;
+          if (!cur || cur.armed) return;
+          try {
+            barDragTargetRef.current?.setPointerCapture?.(cur.pointerId);
+          } catch {
+            // ignore
+          }
+          const armedNext: PortfolioBarDragState = { ...cur, armed: true };
+          barDragRef.current = armedNext;
+          setBarDrag(armedNext);
+        }, resolveRoadmapHoldDurationMs(initial.pointerType))
+      : null;
+
+    const clearHoldTimer = () => {
+      if (holdTimer !== null) {
+        window.clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    };
+
+    const abortDrag = () => {
+      clearHoldTimer();
+      clearPortfolioBarDrag();
+    };
+
+    const cancelIfUnarmed = () => {
+      const cur = barDragRef.current;
+      if (cur && !cur.armed) abortDrag();
+    };
+
+    const onTouchMove = (ev: TouchEvent) => {
+      const cur = barDragRef.current;
+      if (cur && cur.armed && ev.cancelable) ev.preventDefault();
+    };
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const cur = barDragRef.current;
+      if (!cur || ev.pointerId !== cur.pointerId) return;
+      const effectivePointerType = ev.pointerType || cur.pointerType;
+      if (!isRoadmapPointerActivelyPressed(effectivePointerType, ev.buttons)) {
+        abortDrag();
+        return;
+      }
+
+      const dx = ev.clientX - cur.startClientX;
+      if (!cur.armed) {
+        if (effectivePointerType === 'mouse') {
+          if (
+            !shouldActivateMouseRoadmapDrag(
+              cur.startClientX,
+              cur.startClientY,
+              ev.clientX,
+              ev.clientY,
+              ev.buttons,
+              ROADMAP_MOUSE_DRAG_ACTIVATE_PX
+            )
+          ) {
+            return;
+          }
+          clearHoldTimer();
+          try {
+            barDragTargetRef.current?.setPointerCapture?.(cur.pointerId);
+          } catch {
+            // ignore
+          }
+          if (ev.cancelable) ev.preventDefault();
+          const delta = Math.round(dx / dayWidthRef.current);
+          const next: PortfolioBarDragState = {
+            ...cur,
+            armed: true,
+            moved: true,
+            deltaDays: delta
+          };
+          barDragRef.current = next;
+          setBarDrag(next);
+          return;
+        }
+        if (
+          shouldCancelUnarmedRoadmapDrag(
+            cur.startClientX,
+            cur.startClientY,
+            ev.clientX,
+            ev.clientY,
+            ROADMAP_TOUCH_HOLD_SLOP_PX
+          )
+        ) {
+          cancelIfUnarmed();
+        }
+        return;
+      }
+
+      if (ev.cancelable) ev.preventDefault();
+      const delta = Math.round(dx / dayWidthRef.current);
+      const moved = cur.moved || Math.abs(dx) >= ROADMAP_MOUSE_DRAG_ACTIVATE_PX;
+      if (cur.deltaDays !== delta || cur.moved !== moved) {
+        const next: PortfolioBarDragState = { ...cur, deltaDays: delta, moved };
+        barDragRef.current = next;
+        setBarDrag(next);
+      }
+    };
+
+    const onPointerUp = (ev: PointerEvent) => {
+      const finished = barDragRef.current;
+      if (!finished || ev.pointerId !== finished.pointerId) return;
+      clearHoldTimer();
+      clearPortfolioBarDrag();
+      if (!finished.armed) return;
+
+      if (
+        finished.moved ||
+        finished.deltaDays !== 0 ||
+        finished.pointerType !== 'mouse'
+      ) {
+        suppressNextClickRef.current = true;
+        window.setTimeout(() => {
+          suppressNextClickRef.current = false;
+        }, 80);
+      }
+
+      if (finished.deltaDays !== 0) {
+        const curLayout = layoutRef.current;
+        const pLane = curLayout.projectLanes.find(
+          (pl) => pl.project.id === finished.projectId
+        );
+        if (!pLane) return;
+        if (finished.kind === 'phase') {
+          const lane = pLane.projectLayout.lanes.find(
+            (l) => l.heading?.id === finished.id
+          );
+          if (lane && lane.heading) {
+            const shifted = shiftPhaseDatesByDays(lane.heading, finished.deltaDays, {
+              startEpoch: lane.startEpoch,
+              endEpoch: lane.endEpoch
+            });
+            void localDb.rescheduleRoadmapHeading(
+              lane.heading.id,
+              shifted.startDate,
+              shifted.endDate,
+              lane.heading.title || t.entityHeading
+            );
+          }
+        } else {
+          const plotted = pLane.projectLayout.plottedTasks.find(
+            (pt) => pt.task.id === finished.id
+          );
+          if (plotted) {
+            void localDb.rescheduleRoadmapTaskWithCascade(
+              plotted.task,
+              finished.deltaDays,
+              curLayout.todayEpoch
+            );
+          }
+        }
+      }
+    };
+
+    const onPointerCancel = (ev: PointerEvent) => {
+      const cur = barDragRef.current;
+      if (!cur || ev.pointerId !== cur.pointerId) return;
+      abortDrag();
+    };
+
+    const scrollEl = scrollRef.current;
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('blur', abortDrag);
+    scrollEl?.addEventListener('scroll', cancelIfUnarmed, { passive: true });
+    return () => {
+      clearHoldTimer();
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('blur', abortDrag);
+      scrollEl?.removeEventListener('scroll', cancelIfUnarmed);
+    };
+  }, [activeSessionKey, isFullScreen, clearPortfolioBarDrag, t.entityHeading]);
+
+  const cascadePreviewByProject = useMemo(() => {
+    const map = new Map<string, number>();
+    if (
+      isFullScreen ||
+      !barDrag ||
+      barDrag.kind !== 'task' ||
+      !barDrag.armed ||
+      barDrag.deltaDays === 0
+    ) {
+      return map;
+    }
+    const pLane = layout.projectLanes.find((pl) => pl.project.id === barDrag.projectId);
+    if (!pLane) return map;
+    const anchor = pLane.projectLayout.plottedTasks.find(
+      (pt) => pt.task.id === barDrag.id
+    );
+    if (!anchor) return map;
+    return computeCascadeDeltaPreviewMap(
+      anchor.task,
+      barDrag.deltaDays,
+      pLane.projectLayout.plottedTasks.map((pt) => pt.task),
+      layout.todayEpoch
+    );
+  }, [isFullScreen, barDrag, layout.projectLanes, layout.todayEpoch]);
+
+  const monthSpans = useMemo(() => {
+    const groups: Array<{ key: string; label: string; count: number }> = [];
+    const fmt = new Intl.DateTimeFormat(lang, { month: 'short', year: 'numeric' });
+    for (const d of layout.days) {
+      const key = `${d.year}-${d.monthIndex}`;
+      const prev = groups[groups.length - 1];
+      if (prev && prev.key === key) {
+        prev.count += 1;
+      } else {
+        groups.push({ key, label: fmt.format(new Date(d.epoch)), count: 1 });
+      }
+    }
+    return groups;
+  }, [layout.days, lang]);
+
+  const weekdayNarrow = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat(lang, { weekday: 'narrow' });
+    return layout.days.map((d) => fmt.format(new Date(d.epoch)));
+  }, [layout.days, lang]);
+
+  const rangeSummaryLabel = useMemo(() => {
+    const first = layout.days[0];
+    const last = layout.days[layout.days.length - 1];
+    if (!first || !last) return '';
+    return `${formatShortMonthDay(first.epoch, lang)} – ${formatShortMonthDay(last.epoch, lang)}`;
+  }, [layout.days, lang]);
+
+  const exportablePortfolioLayout = useMemo(
+    () => toExportablePortfolioLayout(layout, expandedProjectIds),
+    [layout, expandedProjectIds]
+  );
+
+  const openPortfolioPdfDialog = () => {
+    setExportMenuOpen(false);
+    setPdfSelectedLaneIds(exportablePortfolioLayout.lanes.map((l) => l.laneId));
+    setPdfTimelinePreset('auto');
+    setPdfCustomStartIso(toIsoDateInputValue(layout.windowStartEpoch));
+    setPdfCustomEndIso(toIsoDateInputValue(layout.windowEndEpoch));
+    setPdfOrientation('landscape');
+    setPdfDialogOpen(true);
+  };
+
+  const handleConfirmPortfolioPdf = () => {
+    if (pdfSelectedLaneIds.length === 0) return;
+    let resolvedStart = layout.windowStartEpoch;
+    let resolvedEnd = layout.windowEndEpoch;
+    if (pdfTimelinePreset === 'from_today') {
+      resolvedStart = layout.todayEpoch;
+      resolvedEnd = Math.max(layout.todayEpoch, layout.windowEndEpoch);
+    } else if (pdfTimelinePreset === 'next_30d') {
+      resolvedStart = layout.todayEpoch;
+      resolvedEnd = addDaysLocal(layout.todayEpoch, 29);
+    } else if (pdfTimelinePreset === 'custom') {
+      const parsedStart = fromIsoDateInputValue(pdfCustomStartIso) ?? layout.windowStartEpoch;
+      const parsedEnd = fromIsoDateInputValue(pdfCustomEndIso) ?? layout.windowEndEpoch;
+      resolvedStart = Math.min(parsedStart, parsedEnd);
+      resolvedEnd = Math.max(parsedStart, parsedEnd);
+    }
+    const exportSubtitle = `${formatShortMonthDay(resolvedStart, lang)} – ${formatShortMonthDay(resolvedEnd, lang)}`;
+    const bytes = generateRoadmapPdfBytes(
+      exportablePortfolioLayout,
+      area.title,
+      {
+        lang,
+        ungroupedTitle: t.projectUngroupedColumn,
+        todayLabel: t.viewToday,
+        unscheduledLabel: t.roadmapUnscheduledSection,
+        subtitle: exportSubtitle
+      },
+      {
+        orientation: pdfOrientation,
+        selectedLaneIds: pdfSelectedLaneIds,
+        startEpoch: resolvedStart,
+        endEpoch: resolvedEnd
+      }
+    );
+    setPdfDialogOpen(false);
+    downloadBlob(bytes, `${slugifyFilename(area.title)}-portfolio-roadmap.pdf`, 'application/pdf');
+    onToast?.(`✓ ${t.roadmapExportPdf}`);
+  };
+
+  const handleExportPortfolioPng = () => {
+    setExportMenuOpen(false);
+    const dataUrl = renderRoadmapToPngDataUrl(
+      exportablePortfolioLayout,
+      area.title,
+      {
+        lang,
+        ungroupedTitle: t.projectUngroupedColumn,
+        todayLabel: t.viewToday,
+        unscheduledLabel: t.roadmapUnscheduledSection,
+        subtitle: rangeSummaryLabel
+      },
+      isDark
+    );
+    downloadBlob(dataUrl, `${slugifyFilename(area.title)}-portfolio-roadmap.png`, 'image/png');
+    onToast?.(`✓ ${t.roadmapExportPng}`);
+  };
+
+  const todayRawOffset = localDaysBetween(layout.windowStartEpoch, layout.todayEpoch);
+  const showTodayLine = todayRawOffset >= 0 && todayRawOffset < layout.totalDays;
+
+  const { totalBodyHeight, svgConnectorPaths } = useMemo(() => {
+    const coords = new Map<string, { xLeft: number; xRight: number; yMid: number }>();
+    const paths: Array<{ key: string; d: string; isActivelyBlocking: boolean }> = [];
+    let yCursor = 0;
+
+    for (const pLane of layout.projectLanes) {
+      yCursor += PORTFOLIO_PROJECT_ROW_HEIGHT_PX;
+      const isExpanded = expandedProjectIds.has(pLane.project.id);
+      if (!isExpanded) continue;
+
+      for (const lane of pLane.projectLayout.lanes) {
+        const showLaneRow = lane.heading != null || lane.plottedTasks.length > 0;
+        if (!showLaneRow) continue;
+        if (lane.heading != null) {
+          yCursor += PORTFOLIO_PHASE_ROW_HEIGHT_PX;
+        }
+        for (const pt of lane.plottedTasks) {
+          const offsetDays = !isFullScreen
+            ? (cascadePreviewByProject.get(pt.task.id) ?? 0)
+            : 0;
+          const clampedS = Math.max(
+            0,
+            Math.min(layout.totalDays - 1, pt.startDayIndex + offsetDays)
+          );
+          const clampedE = Math.max(
+            clampedS,
+            Math.min(layout.totalDays - 1, pt.endDayIndex + offsetDays)
+          );
+          if (pt.isMilestone || pt.task.isMilestone) {
+            const cx = clampedS * dayWidth + dayWidth / 2;
+            coords.set(pt.task.id, {
+              xLeft: Math.max(2, cx - 10),
+              xRight: Math.min(timelineWidthPx - 2, cx + 10),
+              yMid: yCursor + TASK_ROW_HEIGHT_PX / 2
+            });
+          } else {
+            const barLeft = clampedS * dayWidth + 4;
+            const maxAvailW = Math.max(18, timelineWidthPx - barLeft - 4);
+            const barWidth = Math.min(
+              maxAvailW,
+              Math.max(18, (clampedE - clampedS + 1) * dayWidth - 8)
+            );
+            coords.set(pt.task.id, {
+              xLeft: barLeft,
+              xRight: barLeft + barWidth,
+              yMid: yCursor + TASK_ROW_HEIGHT_PX / 2
+            });
+          }
+          yCursor += TASK_ROW_HEIGHT_PX;
+        }
+      }
+
+      for (const edge of pLane.projectLayout.dependencyEdges) {
+        const src = coords.get(edge.fromTaskId);
+        const dst = coords.get(edge.toTaskId);
+        if (!src || !dst) continue;
+        const x1 = src.xRight;
+        const y1 = src.yMid;
+        const x2 = dst.xLeft;
+        const y2 = dst.yMid;
+        const cOffset = Math.max(22, Math.abs(x2 - x1) * 0.45);
+        paths.push({
+          key: `${pLane.project.id}:${edge.fromTaskId}->${edge.toTaskId}`,
+          d: `M ${x1} ${y1} C ${x1 + cOffset} ${y1}, ${x2 - cOffset} ${y2}, ${x2} ${y2}`,
+          isActivelyBlocking: edge.isActivelyBlocking
+        });
+      }
+    }
+
+    return {
+      totalBodyHeight: Math.max(PORTFOLIO_PROJECT_ROW_HEIGHT_PX, yCursor),
+      svgConnectorPaths: paths
+    };
+  }, [
+    layout.projectLanes,
+    layout.totalDays,
+    expandedProjectIds,
+    isFullScreen,
+    cascadePreviewByProject,
+    dayWidth,
+    timelineWidthPx
+  ]);
+
+  const zoomIdx = PORTFOLIO_ZOOM_ORDER.indexOf(zoom);
+
+  const toggleProjectExpand = (projId: string) => {
+    setExpandedProjectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(projId)) next.delete(projId);
+      else next.add(projId);
+      return next;
+    });
+  };
+
+  if (layout.projectLanes.length === 0 && layout.unscheduledProjects.length === 0) {
+    return (
+      <div className="empty-state" data-testid="area-portfolio-empty">
+        {t.v31AreaNoProjectsTimeline}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`project-roadmap-workspace area-portfolio-workspace ${
+        isFullScreen ? 'fullscreen' : ''
+      }`}
+      data-testid="area-portfolio-roadmap-workspace"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Toolbar: Expand All / Collapse All, Jump to Today, Zoom -/+, Full-Screen (F) */}
+      <div className="roadmap-toolbar">
+        <div className="roadmap-toolbar-left">
+          {isFullScreen && (
+            <span className="roadmap-fullscreen-title" title={area.title}>
+              {area.title}
+            </span>
+          )}
+          <span className="roadmap-range-pill">{rangeSummaryLabel}</span>
+
+          {layout.projectLanes.length > 0 && (
+            <>
+              <button
+                type="button"
+                className="chip-btn"
+                data-testid="area-portfolio-expand-all-btn"
+                onClick={() =>
+                  setExpandedProjectIds(
+                    new Set(layout.projectLanes.map((pl) => pl.project.id))
+                  )
+                }
+              >
+                <ChevronDown size={12.5} />
+                <span>{t.v31AreaExpandAll}</span>
+              </button>
+              <button
+                type="button"
+                className="chip-btn"
+                data-testid="area-portfolio-collapse-all-btn"
+                onClick={() => setExpandedProjectIds(new Set())}
+              >
+                <ChevronRight size={12.5} />
+                <span>{t.v31AreaCollapseAll}</span>
+              </button>
+            </>
+          )}
+
+          <button
+            type="button"
+            className="chip-btn"
+            data-testid="area-portfolio-jump-today-btn"
+            title={t.roadmapJumpToday}
+            onClick={() => jumpToToday(true)}
+          >
+            <Sun size={12.5} style={{ color: 'var(--today-star)' }} />
+            <span>{t.roadmapJumpToday}</span>
+          </button>
+
+          <div className="v31-portfolio-zoom-btns">
+            <button
+              type="button"
+              className="chip-btn"
+              data-testid="area-portfolio-zoom-out-btn"
+              title={t.attachmentsZoomOut}
+              aria-label={t.attachmentsZoomOut}
+              disabled={zoomIdx <= 0}
+              onClick={() => {
+                if (zoomIdx > 0) setZoom(PORTFOLIO_ZOOM_ORDER[zoomIdx - 1]);
+              }}
+            >
+              <Minus size={12} />
+            </button>
+            <button
+              type="button"
+              className="chip-btn"
+              data-testid="area-portfolio-zoom-in-btn"
+              title={t.attachmentsZoomIn}
+              aria-label={t.attachmentsZoomIn}
+              disabled={zoomIdx >= PORTFOLIO_ZOOM_ORDER.length - 1}
+              onClick={() => {
+                if (zoomIdx < PORTFOLIO_ZOOM_ORDER.length - 1) {
+                  setZoom(PORTFOLIO_ZOOM_ORDER[zoomIdx + 1]);
+                }
+              }}
+            >
+              <Plus size={12} />
+            </button>
+          </div>
+        </div>
+
+        <div className="roadmap-toolbar-right">
+          {!isFullScreen && layout.projectLanes.length > 0 && (
+            <div className="dropdown-anchor">
+              <button
+                type="button"
+                className="chip-btn active"
+                data-testid="area-portfolio-export-btn"
+                title={t.roadmapExport}
+                onClick={() => setExportMenuOpen((v) => !v)}
+              >
+                <Download size={12.5} />
+                <span>{t.roadmapExport}</span>
+              </button>
+
+              {exportMenuOpen && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 75 }}
+                    onClick={() => setExportMenuOpen(false)}
+                  />
+                  <div className="dropdown-popover" data-testid="area-portfolio-export-menu">
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="area-portfolio-export-pdf-btn"
+                      onClick={openPortfolioPdfDialog}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <FileText size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.roadmapExportPdf}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="area-portfolio-export-png-btn"
+                      onClick={handleExportPortfolioPng}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <FileImage size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.roadmapExportPng}</span>
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {onToggleFullScreen && (
+            <button
+              type="button"
+              className={`chip-btn ${isFullScreen ? 'active' : ''}`}
+              data-testid="area-portfolio-fullscreen-btn"
+              title={isFullScreen ? t.timelineExitFullscreen : t.timelineFullscreen}
+              onClick={() => {
+                clearPortfolioBarDrag();
+                setExportMenuOpen(false);
+                setPdfDialogOpen(false);
+                onToggleFullScreen();
+              }}
+            >
+              {isFullScreen ? <Minimize2 size={12.5} /> : <Maximize2 size={12.5} />}
+              <span>{isFullScreen ? t.timelineExitFullscreen : t.timelineFullscreen}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Gantt Grid (when at least 1 scheduled project exists) */}
+      {layout.projectLanes.length > 0 && (
+        <div ref={scrollRef} className="roadmap-canvas-scroll">
+          <div
+            className="roadmap-grid-inner"
+            style={{ width: LABEL_COL_WIDTH_PX + timelineWidthPx }}
+          >
+            <div className="roadmap-header-row">
+              <div
+                className="roadmap-sticky-label-header"
+                style={{ width: LABEL_COL_WIDTH_PX }}
+              >
+                <span>{t.entityProjects}</span>
+              </div>
+
+              <div className="roadmap-timeline-header" style={{ width: timelineWidthPx }}>
+                <div className="roadmap-months-row">
+                  {monthSpans.map((ms) => (
+                    <div
+                      key={ms.key}
+                      className="roadmap-month-cell"
+                      style={{ width: ms.count * dayWidth }}
+                    >
+                      {ms.label}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="roadmap-days-row">
+                  {layout.days.map((cell, idx) => (
+                    <div
+                      key={cell.isoDate}
+                      className={`roadmap-day-cell ${cell.isToday ? 'today' : ''} ${
+                        cell.isWeekend ? 'weekend' : ''
+                      }`}
+                      style={{ width: dayWidth }}
+                    >
+                      <span className="roadmap-day-dow">{weekdayNarrow[idx]}</span>
+                      <span className="roadmap-day-num">{cell.dayOfMonth}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="roadmap-body-wrap" style={{ minHeight: totalBodyHeight }}>
+              <div
+                className="roadmap-timeline-backdrop"
+                style={{
+                  left: LABEL_COL_WIDTH_PX,
+                  width: timelineWidthPx,
+                  height: totalBodyHeight
+                }}
+              >
+                {layout.days.map((cell) => (
+                  <div
+                    key={`bg-${cell.isoDate}`}
+                    className={`roadmap-bg-col ${cell.isWeekend ? 'weekend' : ''}`}
+                    style={{ left: cell.dayIndex * dayWidth, width: dayWidth }}
+                  />
+                ))}
+
+                {showTodayLine && (
+                  <div
+                    className="roadmap-today-line"
+                    style={{ left: todayRawOffset * dayWidth + dayWidth / 2 }}
+                  >
+                    <span className="roadmap-today-dot" />
+                  </div>
+                )}
+
+                {svgConnectorPaths.length > 0 && (
+                  <svg
+                    className="roadmap-dependency-svg"
+                    width={timelineWidthPx}
+                    height={totalBodyHeight}
+                  >
+                    <defs>
+                      <marker
+                        id="portfolio-arrow-blocking"
+                        viewBox="0 0 8 8"
+                        refX="7"
+                        refY="4"
+                        markerWidth="6"
+                        markerHeight="6"
+                        orient="auto-start-reverse"
+                      >
+                        <path d="M 0 1 L 7 4 L 0 7 z" fill="#EA580C" />
+                      </marker>
+                      <marker
+                        id="portfolio-arrow-resolved"
+                        viewBox="0 0 8 8"
+                        refX="7"
+                        refY="4"
+                        markerWidth="6"
+                        markerHeight="6"
+                        orient="auto-start-reverse"
+                      >
+                        <path d="M 0 1 L 7 4 L 0 7 z" fill="#64748B" />
+                      </marker>
+                    </defs>
+                    {svgConnectorPaths.map((edge) => (
+                      <path
+                        key={edge.key}
+                        d={edge.d}
+                        fill="none"
+                        stroke={edge.isActivelyBlocking ? '#EA580C' : '#64748B'}
+                        strokeWidth={edge.isActivelyBlocking ? 1.75 : 1.35}
+                        strokeDasharray={edge.isActivelyBlocking ? undefined : '4 3'}
+                        markerEnd={
+                          edge.isActivelyBlocking
+                            ? 'url(#portfolio-arrow-blocking)'
+                            : 'url(#portfolio-arrow-resolved)'
+                        }
+                      />
+                    ))}
+                  </svg>
+                )}
+              </div>
+
+              {layout.projectLanes.map((pLane) => {
+                const proj = pLane.project;
+                const isExpanded = expandedProjectIds.has(proj.id);
+                const summaryLeft = pLane.summaryStartDayIndex * dayWidth + 3;
+                const maxSummaryW = Math.max(18, timelineWidthPx - summaryLeft - 3);
+                const summaryWidth = Math.min(
+                  maxSummaryW,
+                  Math.max(22, pLane.spanDays * dayWidth - 6)
+                );
+                const summaryDateRange =
+                  pLane.summaryStartDay === pLane.summaryEndDay
+                    ? formatShortMonthDay(pLane.summaryStartDay, lang)
+                    : `${formatShortMonthDay(pLane.summaryStartDay, lang)} – ${formatShortMonthDay(
+                        pLane.summaryEndDay,
+                        lang
+                      )}`;
+
+                return (
+                  <React.Fragment key={proj.id}>
+                    {/* Project Summary Row */}
+                    <div
+                      className={`roadmap-lane-row area-portfolio-project-row ${
+                        isExpanded ? 'expanded' : ''
+                      }`}
+                      style={{
+                        height: PORTFOLIO_PROJECT_ROW_HEIGHT_PX,
+                        minHeight: PORTFOLIO_PROJECT_ROW_HEIGHT_PX
+                      }}
+                      data-testid={`area-portfolio-project-row-${proj.id}`}
+                    >
+                      <div
+                        className="roadmap-sticky-cell lane-cell area-portfolio-sticky-cell"
+                        style={{ width: LABEL_COL_WIDTH_PX }}
+                      >
+                        <button
+                          type="button"
+                          className="area-portfolio-chevron-btn"
+                          data-testid={`area-portfolio-chevron-${proj.id}`}
+                          aria-expanded={isExpanded}
+                          onClick={() => toggleProjectExpand(proj.id)}
+                        >
+                          <span>{isExpanded ? '▾' : '▸'}</span>
+                        </button>
+
+                        <ProjectProgressRing
+                          completed={pLane.completedCount}
+                          total={pLane.totalCount}
+                          size={16}
+                        />
+
+                        <button
+                          type="button"
+                          className="area-portfolio-proj-title-btn"
+                          title={proj.title}
+                          onClick={() => toggleProjectExpand(proj.id)}
+                        >
+                          {proj.title}
+                        </button>
+
+                        <span className="area-portfolio-proj-count">
+                          {pLane.completedCount}/{pLane.totalCount}
+                        </span>
+
+                        {!isFullScreen && (
+                          <button
+                            type="button"
+                            className="icon-btn area-portfolio-open-btn"
+                            data-testid={`area-portfolio-open-project-${proj.id}`}
+                            title={t.v31AreaOpenProject}
+                            aria-label={t.v31AreaOpenProject}
+                            onClick={() => onOpenProject(proj.id)}
+                          >
+                            <ArrowUpRight size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      <div
+                        className="roadmap-track-cell"
+                        style={{ width: timelineWidthPx }}
+                      >
+                        <div
+                          className="area-portfolio-summary-bar"
+                          data-testid={`area-portfolio-summary-bar-${proj.id}`}
+                          title={`${proj.title} · ${summaryDateRange}`}
+                          style={{
+                            left: summaryLeft,
+                            width: summaryWidth
+                          }}
+                          onClick={() => toggleProjectExpand(proj.id)}
+                        >
+                          {summaryWidth >= 110 && (
+                            <span className="area-portfolio-summary-label">
+                              {proj.title}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Overlaid 45° Royal-Violet Milestone Diamonds (◆) when collapsed */}
+                        {!isExpanded &&
+                          pLane.milestoneBars.map((ms) => {
+                            const msLeft = Math.max(
+                              2,
+                              ms.startDayIndex * dayWidth + dayWidth / 2 - 7.5
+                            );
+                            const msTip = `◆ ${
+                              ms.task.title || t.placeholderTodoTitle
+                            } · ${formatShortMonthDay(ms.startEpoch, lang)}`;
+                            return (
+                              <span
+                                key={`collapsed-ms-${ms.task.id}`}
+                                className={`roadmap-milestone-diamond area-portfolio-collapsed-diamond ${
+                                  ms.task.status === 'COMPLETED' ? 'completed' : ''
+                                }`}
+                                data-testid={`area-portfolio-collapsed-milestone-${ms.task.id}`}
+                                title={msTip}
+                                style={{ left: msLeft }}
+                              />
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    {/* Expanded Project Phases & Tasks */}
+                    {isExpanded &&
+                      pLane.projectLayout.lanes.map((lane) => {
+                        const hd = lane.heading;
+                        const showLaneRow = hd != null || lane.plottedTasks.length > 0;
+                        if (!showLaneRow) return null;
+
+                        const phaseDragDelta =
+                          !isFullScreen &&
+                          hd &&
+                          barDrag?.projectId === proj.id &&
+                          barDrag.kind === 'phase' &&
+                          barDrag.id === hd.id &&
+                          barDrag.armed
+                            ? barDrag.deltaDays
+                            : 0;
+
+                        let phaseBarGeom: { leftPx: number; widthPx: number } | null = null;
+                        if (hd && lane.startEpoch != null && lane.endEpoch != null) {
+                          const shiftedS = addDaysLocal(lane.startEpoch, phaseDragDelta);
+                          const shiftedE = addDaysLocal(lane.endEpoch, phaseDragDelta);
+                          if (
+                            shiftedE >= layout.windowStartEpoch &&
+                            shiftedS <= layout.windowEndEpoch
+                          ) {
+                            const visS = Math.max(layout.windowStartEpoch, shiftedS);
+                            const visE = Math.min(layout.windowEndEpoch, shiftedE);
+                            const sIdx = Math.max(
+                              0,
+                              Math.min(
+                                layout.totalDays - 1,
+                                localDaysBetween(layout.windowStartEpoch, visS)
+                              )
+                            );
+                            const eIdx = Math.max(
+                              sIdx,
+                              Math.min(
+                                layout.totalDays - 1,
+                                localDaysBetween(layout.windowStartEpoch, visE)
+                              )
+                            );
+                            const leftPx = sIdx * dayWidth + 3;
+                            const maxW = Math.max(14, timelineWidthPx - leftPx - 3);
+                            phaseBarGeom = {
+                              leftPx,
+                              widthPx: Math.min(maxW, Math.max(20, (eIdx - sIdx + 1) * dayWidth - 6))
+                            };
+                          }
+                        }
+
+                        return (
+                          <React.Fragment key={`${proj.id}:${lane.laneId}`}>
+                            {hd != null && (
+                              <div
+                                className="roadmap-lane-row area-portfolio-phase-subrow"
+                                style={{
+                                  height: PORTFOLIO_PHASE_ROW_HEIGHT_PX,
+                                  minHeight: PORTFOLIO_PHASE_ROW_HEIGHT_PX
+                                }}
+                              >
+                                <div
+                                  className="roadmap-sticky-cell lane-cell area-portfolio-phase-cell"
+                                  style={{ width: LABEL_COL_WIDTH_PX }}
+                                >
+                                  <span className="board-column-accent" />
+                                  <span className="roadmap-lane-title">
+                                    {hd.title || t.entityHeading}
+                                  </span>
+                                </div>
+
+                                <div
+                                  className="roadmap-track-cell"
+                                  style={{ width: timelineWidthPx }}
+                                >
+                                  {phaseBarGeom && (
+                                    <div
+                                      className={`roadmap-phase-bar ${
+                                        lane.isInferred ? 'inferred' : ''
+                                      } ${phaseDragDelta !== 0 ? 'dragging' : ''}`}
+                                      style={{
+                                        top: 7,
+                                        left: phaseBarGeom.leftPx,
+                                        width: phaseBarGeom.widthPx,
+                                        cursor: isFullScreen ? 'default' : undefined
+                                      }}
+                                      onPointerDown={(e) => {
+                                        if (isFullScreen) return;
+                                        if (e.pointerType === 'mouse' && e.button !== 0) return;
+                                        e.stopPropagation();
+                                        suppressNextClickRef.current = false;
+                                        beginPortfolioBarDrag(e.currentTarget, {
+                                          projectId: proj.id,
+                                          kind: 'phase',
+                                          id: hd.id,
+                                          pointerId: e.pointerId,
+                                          pointerType: e.pointerType || 'mouse',
+                                          startClientX: e.clientX,
+                                          startClientY: e.clientY,
+                                          armed: false,
+                                          deltaDays: 0,
+                                          moved: false
+                                        });
+                                      }}
+                                    >
+                                      <span className="roadmap-phase-bar-label">
+                                        {hd.title || t.entityHeading}
+                                      </span>
+                                      {phaseDragDelta !== 0 && (
+                                        <span className="roadmap-drag-delta-pill">
+                                          {phaseDragDelta > 0
+                                            ? `+${phaseDragDelta}d`
+                                            : `${phaseDragDelta}d`}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {lane.plottedTasks.map((pt) => {
+                              const tk = pt.task;
+                              const isSelected = !isFullScreen && selectedTaskIds.includes(tk.id);
+                              const taskDragDelta = !isFullScreen
+                                ? (cascadePreviewByProject.get(tk.id) ?? 0)
+                                : 0;
+                              const isCascaded =
+                                taskDragDelta !== 0 &&
+                                !(barDrag?.kind === 'task' && barDrag.id === tk.id);
+                              const clampedS = Math.max(
+                                0,
+                                Math.min(layout.totalDays - 1, pt.startDayIndex + taskDragDelta)
+                              );
+                              const clampedE = Math.max(
+                                clampedS,
+                                Math.min(layout.totalDays - 1, pt.endDayIndex + taskDragDelta)
+                              );
+                              const barLeft = clampedS * dayWidth + 4;
+                              const maxW = Math.max(18, timelineWidthPx - barLeft - 4);
+                              const barWidth = Math.min(
+                                maxW,
+                                Math.max(22, (clampedE - clampedS + 1) * dayWidth - 8)
+                              );
+                              const isMilestoneTask = Boolean(pt.isMilestone || tk.isMilestone);
+                              const milestoneLeft = Math.max(
+                                2,
+                                clampedS * dayWidth + dayWidth / 2 - 8
+                              );
+
+                              return (
+                                <div
+                                  key={tk.id}
+                                  className={`roadmap-task-row ${isSelected ? 'selected' : ''}`}
+                                  style={{ height: TASK_ROW_HEIGHT_PX }}
+                                  data-testid={`area-portfolio-task-row-${tk.id}`}
+                                >
+                                  <div
+                                    className="roadmap-sticky-cell task-cell area-portfolio-task-cell"
+                                    style={{ width: LABEL_COL_WIDTH_PX }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isFullScreen) return;
+                                      if (e.shiftKey) {
+                                        onSelectTask(tk.id, true, true);
+                                      } else if (e.ctrlKey || e.metaKey || isMultiSelectMode) {
+                                        onSelectTask(tk.id, true, false);
+                                      } else {
+                                        onSelectTask(tk.id, false, false);
+                                      }
+                                    }}
+                                    onDoubleClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isFullScreen) return;
+                                      onOpenTaskEditor(tk.id);
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      className={`things-checkbox ${
+                                        isMilestoneTask ? 'milestone' : ''
+                                      } ${tk.status === 'COMPLETED' ? 'completed checked' : ''}`}
+                                      disabled={isFullScreen}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isFullScreen) return;
+                                        void localDb.upsertTask({
+                                          id: tk.id,
+                                          status: tk.status === 'COMPLETED' ? 'OPEN' : 'COMPLETED'
+                                        });
+                                      }}
+                                    >
+                                      {tk.status === 'COMPLETED' && (
+                                        <Check size={11.5} strokeWidth={3} />
+                                      )}
+                                    </button>
+                                    <span
+                                      className={`roadmap-task-label ${
+                                        tk.status === 'COMPLETED' ? 'done' : ''
+                                      }`}
+                                      style={
+                                        isMilestoneTask && tk.status !== 'COMPLETED'
+                                          ? { color: 'var(--milestone-violet)', fontWeight: 620 }
+                                          : undefined
+                                      }
+                                    >
+                                      {isMilestoneTask
+                                        ? `◆ ${tk.title || t.placeholderTodoTitle}`
+                                        : tk.title || t.placeholderTodoTitle}
+                                    </span>
+
+                                    {!isFullScreen && (
+                                      <div className="roadmap-cell-quick-btns">
+                                        <button
+                                          type="button"
+                                          className="roadmap-step-btn"
+                                          title={t.roadmapShiftEarlier}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            void localDb.rescheduleRoadmapTaskWithCascade(
+                                              tk,
+                                              -1,
+                                              layout.todayEpoch
+                                            );
+                                          }}
+                                        >
+                                          <ChevronLeft size={11.5} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="roadmap-step-btn"
+                                          title={t.roadmapShiftLater}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            void localDb.rescheduleRoadmapTaskWithCascade(
+                                              tk,
+                                              1,
+                                              layout.todayEpoch
+                                            );
+                                          }}
+                                        >
+                                          <ChevronRight size={11.5} />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div
+                                    className="roadmap-track-cell"
+                                    style={{ width: timelineWidthPx }}
+                                  >
+                                    <div
+                                      className={`roadmap-task-bar ${
+                                        isMilestoneTask ? 'milestone' : ''
+                                      } ${pt.isActivelyBlocked ? 'blocked' : ''} ${
+                                        isSelected ? 'selected' : ''
+                                      } ${taskDragDelta !== 0 ? 'dragging' : ''} ${
+                                        isCascaded ? 'cascaded' : ''
+                                      }`}
+                                      data-testid={`area-portfolio-task-bar-${tk.id}`}
+                                      style={
+                                        isMilestoneTask
+                                          ? {
+                                              left: milestoneLeft,
+                                              cursor: isFullScreen ? 'default' : undefined
+                                            }
+                                          : {
+                                              left: barLeft,
+                                              width: barWidth,
+                                              cursor: isFullScreen ? 'default' : undefined
+                                            }
+                                      }
+                                      onPointerDown={(e) => {
+                                        if (isFullScreen) return;
+                                        if (e.pointerType === 'mouse' && e.button !== 0) return;
+                                        e.stopPropagation();
+                                        suppressNextClickRef.current = false;
+                                        beginPortfolioBarDrag(e.currentTarget, {
+                                          projectId: proj.id,
+                                          kind: 'task',
+                                          id: tk.id,
+                                          pointerId: e.pointerId,
+                                          pointerType: e.pointerType || 'mouse',
+                                          startClientX: e.clientX,
+                                          startClientY: e.clientY,
+                                          armed: false,
+                                          deltaDays: 0,
+                                          moved: false
+                                        });
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isFullScreen) return;
+                                        if (suppressNextClickRef.current) {
+                                          suppressNextClickRef.current = false;
+                                          return;
+                                        }
+                                        onSelectTask(tk.id, false, false);
+                                      }}
+                                      onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isFullScreen) return;
+                                        clearPortfolioBarDrag();
+                                        onOpenTaskEditor(tk.id);
+                                      }}
+                                    >
+                                      {isMilestoneTask ? (
+                                        <>
+                                          <span
+                                            className={`roadmap-milestone-diamond ${
+                                              tk.status === 'COMPLETED' ? 'completed' : ''
+                                            }`}
+                                            aria-hidden="true"
+                                          />
+                                          <span
+                                            className={`roadmap-milestone-label ${
+                                              tk.status === 'COMPLETED' ? 'done' : ''
+                                            }`}
+                                          >
+                                            <span>◆ {tk.title || t.placeholderTodoTitle}</span>
+                                          </span>
+                                          {taskDragDelta !== 0 && (
+                                            <span className="roadmap-drag-delta-pill">
+                                              {taskDragDelta > 0
+                                                ? `+${taskDragDelta}d`
+                                                : `${taskDragDelta}d`}
+                                            </span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="roadmap-task-bar-title">
+                                            {tk.title || t.placeholderTodoTitle}
+                                          </span>
+                                          {taskDragDelta !== 0 && (
+                                            <span className="roadmap-drag-delta-pill">
+                                              {taskDragDelta > 0
+                                                ? `+${taskDragDelta}d`
+                                                : `${taskDragDelta}d`}
+                                            </span>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unscheduled Projects Tray Footer */}
+      {!isFullScreen && layout.unscheduledProjects.length > 0 && (
+        <section
+          className="roadmap-unscheduled-tray"
+          data-testid="area-portfolio-unscheduled-tray"
+        >
+          <div className="roadmap-unscheduled-header">
+            <div className="roadmap-unscheduled-title-group">
+              <span className="roadmap-unscheduled-title">
+                {t.v31AreaUnscheduledProjects} ({layout.unscheduledProjects.length})
+              </span>
+            </div>
+          </div>
+
+          <div className="roadmap-unscheduled-list">
+            {layout.unscheduledProjects.map((proj) => {
+              const projTasks = allTasks.filter(
+                (tk) => !tk.isDeleted && tk.status !== 'CANCELED' && tk.projectId === proj.id
+              );
+              const doneCount = projTasks.filter((tk) => tk.status === 'COMPLETED').length;
+              return (
+                <div
+                  key={`unsch-proj-${proj.id}`}
+                  className="roadmap-unscheduled-item"
+                  data-testid={`area-portfolio-unscheduled-project-${proj.id}`}
+                >
+                  <div className="roadmap-unscheduled-item-left">
+                    <ProjectProgressRing
+                      completed={doneCount}
+                      total={projTasks.length}
+                      size={16}
+                    />
+                    <button
+                      type="button"
+                      className="roadmap-unscheduled-task-btn"
+                      onClick={() => onOpenProject(proj.id)}
+                    >
+                      {proj.title}
+                    </button>
+                    <span className="meta-badge">
+                      {doneCount}/{projTasks.length}
+                    </span>
+                  </div>
+
+                  <div className="roadmap-unscheduled-actions">
+                    {onOpenProjectDeadlineModal && (
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        onClick={() => onOpenProjectDeadlineModal(proj.id)}
+                      >
+                        <Flag size={11.5} />
+                        <span>{t.targetDate}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="chip-btn"
+                      title={t.v31AreaOpenProject}
+                      onClick={() => onOpenProject(proj.id)}
+                    >
+                      <ArrowUpRight size={12} />
+                      <span>{t.v31AreaOpenProject}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {!isFullScreen && pdfDialogOpen && (
+        <div
+          className="modal-backdrop"
+          style={{ zIndex: 140 }}
+          onClick={() => setPdfDialogOpen(false)}
+        >
+          <div
+            className="modal-card pdf-export-modal"
+            data-testid="area-portfolio-pdf-dialog"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div className="pdf-export-modal-title-group">
+                <FileText size={18} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+                <h3 className="modal-title">{t.pdfExportDialogTitle}</h3>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ height: 28, minWidth: 28, padding: 0 }}
+                aria-label={t.actionCancel}
+                onClick={() => setPdfDialogOpen(false)}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="pdf-export-section">
+              <div className="pdf-export-section-header">
+                <span className="pdf-export-section-label">{t.entityProjects}</span>
+                <button
+                  type="button"
+                  className="pdf-select-all-btn"
+                  onClick={() =>
+                    setPdfSelectedLaneIds(exportablePortfolioLayout.lanes.map((l) => l.laneId))
+                  }
+                >
+                  {t.pdfSelectAllPhases}
+                </button>
+              </div>
+
+              <div className="pdf-phases-checklist">
+                {exportablePortfolioLayout.lanes.map((lane) => {
+                  const checked = pdfSelectedLaneIds.includes(lane.laneId);
+                  return (
+                    <label
+                      key={lane.laneId}
+                      className={`pdf-phase-checkbox-row ${checked ? 'checked' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const nextChecked = e.target.checked;
+                          setPdfSelectedLaneIds((prev) =>
+                            nextChecked
+                              ? Array.from(new Set([...prev, lane.laneId]))
+                              : prev.filter((id) => id !== lane.laneId)
+                          );
+                        }}
+                      />
+                      <span className="board-column-accent" />
+                      <span className="pdf-phase-option-title">{lane.title}</span>
+                      <span className="board-column-count">{lane.totalCount}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pdf-export-section">
+              <div className="pdf-export-section-header">
+                <span className="pdf-export-section-label">{t.pdfTimelineLabel}</span>
+              </div>
+              <div className="pdf-timeline-presets">
+                {(
+                  [
+                    ['auto', t.pdfTimelineAuto],
+                    ['from_today', t.pdfTimelineFromToday],
+                    ['next_30d', t.pdfTimelineNext30d],
+                    ['custom', t.pdfTimelineCustom]
+                  ] as Array<[RoadmapPdfTimelinePreset, string]>
+                ).map(([presetKey, presetLabel]) => (
+                  <button
+                    key={presetKey}
+                    type="button"
+                    className={`chip-btn ${pdfTimelinePreset === presetKey ? 'active' : ''}`}
+                    onClick={() => setPdfTimelinePreset(presetKey)}
+                  >
+                    <span>{presetLabel}</span>
+                  </button>
+                ))}
+              </div>
+              {pdfTimelinePreset === 'custom' && (
+                <div className="pdf-custom-dates-grid">
+                  <label className="pdf-custom-date-field">
+                    <span className="pdf-custom-date-caption">{t.phaseSetStartDate}</span>
+                    <input
+                      type="date"
+                      className="text-field"
+                      value={pdfCustomStartIso}
+                      onChange={(e) => setPdfCustomStartIso(e.target.value)}
+                    />
+                  </label>
+                  <label className="pdf-custom-date-field">
+                    <span className="pdf-custom-date-caption">{t.phaseSetEndDate}</span>
+                    <input
+                      type="date"
+                      className="text-field"
+                      value={pdfCustomEndIso}
+                      onChange={(e) => setPdfCustomEndIso(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+
+            <div className="pdf-export-section">
+              <div className="pdf-export-section-header">
+                <span className="pdf-export-section-label">{t.pdfOrientationLabel}</span>
+              </div>
+              <div className="pdf-orientation-grid">
+                <button
+                  type="button"
+                  className={`pdf-orientation-card ${pdfOrientation === 'landscape' ? 'active' : ''}`}
+                  onClick={() => setPdfOrientation('landscape')}
+                >
+                  <span className="pdf-page-preview landscape" aria-hidden="true" />
+                  <span className="pdf-orientation-texts">
+                    <span className="pdf-orientation-name">{t.pdfOrientationLandscape}</span>
+                    <span className="pdf-orientation-dim">A4 · 842 × 595 pt</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`pdf-orientation-card ${pdfOrientation === 'portrait' ? 'active' : ''}`}
+                  onClick={() => setPdfOrientation('portrait')}
+                >
+                  <span className="pdf-page-preview portrait" aria-hidden="true" />
+                  <span className="pdf-orientation-texts">
+                    <span className="pdf-orientation-name">{t.pdfOrientationPortrait}</span>
+                    <span className="pdf-orientation-dim">A4 · 595 × 842 pt</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div className="pdf-export-modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setPdfDialogOpen(false)}
+              >
+                {t.actionCancel}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={pdfSelectedLaneIds.length === 0}
+                onClick={handleConfirmPortfolioPdf}
+              >
+                <Download size={13.5} />
+                <span>{t.roadmapExportPdf}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -2408,6 +2408,84 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         notifyMutation()
     }
 
+    @discardableResult
+    public func applyCascadedTaskShifts(
+        _ shifts: [CascadedTaskShift]
+    ) throws -> [TaskPlacementSnapshot] {
+        guard !shifts.isEmpty else { return [] }
+        let snapshots = try queue.sync { () -> [TaskPlacementSnapshot] in
+            let now = nowMillis()
+            return try inTransactionLocked {
+                let tagIdsByTask = try fetchAllTaskTagIdsLocked()
+                var captured: [TaskPlacementSnapshot] = []
+                for (idx, shift) in shifts.enumerated() {
+                    guard let existing = try fetchTaskByIdLocked(shift.task.id) else { continue }
+                    let rawTags = tagIdsByTask[existing.id] ?? existing.tagIds
+                    captured.append(
+                        TaskPlacementSnapshot(
+                            task: existing,
+                            tagIds: rawTags,
+                            wasDeleted: existing.isDeleted
+                        )
+                    )
+                    var updated = existing
+                    updated.scheduleState = shift.nextScheduleState
+                    updated.whenDate = shift.nextWhenMillis
+                    updated.deadline = shift.nextDeadlineMillis
+                    updated.updatedAt = max(now + Int64(idx), existing.updatedAt + 1)
+                    try upsertTaskLocked(updated, tagIds: rawTags, isDirty: true)
+                }
+                return captured
+            }
+        }
+        if !snapshots.isEmpty { notifyMutation() }
+        return snapshots
+    }
+
+    @discardableResult
+    public func applyBatchTaskTimeblocks(
+        _ updates: [(taskId: String, startMinutes: Int?, durationMinutes: Int?)],
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> [TaskPlacementSnapshot] {
+        guard !updates.isEmpty else { return [] }
+        let todayEpoch = DateEpochConverter.startOfDayMillis(for: referenceDate, calendar: calendar)
+        let snapshots = try queue.sync { () -> [TaskPlacementSnapshot] in
+            let now = nowMillis()
+            return try inTransactionLocked {
+                let tagIdsByTask = try fetchAllTaskTagIdsLocked()
+                var captured: [TaskPlacementSnapshot] = []
+                for (idx, item) in updates.enumerated() {
+                    guard let existing = try fetchTaskByIdLocked(item.taskId), !existing.isDeleted else { continue }
+                    let rawTags = tagIdsByTask[existing.id] ?? existing.tagIds
+                    captured.append(
+                        TaskPlacementSnapshot(
+                            task: existing,
+                            tagIds: rawTags,
+                            wasDeleted: existing.isDeleted
+                        )
+                    )
+                    let cleanStart = item.startMinutes.map { min(1439, max(0, $0)) }
+                    let cleanDur = item.durationMinutes.flatMap { $0 > 0 ? min(48_000, max(5, $0)) : nil }
+                    var updated = existing
+                    if cleanStart != nil && (existing.scheduleState == .inbox || existing.scheduleState == .anytime || existing.scheduleState == .someday) {
+                        updated.scheduleState = .today
+                    }
+                    if cleanStart != nil && existing.whenDate == nil {
+                        updated.whenDate = todayEpoch
+                    }
+                    updated.scheduledStartMinutes = cleanStart
+                    updated.durationMinutes = cleanDur
+                    updated.updatedAt = max(now + Int64(idx), existing.updatedAt + 1)
+                    try upsertTaskLocked(updated, tagIds: rawTags, isDirty: true)
+                }
+                return captured
+            }
+        }
+        if !snapshots.isEmpty { notifyMutation() }
+        return snapshots
+    }
+
     // MARK: - Checklist Mutations
 
     @discardableResult
@@ -2701,6 +2779,201 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
         notifyMutation()
         return proj
+    }
+
+    @discardableResult
+    public func createProjectFromBlueprint(
+        _ blueprint: ProjectBlueprintResponse,
+        areaId: String? = nil,
+        languageCode: String = "en",
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> Project {
+        let defaultProjTitle: String = {
+            switch languageCode {
+            case "de": return "Neues Projekt"
+            case "fr": return "Nouveau projet"
+            case "it": return "Nuovo progetto"
+            case "es": return "Nuevo proyecto"
+            default:   return "New Project"
+            }
+        }()
+        let sectionPrefix: String = {
+            switch languageCode {
+            case "de": return "Abschnitt"
+            case "fr": return "Section"
+            case "it": return "Sezione"
+            case "es": return "Sección"
+            default:   return "Section"
+            }
+        }()
+
+        let trimmedTitle = blueprint.projectTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = trimmedTitle.isEmpty ? defaultProjTitle : trimmedTitle
+        let sodToday = calendar.startOfDay(for: referenceDate)
+        let todayEpoch = DateEpochConverter.startOfDayMillis(for: sodToday, calendar: calendar)
+
+        func dayOffsetMillis(_ offsetDays: Int) -> Int64 {
+            let clamped = min(365, max(0, offsetDays))
+            let targetDate = calendar.date(byAdding: .day, value: clamped, to: sodToday)
+                ?? sodToday.addingTimeInterval(Double(clamped) * 86_400.0)
+            return DateEpochConverter.startOfDayMillis(for: targetDate, calendar: calendar)
+        }
+
+        let maxEndOffset: Int = blueprint.headings.compactMap { h in
+            h.endDayOffset ?? h.richTasks.map(\.dayOffset).max()
+        }.max() ?? 10
+
+        let createdProject = try queue.sync { () -> Project in
+            let now = nowMillis()
+            let maxOrd = try maxSortOrderLocked(table: "projects")
+            let project = Project(
+                id: UUID().uuidString,
+                areaId: areaId,
+                title: resolvedTitle,
+                notes: blueprint.projectNotes,
+                status: .active,
+                scheduleState: .today,
+                whenDate: todayEpoch,
+                deadline: dayOffsetMillis(max(1, maxEndOffset)),
+                lastReviewedAt: now,
+                sortOrder: maxOrd + 1000.0,
+                tagIds: [],
+                viewMode: "roadmap",
+                createdAt: now,
+                updatedAt: now
+            )
+
+            try inTransactionLocked {
+                try upsertProjectLocked(project, isDirty: true)
+
+                var taskIdByKey: [String: String] = [:]
+                struct PendingBlueprintTask {
+                    let id: String
+                    let headingId: String
+                    let hIndex: Int
+                    let tIndex: Int
+                    let dto: RoadmapTaskBlueprintDTO
+                }
+                var pendingTasks: [PendingBlueprintTask] = []
+
+                for (hIndex, headingDto) in blueprint.headings.enumerated() {
+                    let headingId = UUID().uuidString
+                    let nonBlankRich = headingDto.richTasks.filter {
+                        !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                    let richList: [RoadmapTaskBlueprintDTO]
+                    if !nonBlankRich.isEmpty {
+                        richList = nonBlankRich
+                    } else {
+                        let cleanPlain = headingDto.tasks
+                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty }
+                        richList = cleanPlain.enumerated().map { tIdx, tTitle in
+                            RoadmapTaskBlueprintDTO(
+                                key: "h\(hIndex)_t\(tIdx)",
+                                title: tTitle,
+                                dayOffset: hIndex * 4 + tIdx,
+                                durationMinutes: 120,
+                                effortLevel: "MEDIUM",
+                                isMilestone: (hIndex == blueprint.headings.count - 1 && tIdx == cleanPlain.count - 1)
+                            )
+                        }
+                    }
+
+                    let startOff = headingDto.startDayOffset ?? richList.map(\.dayOffset).min() ?? (hIndex * 4)
+                    let endOff = max(startOff, headingDto.endDayOffset ?? richList.map(\.dayOffset).max() ?? (startOff + 3))
+                    let cleanHeadingTitle = headingDto.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let heading = Heading(
+                        id: headingId,
+                        projectId: project.id,
+                        title: cleanHeadingTitle.isEmpty ? "\(sectionPrefix) \(hIndex + 1)" : cleanHeadingTitle,
+                        sortOrder: Double(hIndex + 1) * 1000.0,
+                        isArchived: false,
+                        startDate: dayOffsetMillis(startOff),
+                        endDate: dayOffsetMillis(endOff),
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                    try upsertHeadingLocked(heading, isDirty: true)
+
+                    for (tIndex, rTask) in richList.enumerated() {
+                        let newTaskId = UUID().uuidString
+                        let cleanKey = rTask.key.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !cleanKey.isEmpty {
+                            taskIdByKey[cleanKey] = newTaskId
+                        }
+                        pendingTasks.append(
+                            PendingBlueprintTask(
+                                id: newTaskId,
+                                headingId: headingId,
+                                hIndex: hIndex,
+                                tIndex: tIndex,
+                                dto: rTask
+                            )
+                        )
+                    }
+                }
+
+                for pt in pendingTasks {
+                    let r = pt.dto
+                    let safeOffset = min(365, max(0, r.dayOffset))
+                    let itemMillis = dayOffsetMillis(safeOffset)
+                    let schedState: ScheduleState = (safeOffset == 0) ? .today : .upcoming
+                    var seenBlockers = Set<String>()
+                    var resolvedBlockers: [String] = []
+                    for depKey in r.dependsOnKeys {
+                        let trimmedKey = depKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let bid = taskIdByKey[trimmedKey], bid != pt.id, seenBlockers.insert(bid).inserted {
+                            resolvedBlockers.append(bid)
+                        }
+                    }
+                    let normEffort = TaskEffortLevel.normalized(r.effortLevel)?.rawValue ?? "MEDIUM"
+                    let safeDur = min(48_000, max(15, r.durationMinutes))
+
+                    let taskItem = TaskItem(
+                        id: pt.id,
+                        title: r.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        notes: r.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                        status: .open,
+                        scheduleState: schedState,
+                        whenDate: itemMillis,
+                        deadline: r.isMilestone ? itemMillis : nil,
+                        durationMinutes: safeDur,
+                        projectId: project.id,
+                        headingId: pt.headingId,
+                        areaId: areaId,
+                        sortOrder: Double(pt.hIndex + 1) * 1000.0 + Double(pt.tIndex + 1) * 100.0,
+                        isPinned: false,
+                        isMilestone: r.isMilestone,
+                        effortLevel: normEffort,
+                        blockedByTaskIds: resolvedBlockers,
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                    try upsertTaskLocked(taskItem, tagIds: [], isDirty: true)
+
+                    let cleanChecks = r.checklist
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                    for (cIdx, cTitle) in cleanChecks.enumerated() {
+                        let chk = ChecklistItem(
+                            id: UUID().uuidString,
+                            taskId: pt.id,
+                            title: cTitle,
+                            isCompleted: false,
+                            sortOrder: Double(cIdx + 1) * 100.0,
+                            createdAt: now,
+                            updatedAt: now
+                        )
+                        try upsertChecklistItemLocked(chk, isDirty: true)
+                    }
+                }
+            }
+            return project
+        }
+        notifyMutation()
+        return createdProject
     }
 
     public func updateProject(_ project: Project) throws {
@@ -4783,7 +5056,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 includeBetaUpdates: preferences.includeBetaUpdates,
                 tagSortMode: preferences.tagSortMode,
                 viewSortMode: preferences.viewSortMode,
-                savedPerspectivesJson: encodedPerspectivesJson
+                savedPerspectivesJson: encodedPerspectivesJson,
+                workdayStartMinutes: preferences.workdayStartMinutes,
+                workdayEndMinutes: preferences.workdayEndMinutes
             )
 
             return ThingsbookBackupPayload(

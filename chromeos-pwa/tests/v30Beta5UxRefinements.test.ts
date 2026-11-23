@@ -8,7 +8,7 @@ import { TRANSLATIONS } from '../src/i18n/translations.ts';
 const SRC_DIR = path.resolve(import.meta.dirname, '../src');
 
 test('v3.0.1 build constants and localized UX strings exist across all 5 languages', () => {
-  assert.ok(APP_VERSION.startsWith('3.0.'));
+  assert.ok(APP_VERSION.startsWith('3.'));
   assert.ok(APP_BUILD_CODE >= 112);
 
   for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {

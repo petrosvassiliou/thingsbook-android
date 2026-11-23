@@ -409,11 +409,11 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.0.1")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.0.1")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 112)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.1.0")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.1.0")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 113)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.1", current: "3.0.0"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.1.0", current: "3.0.1"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -5948,5 +5948,427 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(todayTip.contains("09:00–13:00"))
         XCTAssertTrue(todayTip.contains("4h"))
         XCTAssertTrue(todayTip.contains("Platform 3.0"))
+    }
+
+    // MARK: - 44. v3.1 Smart Push-on-Conflict Dependency Cascade & Undo Persistence
+
+    func testV31SmartDependencyCascadeAndUndoPersistence() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        func millis(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
+            let d = cal.date(from: DateComponents(year: year, month: month, day: day))!
+            return DateEpochConverter.startOfDayMillis(for: d, calendar: cal)
+        }
+
+        let todayMs = millis(2026, 11, 20)
+        // t1: Nov 20..21 (2 days = 960m)
+        // t2 (depends on t1): Nov 24 (1 day = 60m) -> 2 days slack (Nov 22, Nov 23)
+        // t3 (milestone, depends on t2): Nov 25
+        let t1 = TaskItem(
+            id: "t1",
+            title: "Core Schema",
+            status: .open,
+            scheduleState: .today,
+            whenDate: millis(2026, 11, 20),
+            durationMinutes: 960,
+            projectId: "p1",
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let t2 = TaskItem(
+            id: "t2",
+            title: "API Endpoints",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 11, 24),
+            durationMinutes: 60,
+            projectId: "p1",
+            blockedByTaskIds: ["t1"],
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let t3 = TaskItem(
+            id: "t3",
+            title: "API Freeze Milestone",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 11, 25),
+            deadline: millis(2026, 11, 25),
+            projectId: "p1",
+            isMilestone: true,
+            blockedByTaskIds: ["t2"],
+            createdAt: 1,
+            updatedAt: 1
+        )
+
+        // 1. Shift t1 by +1d -> ends Nov 22 < Nov 24 (slack preserved: t2 & t3 NOT pushed)
+        let slackShifts = ProjectRoadmapEngine.computeSmartDependencyCascade(
+            anchorTask: t1,
+            deltaDays: 1,
+            projectTasks: [t1, t2, t3],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+        XCTAssertEqual(slackShifts.map(\.task.id), ["t1"])
+        XCTAssertEqual(slackShifts.first?.isAnchor, true)
+
+        // 2. Shift t1 by +4d -> t1 moves to Nov 24..25; overlaps t2 (Nov 24), pushing t2 by +2d to Nov 26,
+        //    which in turn overlaps t3 (Nov 25), pushing t3 by +2d to Nov 27!
+        let cascadeShifts = ProjectRoadmapEngine.computeSmartDependencyCascade(
+            anchorTask: t1,
+            deltaDays: 4,
+            projectTasks: [t1, t2, t3],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+        XCTAssertEqual(cascadeShifts.map(\.task.id), ["t1", "t2", "t3"])
+        let shiftById = Dictionary(uniqueKeysWithValues: cascadeShifts.map { ($0.task.id, $0) })
+        XCTAssertEqual(shiftById["t1"]?.deltaDays, 4)
+        XCTAssertEqual(shiftById["t2"]?.deltaDays, 2)
+        XCTAssertEqual(shiftById["t2"]?.nextWhenMillis, millis(2026, 11, 26))
+        XCTAssertEqual(shiftById["t3"]?.deltaDays, 2)
+        XCTAssertEqual(shiftById["t3"]?.nextDeadlineMillis, millis(2026, 11, 27))
+
+        // 3. Shifting backward never pulls downstream tasks earlier
+        let backwardShifts = ProjectRoadmapEngine.computeSmartDependencyCascade(
+            anchorTask: t1,
+            deltaDays: -2,
+            projectTasks: [t1, t2, t3],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+        XCTAssertEqual(backwardShifts.map(\.task.id), ["t1"])
+
+        // 4. Cycle guard safety (corrupted mutual blockedBy)
+        var cycA = t1
+        cycA.blockedByTaskIds = ["t2"]
+        let cycleSafe = ProjectRoadmapEngine.computeSmartDependencyCascade(
+            anchorTask: cycA,
+            deltaDays: 5,
+            projectTasks: [cycA, t2],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+        XCTAssertEqual(cycleSafe.count, 2)
+
+        // 5. SQLite applyCascadedTaskShifts + restoreTaskPlacements round-trip
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let proj = try db.createProject(title: "Cascade Test")
+        let dbT1 = try db.createTask(
+            title: "DB Blocker",
+            scheduleState: .today,
+            whenDate: millis(2026, 11, 20),
+            scheduledStartMinutes: 600,
+            durationMinutes: 960,
+            projectId: proj.id
+        )
+        let dbT2 = try db.createTask(
+            title: "DB Dependent",
+            scheduleState: .upcoming,
+            whenDate: millis(2026, 11, 21),
+            durationMinutes: 120,
+            projectId: proj.id
+        )
+        try db.setTaskBlockedBy(taskId: dbT2.id, blockedByTaskIds: [dbT1.id])
+        let snapBefore = try db.loadWorkspaceSnapshot()
+        let shifts = ProjectRoadmapEngine.computeSmartDependencyCascade(
+            anchorTask: try XCTUnwrap(snapBefore.allOpenTasks.first { $0.id == dbT1.id }),
+            deltaDays: 2,
+            projectTasks: snapBefore.allOpenTasks,
+            todayMillis: todayMs,
+            calendar: cal
+        )
+        XCTAssertEqual(shifts.count, 2)
+        let undoSnapshots = try db.applyCascadedTaskShifts(shifts)
+        XCTAssertEqual(undoSnapshots.count, 2)
+
+        let snapShifted = try db.loadWorkspaceSnapshot()
+        let shiftedDep = try XCTUnwrap(snapShifted.allOpenTasks.first { $0.id == dbT2.id })
+        XCTAssertEqual(shiftedDep.whenDate, millis(2026, 11, 24))
+
+        try db.restoreTaskPlacements(undoSnapshots)
+        let snapRestored = try db.loadWorkspaceSnapshot()
+        let restoredAnchor = try XCTUnwrap(snapRestored.allOpenTasks.first { $0.id == dbT1.id })
+        let restoredDep = try XCTUnwrap(snapRestored.allOpenTasks.first { $0.id == dbT2.id })
+        XCTAssertEqual(restoredAnchor.whenDate, millis(2026, 11, 20))
+        XCTAssertEqual(restoredAnchor.scheduledStartMinutes, 600)
+        XCTAssertEqual(restoredAnchor.durationMinutes, 960)
+        XCTAssertEqual(restoredDep.whenDate, millis(2026, 11, 21))
+    }
+
+    // MARK: - 45. v3.1 Area Portfolio Timeline Layout & Backward-Compatible Preferences
+
+    func testV31AreaPortfolioLayoutAndPreferencesCompatibility() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let todayDate = cal.date(from: DateComponents(year: 2026, month: 11, day: 20))!
+        let todayMs = DateEpochConverter.startOfDayMillis(for: todayDate, calendar: cal)
+        let todayDay = DateEpochConverter.epochDay(forMillis: todayMs, calendar: cal)
+
+        let area = Area(id: "area-eng", title: "Engineering", sortOrder: 10, createdAt: 1, updatedAt: 1)
+        let scheduledProj = Project(
+            id: "proj-scheduled",
+            areaId: area.id,
+            title: "macOS v3.1",
+            scheduleState: .today,
+            whenDate: todayMs,
+            deadline: todayMs + 10 * 86_400_000,
+            sortOrder: 10,
+            totalTaskCount: 2,
+            completedTaskCount: 1,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let unscheduledProj = Project(
+            id: "proj-unscheduled",
+            areaId: area.id,
+            title: "Backlog Ideas",
+            scheduleState: .anytime,
+            sortOrder: 20,
+            createdAt: 2,
+            updatedAt: 2
+        )
+        let phase = Heading(
+            id: "h1",
+            projectId: scheduledProj.id,
+            title: "Phase 1",
+            sortOrder: 100,
+            startDate: todayMs,
+            endDate: todayMs + 5 * 86_400_000,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let msTask = TaskItem(
+            id: "ms-1",
+            title: "Beta Freeze",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: todayMs + 5 * 86_400_000,
+            deadline: todayMs + 5 * 86_400_000,
+            projectId: scheduledProj.id,
+            headingId: phase.id,
+            isMilestone: true,
+            createdAt: 1,
+            updatedAt: 1
+        )
+
+        let portfolio = ProjectRoadmapEngine.buildAreaPortfolioLayout(
+            area: area,
+            projects: [scheduledProj, unscheduledProj],
+            headings: [phase],
+            tasks: [msTask],
+            todayMillis: todayMs,
+            calendar: cal
+        )
+
+        XCTAssertEqual(portfolio.projectLanes.map(\.projectId), [scheduledProj.id])
+        XCTAssertEqual(portfolio.unscheduledProjects.map(\.id), [unscheduledProj.id])
+        let lane = try XCTUnwrap(portfolio.projectLanes.first)
+        XCTAssertEqual(lane.summaryStartEpochDay, todayDay)
+        XCTAssertEqual(lane.summaryEndEpochDay, todayDay + 10)
+        XCTAssertEqual(lane.spanDays, 11)
+        XCTAssertEqual(lane.milestoneBars.map(\.id), [msTask.id])
+        XCTAssertGreaterThanOrEqual(portfolio.totalDays, 21)
+
+        // Legacy v3.0 AppPreferences JSON without areaViewModes / workdayStartMinutes decodes cleanly
+        let legacyJson = #"{"localOnlyDbMode":false,"sidebarVisible":true}"#
+        let decodedLegacy = try JSONDecoder().decode(AppPreferences.self, from: Data(legacyJson.utf8))
+        XCTAssertEqual(decodedLegacy.areaViewModes, [:])
+        XCTAssertEqual(decodedLegacy.workdayStartMinutes, 540)
+        XCTAssertEqual(decodedLegacy.workdayEndMinutes, 1020)
+    }
+
+    // MARK: - 46. v3.1 Configurable Workday Hours, 7-Day Workload Forecast & Backup Roundtrip
+
+    func testV31ConfigurableWorkdayHoursSevenDayForecastAndBackup() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let todayDate = cal.date(from: DateComponents(year: 2026, month: 11, day: 20))!
+        let sodMs = DateEpochConverter.startOfDayMillis(for: todayDate, calendar: cal)
+        let nextSodMs = sodMs + 86_400_000
+        let todayDay = DateEpochConverter.epochDay(forMillis: sodMs, calendar: cal)
+
+        // Custom workday: 08:00 (480) to 18:00 (1080) = 600m daily capacity
+        // Calendar event 07:00..09:00 -> clipped to 08:00..09:00 = 60m busy
+        let earlyMorningMeeting = CalendarEventItem(
+            id: "ev-early",
+            eventIdentifier: "ev-early",
+            calendarId: "cal-work",
+            calendarDisplayName: "Work",
+            title: "Global Sync",
+            startMillis: sodMs + 7 * 3_600_000,
+            endMillis: sodMs + 9 * 3_600_000,
+            isAllDay: false,
+            colorHex: 0x2B79C2,
+            startDateEpochDay: todayDay,
+            endDateInclusiveEpochDay: todayDay
+        )
+        let todayTask = TaskItem(
+            id: "t-today",
+            title: "Feature Build",
+            status: .open,
+            scheduleState: .today,
+            whenDate: sodMs,
+            durationMinutes: 180,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let overloadedTomorrowTask = TaskItem(
+            id: "t-tmrw",
+            title: "Full Day Workshop",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: sodMs + 86_400_000,
+            durationMinutes: 660, // 11h > 10h workday -> overloaded by 60m!
+            createdAt: 1,
+            updatedAt: 1
+        )
+
+        let cap = TodayCapacityCalculator.compute(
+            tasks: [todayTask],
+            calendarEvents: [earlyMorningMeeting],
+            dayStartMillis: sodMs,
+            dayEndMillis: nextSodMs,
+            workdayStartMinutes: 480,
+            workdayEndMinutes: 1080
+        )
+        XCTAssertEqual(cap.plannedMinutes, 180)
+        XCTAssertEqual(cap.freeMinutes, 360) // 600 - 60 - 180
+
+        let forecast = TodayCapacityCalculator.computeSevenDayForecast(
+            todayTasks: [todayTask],
+            allOpenTasks: [todayTask, overloadedTomorrowTask],
+            calendarEvents: [earlyMorningMeeting],
+            todayMillis: sodMs,
+            daysCount: 7,
+            workdayStartMinutes: 480,
+            workdayEndMinutes: 1080,
+            calendar: cal
+        )
+        XCTAssertEqual(forecast.count, 7)
+        XCTAssertEqual(forecast[0].plannedTaskMinutes, 180)
+        XCTAssertEqual(forecast[0].busyCalendarMinutes, 60)
+        XCTAssertEqual(forecast[0].freeWorkdayMinutes, 360)
+        XCTAssertFalse(forecast[0].isOverloaded)
+        XCTAssertTrue(forecast[1].isOverloaded)
+        XCTAssertEqual(forecast[1].overloadedByMinutes, 60)
+
+        // BackupPreferencesDto roundtrip preserves workdayStartMinutes & workdayEndMinutes
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let customPrefs = AppPreferences(workdayStartMinutes: 510, workdayEndMinutes: 1050)
+        let backupPayload = try db.buildBackupPayload(preferences: customPrefs)
+        let encoded = try ThingsBackupCodec.encodeBackup(payload: backupPayload, password: nil)
+        let decoded = try ThingsBackupCodec.decodeBackup(rawBytes: encoded, password: nil)
+        XCTAssertEqual(decoded.preferences.workdayStartMinutes, 510)
+        XCTAssertEqual(decoded.preferences.workdayEndMinutes, 1050)
+    }
+
+    // MARK: - 47. v3.1 Gemini Roadmap Architect, Deterministic Plan My Day & 5-Language Keys
+
+    func testV31GeminiBlueprintEnrichmentAndPlanMyDayAutoTimeblocker() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let refDate = cal.date(from: DateComponents(year: 2026, month: 11, day: 20))!
+
+        // 1. Offline localized blueprints across all 5 languages include dated phases, milestones & dependencies
+        for lang in ["en", "de", "fr", "it", "es"] {
+            let bp = ThingsbookGeminiService.offlineLocalizedProjectBlueprint(goal: "Ship v3.1", langCode: lang)
+            XCTAssertEqual(bp.headings.count, 3)
+            let allRich = bp.headings.flatMap(\.richTasks)
+            XCTAssertGreaterThanOrEqual(allRich.count, 9)
+            XCTAssertTrue(allRich.contains(where: \.isMilestone), "Expected milestone in \(lang) blueprint")
+            XCTAssertTrue(allRich.contains { !$0.dependsOnKeys.isEmpty }, "Expected dependencies in \(lang) blueprint")
+            let refl = ThingsbookGeminiService.offlineLocalizedLogbookReflection(count: 12, langCode: lang)
+            XCTAssertEqual(refl.suggestedFocusTasks.count, 3)
+        }
+
+        // 2. createProjectFromBlueprint creates a roadmap project with dated headings, milestones, dependencies & checklists
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let blueprint = ThingsbookGeminiService.offlineLocalizedProjectBlueprint(goal: "Launch Portfolio", langCode: "en")
+        let createdProj = try db.createProjectFromBlueprint(
+            blueprint,
+            languageCode: "en",
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertEqual(createdProj.viewMode, "roadmap")
+
+        let snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let projHeadings = try XCTUnwrap(snap.headingsByProject[createdProj.id])
+        XCTAssertEqual(projHeadings.count, 3)
+        XCTAssertTrue(projHeadings.allSatisfy { $0.startDate != nil && $0.endDate != nil })
+
+        let projTasks = snap.allOpenTasks.filter { $0.projectId == createdProj.id }
+        XCTAssertEqual(projTasks.count, 9)
+        XCTAssertTrue(projTasks.contains { $0.isMilestone && $0.deadline != nil })
+        XCTAssertTrue(projTasks.contains { !$0.blockedByTaskIds.isEmpty })
+        XCTAssertTrue(projTasks.contains { !$0.checklistItems.isEmpty })
+
+        // 3. Deterministic "Plan My Day" scheduler avoids busy intervals & prioritizes pinned/deep-focus tasks
+        let candidates = [
+            DayTimeblockCandidate(taskId: "qw", title: "Reply to emails", durationMinutes: 30, effortLevel: "QUICK_WIN"),
+            DayTimeblockCandidate(taskId: "pin", title: "Critical Review", durationMinutes: 60, effortLevel: "DEEP_FOCUS", isPinned: true),
+            DayTimeblockCandidate(taskId: "med", title: "Spec Draft", durationMinutes: 45, effortLevel: "MEDIUM", hasTodayDeadline: true)
+        ]
+        // Busy meeting 09:00..10:00 (540..600)
+        let busy = [(540, 600)]
+        let plan = ThingsbookGeminiService.buildDeterministicDayTimeblockPlan(
+            candidates: candidates,
+            busyIntervalsMinutes: busy,
+            workdayStartMinutes: 540,
+            workdayEndMinutes: 1020,
+            earliestStartMinutes: 540,
+            langCode: "de"
+        )
+        XCTAssertEqual(plan.blocks.count, 3)
+        XCTAssertFalse(plan.summary.isEmpty)
+        for block in plan.blocks {
+            let bEnd = block.startMinutes + block.durationMinutes
+            XCTAssertFalse(block.startMinutes < 600 && 540 < bEnd, "Block overlapped busy calendar event")
+            XCTAssertEqual(block.startMinutes % 15, 0, "Block start must align to 15m grid")
+        }
+        // First placed block after 10:00 should be the pinned task
+        XCTAssertEqual(plan.blocks.first?.taskId, "pin")
+        XCTAssertEqual(plan.blocks.first?.startMinutes, 600)
+
+        // 4. applyBatchTaskTimeblocks + restoreTaskPlacements undo round-trip
+        let taskForPlan = try XCTUnwrap(projTasks.first)
+        let origStart = taskForPlan.scheduledStartMinutes
+        let origDur = taskForPlan.durationMinutes
+        let tbSnaps = try db.applyBatchTaskTimeblocks(
+            [(taskId: taskForPlan.id, startMinutes: 630, durationMinutes: 45)],
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertEqual(tbSnaps.count, 1)
+        let afterPlan = try XCTUnwrap(try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal).allOpenTasks.first { $0.id == taskForPlan.id })
+        XCTAssertEqual(afterPlan.scheduledStartMinutes, 630)
+        XCTAssertEqual(afterPlan.durationMinutes, 45)
+
+        try db.restoreTaskPlacements(tbSnaps)
+        let afterUndo = try XCTUnwrap(try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal).allOpenTasks.first { $0.id == taskForPlan.id })
+        XCTAssertEqual(afterUndo.scheduledStartMinutes, origStart)
+        XCTAssertEqual(afterUndo.durationMinutes, origDur)
+
+        // 5. All 25 v31_* localization keys exist across all 5 languages
+        let v31Keys = [
+            "v31_area_portfolio_timeline", "v31_area_expand_all", "v31_area_collapse_all",
+            "v31_area_open_project", "v31_area_unscheduled_projects", "v31_area_no_projects_timeline",
+            "v31_roadmap_cascade_undo", "v31_roadmap_rescheduled_undo",
+            "v31_settings_workday_hours", "v31_settings_workday_desc", "v31_settings_workday_start",
+            "v31_settings_workday_end", "v31_settings_workday_daily_capacity",
+            "v31_workload_7day_title", "v31_workload_overloaded_by", "v31_workload_overloaded_short",
+            "v31_workload_balanced", "v31_gemini_architect_v3_hint", "v31_gemini_plan_day_tab",
+            "v31_gemini_plan_day_desc", "v31_gemini_plan_day_generate", "v31_gemini_plan_day_apply",
+            "v31_gemini_plan_day_empty", "v31_gemini_plan_day_applied_undo", "v31_gemini_plan_day_replan"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in v31Keys {
+                let text = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertNotEqual(text, key, "Missing v31 key \(key) in \(lang.rawValue)")
+                XCTAssertFalse(text.isEmpty)
+            }
+        }
     }
 }

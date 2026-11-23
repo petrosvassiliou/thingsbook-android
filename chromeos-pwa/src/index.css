@@ -6832,5 +6832,355 @@ button.v2-stalled-pill:hover {
   color: var(--milestone-violet);
 }
 
+/* ==================== v3.1 Smart Cascade, Area Portfolio, 7-Day Workload & Plan My Day ==================== */
+
+.roadmap-task-bar.cascaded {
+  box-shadow: 0 0 0 2px rgba(56, 152, 236, 0.48), 0 3px 10px rgba(56, 152, 236, 0.22);
+}
+
+.v31-portfolio-zoom-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.area-portfolio-project-row {
+  background: var(--bg-subtle);
+}
+
+.area-portfolio-sticky-cell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+}
+
+.area-portfolio-chevron-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.area-portfolio-chevron-btn:hover {
+  background: var(--bg-chip);
+  color: var(--text-primary);
+}
+
+.area-portfolio-proj-title-btn {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 13.4px;
+  font-weight: 680;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-portfolio-proj-count {
+  font-size: 11.2px;
+  font-weight: 640;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.area-portfolio-open-btn {
+  height: 25px;
+  min-width: 25px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.area-portfolio-summary-bar {
+  position: absolute;
+  top: 12px;
+  height: 24px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(116, 196, 255, 0.28) 0%, rgba(56, 152, 236, 0.34) 100%);
+  border: 1.5px solid rgba(56, 152, 236, 0.55);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  overflow: hidden;
+  cursor: pointer;
+  z-index: 2;
+}
+
+[data-theme="dark"] .area-portfolio-summary-bar {
+  background: linear-gradient(90deg, rgba(56, 152, 236, 0.26) 0%, rgba(56, 152, 236, 0.40) 100%);
+  border-color: rgba(116, 196, 255, 0.55);
+}
+
+.area-portfolio-summary-label {
+  font-size: 11.5px;
+  font-weight: 670;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-portfolio-collapsed-diamond {
+  position: absolute;
+  top: 16px;
+  z-index: 4;
+  pointer-events: auto;
+}
+
+.area-portfolio-phase-cell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 24px;
+}
+
+.area-portfolio-task-cell {
+  padding-left: 32px;
+}
+
+/* 7-Day Workload Soft Bento Card & Upcoming Day Pill */
+.v31-workload-bento-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 13px 15px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow-xs);
+}
+
+.v31-workload-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2.5px 9px;
+  border-radius: 999px;
+  font-size: 11.3px;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+}
+
+.v31-workload-status-pill.balanced {
+  background: var(--things-blue-soft);
+  color: var(--things-blue);
+}
+
+.v31-workload-status-pill.overloaded {
+  background: var(--deadline-red-bg);
+  color: var(--deadline-red);
+}
+
+.v31-workload-bars-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.v31-workload-bars-grid.compact {
+  gap: 5px;
+}
+
+.v31-workload-day-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.v31-workload-day-top {
+  font-size: 10.4px;
+  font-weight: 640;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.v31-workload-day-col.overloaded .v31-workload-day-top {
+  color: var(--deadline-red);
+  font-weight: 700;
+}
+
+.v31-workload-bar-track {
+  width: 100%;
+  max-width: 28px;
+  height: 54px;
+  border-radius: 7px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
+}
+
+.v31-workload-bars-grid.compact .v31-workload-bar-track {
+  max-width: 22px;
+  height: 40px;
+  border-radius: 6px;
+}
+
+.v31-workload-bar-busy {
+  width: 100%;
+  background: rgba(100, 116, 139, 0.38);
+  transition: height 0.2s ease;
+}
+
+.v31-workload-bar-planned {
+  width: 100%;
+  background: var(--things-blue);
+  transition: height 0.2s ease;
+}
+
+.v31-workload-bar-planned.overloaded {
+  background: var(--deadline-red);
+}
+
+.v31-workload-day-dow {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.v31-workload-day-col.today .v31-workload-day-dow {
+  color: var(--things-blue);
+  font-weight: 700;
+}
+
+.v31-workload-day-num {
+  font-size: 10.2px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.upcoming-day-workload-pill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 2.5px 9px;
+  border-radius: 999px;
+  font-size: 11.4px;
+  font-weight: 650;
+  background: var(--things-blue-soft);
+  border: 1px solid rgba(36, 139, 253, 0.22);
+  color: var(--things-blue);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.upcoming-day-workload-pill.overloaded {
+  background: var(--deadline-red-bg);
+  border-color: rgba(229, 57, 53, 0.30);
+  color: var(--deadline-red);
+}
+
+/* Plan My Day & v3 Gemini Architect */
+.v31-plan-my-day-pill {
+  border-color: rgba(124, 58, 237, 0.28);
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--text-primary);
+}
+
+.v31-plan-my-day-pill:hover {
+  border-color: rgba(124, 58, 237, 0.45);
+  background: rgba(124, 58, 237, 0.14);
+}
+
+.v31-gemini-hint-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(124, 58, 237, 0.09);
+  border: 1px solid rgba(124, 58, 237, 0.24);
+  font-size: 12.2px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.v31-planday-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.v31-planday-summary {
+  font-size: 12.4px;
+  font-weight: 560;
+  color: var(--text-secondary);
+}
+
+.v31-planday-blocks-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 290px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.v31-planday-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.v31-planday-row.unchecked {
+  opacity: 0.56;
+}
+
+.v31-planday-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.v31-planday-row-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.v31-planday-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.v31-planday-row-reason {
+  font-size: 11.4px;
+  color: var(--text-muted);
+}
+
+.v31-planday-shift-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 
 

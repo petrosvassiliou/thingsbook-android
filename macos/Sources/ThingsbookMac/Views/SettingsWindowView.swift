@@ -240,6 +240,10 @@ public struct SettingsWindowView: View {
 
                     Divider()
 
+                    workdayHoursSettingsSection
+
+                    Divider()
+
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(store.tr("macos_touch_id_title"))
@@ -323,6 +327,92 @@ public struct SettingsWindowView: View {
         case .fr: return store.tr("lang_fr")
         case .es: return store.tr("lang_es")
         }
+    }
+
+    private var workdayHoursSettingsSection: some View {
+        let bounds = TodayCapacityCalculator.normalizeWorkdayBounds(
+            startMinutes: store.preferences.workdayStartMinutes,
+            endMinutes: store.preferences.workdayEndMinutes
+        )
+        let dailyCapacityLabel = TaskItem.formatCompactDuration(bounds.endMinutes - bounds.startMinutes)
+        let baseStartOptions: [Int] = Array(stride(from: 300, through: 870, by: 30))
+        let startOptions: [Int] = Array(Set(baseStartOptions + [bounds.startMinutes])).sorted()
+        let baseEndOptions: [Int] = stride(from: 600, through: 1440, by: 30)
+            .filter { $0 >= bounds.startMinutes + 60 && $0 <= 1440 }
+        let endOptions: [Int] = Array(Set(baseEndOptions + [bounds.endMinutes])).sorted()
+
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.tr("v31_settings_workday_hours"))
+                        .font(.system(size: 13.5, weight: .medium))
+                    Text(store.tr("v31_settings_workday_desc"))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(store.trf("v31_settings_workday_daily_capacity", dailyCapacityLabel))
+                    .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(0.12))
+                    )
+            }
+
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Text(store.tr("v31_settings_workday_start"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { bounds.startMinutes },
+                            set: { nextStart in
+                                store.setWorkdayBounds(startMinutes: nextStart, endMinutes: bounds.endMinutes)
+                            }
+                        )
+                    ) {
+                        ForEach(startOptions, id: \.self) { mins in
+                            Text(formatWorkdayClock(mins)).tag(mins)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 96)
+                }
+
+                HStack(spacing: 6) {
+                    Text(store.tr("v31_settings_workday_end"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { bounds.endMinutes },
+                            set: { nextEnd in
+                                store.setWorkdayBounds(startMinutes: bounds.startMinutes, endMinutes: nextEnd)
+                            }
+                        )
+                    ) {
+                        ForEach(endOptions, id: \.self) { mins in
+                            Text(formatWorkdayClock(mins)).tag(mins)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 96)
+                }
+
+                Spacer()
+            }
+        }
+    }
+
+    private func formatWorkdayClock(_ minutes: Int) -> String {
+        if minutes >= 1440 { return "24:00" }
+        return TaskItem.formatMinutesOfDay(minutes)
     }
 
     private func shortcutRow(title: String, keys: String) -> some View {

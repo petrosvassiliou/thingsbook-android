@@ -451,6 +451,22 @@ public struct ThingsCommandMenus: Commands {
                 }
                 .keyboardShortcut("3", modifiers: [.command, .control])
                 .disabled(isCommandBlocked)
+            } else if case .area(let activeAreaId) = store.selectedDestination {
+                Divider()
+
+                Button(store.tr("v30_project_mode_list")) {
+                    guard !isCommandBlocked else { return }
+                    store.setAreaViewMode(activeAreaId, mode: .list)
+                }
+                .keyboardShortcut("1", modifiers: [.command, .control])
+                .disabled(isCommandBlocked)
+
+                Button(store.tr("v31_area_portfolio_timeline")) {
+                    guard !isCommandBlocked else { return }
+                    store.setAreaViewMode(activeAreaId, mode: .roadmap)
+                }
+                .keyboardShortcut("2", modifiers: [.command, .control])
+                .disabled(isCommandBlocked)
             }
         }
     }

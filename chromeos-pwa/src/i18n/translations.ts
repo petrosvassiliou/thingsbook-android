@@ -270,6 +270,31 @@ export interface TranslationStrings {
   settingsGroupTodayDesc: string;
   settingsShowPerspectives: string;
   settingsShowPerspectivesDesc: string;
+  v31AreaPortfolioTimeline: string;
+  v31AreaExpandAll: string;
+  v31AreaCollapseAll: string;
+  v31AreaOpenProject: string;
+  v31AreaUnscheduledProjects: string;
+  v31AreaNoProjectsTimeline: string;
+  v31RoadmapCascadeUndo: (count: number) => string;
+  v31RoadmapRescheduledUndo: string;
+  v31SettingsWorkdayHours: string;
+  v31SettingsWorkdayDesc: string;
+  v31SettingsWorkdayStart: string;
+  v31SettingsWorkdayEnd: string;
+  v31SettingsWorkdayDailyCapacity: (duration: string) => string;
+  v31Workload7DayTitle: string;
+  v31WorkloadOverloadedBy: (duration: string) => string;
+  v31WorkloadOverloadedShort: (duration: string) => string;
+  v31WorkloadBalanced: string;
+  v31GeminiArchitectV3Hint: string;
+  v31GeminiPlanDayTab: string;
+  v31GeminiPlanDayDesc: string;
+  v31GeminiPlanDayGenerate: string;
+  v31GeminiPlanDayApply: (count: number) => string;
+  v31GeminiPlanDayEmpty: string;
+  v31GeminiPlanDayAppliedUndo: (count: number) => string;
+  v31GeminiPlanDayReplan: string;
   settingsBiometricLockTitle: string;
   settingsBiometricLockDesc: string;
   appLockTitle: string;
@@ -790,6 +815,33 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsShowPerspectives: 'Show Custom Perspectives in Sidebar',
     settingsShowPerspectivesDesc:
       'Adds a saved-filters section to the sidebar for custom multi-criteria views',
+    v31AreaPortfolioTimeline: 'Portfolio Timeline',
+    v31AreaExpandAll: 'Expand All',
+    v31AreaCollapseAll: 'Collapse All',
+    v31AreaOpenProject: 'Open Project',
+    v31AreaUnscheduledProjects: 'Unscheduled Projects',
+    v31AreaNoProjectsTimeline: 'Add a project to this Area to visualize its portfolio timeline',
+    v31RoadmapCascadeUndo: (count) => `Rescheduled + cascaded ${count} dependent to-dos`,
+    v31RoadmapRescheduledUndo: 'Timeline schedule updated',
+    v31SettingsWorkdayHours: 'Workday Hours & Capacity',
+    v31SettingsWorkdayDesc: 'Used to calculate daily free capacity and AI auto-timeblocking',
+    v31SettingsWorkdayStart: 'Workday Start',
+    v31SettingsWorkdayEnd: 'Workday End',
+    v31SettingsWorkdayDailyCapacity: (duration) => `Daily Capacity: ${duration}`,
+    v31Workload7DayTitle: '7-Day Workload',
+    v31WorkloadOverloadedBy: (duration) => `Overloaded by ${duration}`,
+    v31WorkloadOverloadedShort: (duration) => `+${duration} over`,
+    v31WorkloadBalanced: 'Balanced',
+    v31GeminiArchitectV3Hint:
+      'Generates dated Phases, ◆ Milestones, Effort, Durations & Dependencies directly in Timeline view',
+    v31GeminiPlanDayTab: 'Plan My Day',
+    v31GeminiPlanDayDesc:
+      "Schedules Today's open to-dos into conflict-free focus blocks around your calendar events and workday hours",
+    v31GeminiPlanDayGenerate: 'Generate Schedule Preview',
+    v31GeminiPlanDayApply: (count) => `Apply to Today (${count})`,
+    v31GeminiPlanDayEmpty: 'All Today to-dos are already timeblocked or completed',
+    v31GeminiPlanDayAppliedUndo: (count) => `Applied ${count} timeblocks to Today`,
+    v31GeminiPlanDayReplan: 'Include already timeblocked to-dos',
     settingsBiometricLockTitle: 'Biometric / PIN App Lock',
     settingsBiometricLockDesc:
       'Require fingerprint, face unlock, or device PIN when opening Thingsbook (off by default).',
@@ -1318,6 +1370,34 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsShowPerspectives: 'Eigene Perspektiven in der Seitenleiste anzeigen',
     settingsShowPerspectivesDesc:
       'Fügt der Seitenleiste einen Bereich für gespeicherte Mehrfachfilter hinzu',
+    v31AreaPortfolioTimeline: 'Portfolio-Zeitplan',
+    v31AreaExpandAll: 'Alle ausklappen',
+    v31AreaCollapseAll: 'Alle einklappen',
+    v31AreaOpenProject: 'Projekt öffnen',
+    v31AreaUnscheduledProjects: 'Ungeplante Projekte',
+    v31AreaNoProjectsTimeline:
+      'Füge diesem Bereich ein Projekt hinzu, um den Portfolio-Zeitplan zu sehen',
+    v31RoadmapCascadeUndo: (count) => `Verschoben + ${count} abhängige Aufgaben angepasst`,
+    v31RoadmapRescheduledUndo: 'Zeitplan aktualisiert',
+    v31SettingsWorkdayHours: 'Arbeitszeiten & Tageskapazität',
+    v31SettingsWorkdayDesc: 'Berechnet die freie Tageskapazität und die KI-Zeitblockplanung',
+    v31SettingsWorkdayStart: 'Arbeitsbeginn',
+    v31SettingsWorkdayEnd: 'Arbeitsende',
+    v31SettingsWorkdayDailyCapacity: (duration) => `Tageskapazität: ${duration}`,
+    v31Workload7DayTitle: '7-Tage-Auslastung',
+    v31WorkloadOverloadedBy: (duration) => `Überlastet um ${duration}`,
+    v31WorkloadOverloadedShort: (duration) => `+${duration} über`,
+    v31WorkloadBalanced: 'Ausgewogen',
+    v31GeminiArchitectV3Hint:
+      'Erstellt datierte Phasen, ◆ Meilensteine, Aufwand, Dauer & Abhängigkeiten direkt in der Zeitplan-Ansicht',
+    v31GeminiPlanDayTab: 'Tag planen',
+    v31GeminiPlanDayDesc:
+      'Plant offene Heute-Aufgaben konfliktfrei um deine Kalendertermine und Arbeitszeiten herum ein',
+    v31GeminiPlanDayGenerate: 'Zeitplan-Vorschau erstellen',
+    v31GeminiPlanDayApply: (count) => `Auf Heute anwenden (${count})`,
+    v31GeminiPlanDayEmpty: 'Alle Heute-Aufgaben haben bereits einen Zeitblock oder sind erledigt',
+    v31GeminiPlanDayAppliedUndo: (count) => `${count} Zeitblöcke auf Heute angewendet`,
+    v31GeminiPlanDayReplan: 'Bereits eingeplante Aufgaben neu verteilen',
     settingsBiometricLockTitle: 'Biometrische App-Sperre (Fingerabdruck / PIN)',
     settingsBiometricLockDesc:
       'Beim Öffnen von Thingsbook Fingerabdruck, Gesichtserkennung oder Geräte-PIN anfordern (standardmäßig deaktiviert).',
@@ -1844,6 +1924,35 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsShowPerspectives: 'Afficher les perspectives personnalisées dans la barre latérale',
     settingsShowPerspectivesDesc:
       'Ajoute une section de filtres enregistrés à la barre latérale',
+    v31AreaPortfolioTimeline: 'Chronologie du portefeuille',
+    v31AreaExpandAll: 'Tout développer',
+    v31AreaCollapseAll: 'Tout réduire',
+    v31AreaOpenProject: 'Ouvrir le projet',
+    v31AreaUnscheduledProjects: 'Projets non planifiés',
+    v31AreaNoProjectsTimeline:
+      'Ajoutez un projet à ce domaine pour visualiser sa chronologie',
+    v31RoadmapCascadeUndo: (count) => `Replanifié + ${count} tâches dépendantes décalées`,
+    v31RoadmapRescheduledUndo: 'Planning mis à jour',
+    v31SettingsWorkdayHours: 'Horaires de travail & capacité',
+    v31SettingsWorkdayDesc:
+      'Utilisé pour calculer la capacité libre quotidienne et les créneaux IA',
+    v31SettingsWorkdayStart: 'Début de journée',
+    v31SettingsWorkdayEnd: 'Fin de journée',
+    v31SettingsWorkdayDailyCapacity: (duration) => `Capacité quotidienne : ${duration}`,
+    v31Workload7DayTitle: 'Charge sur 7 jours',
+    v31WorkloadOverloadedBy: (duration) => `Surchargé de ${duration}`,
+    v31WorkloadOverloadedShort: (duration) => `+${duration} dép.`,
+    v31WorkloadBalanced: 'Équilibré',
+    v31GeminiArchitectV3Hint:
+      'Génère des phases datées, ◆ jalons, effort, durées & dépendances directement en vue Chronologie',
+    v31GeminiPlanDayTab: 'Planifier ma journée',
+    v31GeminiPlanDayDesc:
+      "Planifie vos tâches d'Aujourd'hui dans des créneaux sans conflit autour de votre agenda et de vos horaires",
+    v31GeminiPlanDayGenerate: "Générer l'aperçu du planning",
+    v31GeminiPlanDayApply: (count) => `Appliquer à Aujourd'hui (${count})`,
+    v31GeminiPlanDayEmpty: "Toutes les tâches d'Aujourd'hui sont déjà planifiées ou terminées",
+    v31GeminiPlanDayAppliedUndo: (count) => `${count} créneaux appliqués à Aujourd'hui`,
+    v31GeminiPlanDayReplan: 'Inclure les tâches déjà planifiées',
     settingsBiometricLockTitle: 'Verrouillage biométrique / PIN',
     settingsBiometricLockDesc:
       "Exiger l'empreinte digitale, la reconnaissance faciale ou le code PIN à l'ouverture (désactivé par défaut).",
@@ -2372,6 +2481,35 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsShowPerspectives: 'Mostra prospettive personalizzate nella barra laterale',
     settingsShowPerspectivesDesc:
       'Aggiunge una sezione di filtri salvati alla barra laterale',
+    v31AreaPortfolioTimeline: 'Cronologia portfolio',
+    v31AreaExpandAll: 'Espandi tutto',
+    v31AreaCollapseAll: 'Comprimi tutto',
+    v31AreaOpenProject: 'Apri progetto',
+    v31AreaUnscheduledProjects: 'Progetti non pianificati',
+    v31AreaNoProjectsTimeline:
+      "Aggiungi un progetto a quest'area per visualizzare la cronologia",
+    v31RoadmapCascadeUndo: (count) => `Ripianificato + ${count} attività dipendenti spostate`,
+    v31RoadmapRescheduledUndo: 'Pianificazione aggiornata',
+    v31SettingsWorkdayHours: 'Orario di lavoro e capacità',
+    v31SettingsWorkdayDesc:
+      'Usato per calcolare la capacità giornaliera libera e i blocchi orari IA',
+    v31SettingsWorkdayStart: 'Inizio giornata',
+    v31SettingsWorkdayEnd: 'Fine giornata',
+    v31SettingsWorkdayDailyCapacity: (duration) => `Capacità giornaliera: ${duration}`,
+    v31Workload7DayTitle: 'Carico a 7 giorni',
+    v31WorkloadOverloadedBy: (duration) => `Sovraccarico di ${duration}`,
+    v31WorkloadOverloadedShort: (duration) => `+${duration} oltre`,
+    v31WorkloadBalanced: 'Bilanciato',
+    v31GeminiArchitectV3Hint:
+      'Genera fasi datate, ◆ traguardi, impegno, durate e dipendenze direttamente nella vista Cronologia',
+    v31GeminiPlanDayTab: 'Pianifica giornata',
+    v31GeminiPlanDayDesc:
+      "Pianifica le attività di Oggi in blocchi senza conflitti attorno agli impegni del calendario e all'orario di lavoro",
+    v31GeminiPlanDayGenerate: 'Genera anteprima orario',
+    v31GeminiPlanDayApply: (count) => `Applica a Oggi (${count})`,
+    v31GeminiPlanDayEmpty: 'Tutte le attività di Oggi hanno già un blocco orario o sono completate',
+    v31GeminiPlanDayAppliedUndo: (count) => `Applicati ${count} blocchi orari a Oggi`,
+    v31GeminiPlanDayReplan: 'Includi attività già pianificate',
     settingsBiometricLockTitle: 'Blocco app biometrico / PIN',
     settingsBiometricLockDesc:
       "Richiedi impronta digitale, sblocco facciale o PIN all'apertura (disattivato per impostazione predefinita).",
@@ -2899,6 +3037,35 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     settingsShowPerspectives: 'Mostrar perspectivas personalizadas en la barra lateral',
     settingsShowPerspectivesDesc:
       'Añade una sección de filtros guardados a la barra lateral',
+    v31AreaPortfolioTimeline: 'Cronología del portafolio',
+    v31AreaExpandAll: 'Expandir todo',
+    v31AreaCollapseAll: 'Contraer todo',
+    v31AreaOpenProject: 'Abrir proyecto',
+    v31AreaUnscheduledProjects: 'Proyectos sin programar',
+    v31AreaNoProjectsTimeline:
+      'Añade un proyecto a esta área para visualizar su cronología',
+    v31RoadmapCascadeUndo: (count) => `Reprogramado + ${count} tareas dependientes desplazadas`,
+    v31RoadmapRescheduledUndo: 'Cronograma actualizado',
+    v31SettingsWorkdayHours: 'Horario laboral y capacidad',
+    v31SettingsWorkdayDesc:
+      'Se usa para calcular la capacidad diaria libre y los bloques de tiempo IA',
+    v31SettingsWorkdayStart: 'Inicio de jornada',
+    v31SettingsWorkdayEnd: 'Fin de jornada',
+    v31SettingsWorkdayDailyCapacity: (duration) => `Capacidad diaria: ${duration}`,
+    v31Workload7DayTitle: 'Carga de 7 días',
+    v31WorkloadOverloadedBy: (duration) => `Sobrecargado por ${duration}`,
+    v31WorkloadOverloadedShort: (duration) => `+${duration} extra`,
+    v31WorkloadBalanced: 'Equilibrado',
+    v31GeminiArchitectV3Hint:
+      'Genera fases con fechas, ◆ hitos, esfuerzo, duraciones y dependencias directamente en la vista Cronología',
+    v31GeminiPlanDayTab: 'Planificar mi día',
+    v31GeminiPlanDayDesc:
+      'Programa las tareas de Hoy en bloques sin conflictos alrededor de tus eventos del calendario y tu horario laboral',
+    v31GeminiPlanDayGenerate: 'Generar vista previa del horario',
+    v31GeminiPlanDayApply: (count) => `Aplicar a Hoy (${count})`,
+    v31GeminiPlanDayEmpty: 'Todas las tareas de Hoy ya tienen bloque de tiempo o están completadas',
+    v31GeminiPlanDayAppliedUndo: (count) => `Se aplicaron ${count} bloques de tiempo a Hoy`,
+    v31GeminiPlanDayReplan: 'Incluir tareas ya programadas',
     settingsBiometricLockTitle: 'Bloqueo biométrico / PIN',
     settingsBiometricLockDesc:
       'Requerir huella digital, desbloqueo facial o PIN al abrir Thingsbook (desactivado por defecto).',

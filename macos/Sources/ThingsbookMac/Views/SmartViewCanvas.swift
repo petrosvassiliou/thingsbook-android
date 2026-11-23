@@ -20,12 +20,16 @@ public struct SmartViewCanvas: View {
     }
 
     private var isWideProjectWorkspace: Bool {
-        guard case .project(let projId) = store.selectedDestination,
-              let project = store.project(byId: projId) else {
+        switch store.selectedDestination {
+        case .project(let projId):
+            guard let project = store.project(byId: projId) else { return false }
+            let mode = ProjectViewMode.normalized(project.viewMode)
+            return mode == .board || mode == .roadmap
+        case .area(let areaId):
+            return store.areaViewMode(for: areaId) == .roadmap
+        default:
             return false
         }
-        let mode = ProjectViewMode.normalized(project.viewMode)
-        return mode == .board || mode == .roadmap
     }
 
     private var isTodayTimelineFullScreen: Bool {
@@ -43,8 +47,16 @@ public struct SmartViewCanvas: View {
         return ProjectViewMode.normalized(project.viewMode) == .roadmap
     }
 
+    private var isAreaRoadmapFullScreen: Bool {
+        guard store.isTimelineFullScreen,
+              case .area(let areaId) = store.selectedDestination else {
+            return false
+        }
+        return store.areaViewMode(for: areaId) == .roadmap
+    }
+
     private var isAnyTimelineFullScreen: Bool {
-        isTodayTimelineFullScreen || isProjectRoadmapFullScreen
+        isTodayTimelineFullScreen || isProjectRoadmapFullScreen || isAreaRoadmapFullScreen
     }
 
     public var body: some View {
@@ -189,10 +201,44 @@ public struct SmartViewCanvas: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
 
-            if view == .today, let cap = store.todayCapacitySummary() {
-                todayCapacityBadge(cap.pillText)
+            if view == .today {
+                if let cap = store.todayCapacitySummary() {
+                    todayCapacityBadge(cap.pillText)
+                }
+                planMyDayShortcutPill
             }
         }
+    }
+
+    private var planMyDayShortcutPill: some View {
+        Button {
+            store.openGeminiPlanMyDay()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.geminiPurple)
+                Text(store.tr("v31_gemini_plan_day_tab"))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 10.5)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ThingsMacPalette.cardSurface)
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(ThingsMacPalette.geminiPurple.opacity(0.32), lineWidth: 0.85)
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .thingsTooltip(store.tr("v31_gemini_plan_day_desc"))
     }
 
     @ViewBuilder
@@ -373,7 +419,8 @@ public struct SmartViewCanvas: View {
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
-        .thingsTooltip(isFull ? "\(label) (Esc)" : label)
+        .keyboardShortcut("f", modifiers: [.command, .control])
+        .thingsTooltip(isFull ? "\(label) (Esc)" : "\(label) (⌃⌘F)")
     }
 
     // MARK: - Today View (Daytime + Calendar Events + Optional Grouping + This Evening + v2.0 Timeline)
@@ -500,6 +547,13 @@ public struct SmartViewCanvas: View {
     private var upcomingCanvas: some View {
         let filtered = store.filterTasksByActiveTag(store.upcomingTasks)
         let milestones = upcomingPhaseMilestones
+        let forecast = store.sevenDayWorkloadForecast()
+        let workloadByEpochDay = Dictionary(uniqueKeysWithValues: forecast.map { ($0.epochDay, $0) })
+
+        if !forecast.isEmpty {
+            SevenDayWorkloadStripCard(store: store, forecast: forecast, compact: false)
+        }
+
         if filtered.isEmpty && milestones.isEmpty {
             emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
         } else {
@@ -519,7 +573,10 @@ public struct SmartViewCanvas: View {
                         ?? dayTasks.first?.deadline
                         ?? dayMilestones.first?.heading.endDate
                     VStack(alignment: .leading, spacing: 8) {
-                        upcomingDayHeader(sampleMillis: sampleMillis)
+                        upcomingDayHeader(
+                            sampleMillis: sampleMillis,
+                            dayWorkload: workloadByEpochDay[epochDay]
+                        )
 
                         let events = store.calendarEventsForEpochDay(
                             epochDay,
@@ -625,20 +682,57 @@ public struct SmartViewCanvas: View {
         .buttonStyle(.plain)
     }
 
-    private func upcomingDayHeader(sampleMillis: Int64?) -> some View {
+    private func upcomingDayHeader(
+        sampleMillis: Int64?,
+        dayWorkload: DayWorkloadSummary? = nil
+    ) -> some View {
         let date = sampleMillis.map { DateEpochConverter.date(fromMillis: $0) } ?? Date()
         let dayNum = Calendar.current.component(.day, from: date)
         let df = DateFormatter()
         df.locale = store.preferences.language.locale
         df.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
 
-        return HStack(alignment: .firstTextBaseline, spacing: 9) {
-            Text("\(dayNum)")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-            Text(df.string(from: date))
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+        return HStack(alignment: .center, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                Text("\(dayNum)")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                Text(df.string(from: date))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
             Spacer()
+
+            if let dayWorkload, dayWorkload.plannedTaskMinutes > 0 {
+                let plannedFmt = TaskItem.formatCompactDuration(dayWorkload.plannedTaskMinutes)
+                let pillText: String = {
+                    if dayWorkload.isOverloaded {
+                        return store.trf(
+                            "v31_workload_overloaded_short",
+                            TaskItem.formatCompactDuration(dayWorkload.overloadedByMinutes)
+                        )
+                    } else if store.preferences.calendarEventsEnabled {
+                        let freeFmt = TaskItem.formatCompactDuration(dayWorkload.freeWorkdayMinutes)
+                        return store.trf("v30_today_capacity_summary", plannedFmt, freeFmt)
+                    } else {
+                        return store.trf("v30_today_planned_only", plannedFmt)
+                    }
+                }()
+                let pillColor = dayWorkload.isOverloaded
+                    ? ThingsMacPalette.deadlineCrimson
+                    : ThingsMacPalette.accentBlue
+
+                Text(pillText)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(pillColor)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(pillColor.opacity(0.12))
+                    )
+                    .lineLimit(1)
+            }
         }
         .padding(.bottom, 4)
         .overlay(alignment: .bottom) {
@@ -1371,114 +1465,132 @@ public struct SmartViewCanvas: View {
 
     @ViewBuilder
     private func areaCanvas(_ area: Area) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 25))
-                    .foregroundStyle(ThingsMacPalette.areaGreen)
-                Text(area.title)
-                    .font(.system(size: 28, weight: .bold))
-                Spacer()
+        let areaMode = store.areaViewMode(for: area.id)
 
-                viewSortMenu
+        if areaMode == .roadmap && store.isTimelineFullScreen {
+            AreaPortfolioRoadmapWorkspaceView(store: store, area: area)
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 25))
+                        .foregroundStyle(ThingsMacPalette.areaGreen)
+                    Text(area.title)
+                        .font(.system(size: 28, weight: .bold))
+                    Spacer()
 
-                Button {
-                    store.editingArea = area
-                } label: {
-                    Image(systemName: "pencil")
+                    Button {
+                        store.editingArea = area
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .thingsTooltip(store.tr("areas_rename_label"))
+
+                    Button {
+                        store.newProjectDefaultAreaId = area.id
+                        store.isNewProjectSheetPresented = true
+                    } label: {
+                        Label(store.tr("entity_new_project"), systemImage: "plus.circle")
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .thingsTooltip(store.trf("sidebar_new_project_in_area", area.title))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .thingsTooltip(store.tr("areas_rename_label"))
 
-                Button {
-                    store.newProjectDefaultAreaId = area.id
-                    store.isNewProjectSheetPresented = true
-                } label: {
-                    Label(store.tr("entity_new_project"), systemImage: "plus.circle")
-                        .font(.system(size: 12))
-                        .lineLimit(1)
+                HStack(alignment: .center, spacing: 10) {
+                    AreaModeSegmentedSwitcher(store: store, area: area)
+
+                    if areaMode != .roadmap {
+                        viewSortMenu
+                    }
+
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .fixedSize(horizontal: true, vertical: false)
-                .thingsTooltip(store.trf("sidebar_new_project_in_area", area.title))
-            }
 
-            let areaProjects = store.projectsForArea(area.id)
-            let looseTasks = store.looseTasksForArea(area.id)
+                if areaMode == .roadmap {
+                    AreaPortfolioRoadmapWorkspaceView(store: store, area: area)
+                } else {
+                    let areaProjects = store.projectsForArea(area.id)
+                    let looseTasks = store.looseTasksForArea(area.id)
 
-            if !areaProjects.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(areaProjects) { proj in
-                        Button {
-                            store.selectedDestination = .project(proj.id)
-                        } label: {
-                            HStack(spacing: 12) {
-                                ProjectProgressRing(
-                                    progress: proj.progress,
-                                    size: 18,
-                                    showFraction: proj.totalTaskCount > 0,
-                                    completedCount: proj.completedTaskCount,
-                                    totalCount: proj.totalTaskCount
-                                )
-                                Text(proj.title)
-                                    .font(.system(size: 14.5, weight: .semibold))
-                                Spacer()
-                                if proj.deadline != nil {
-                                    Image(systemName: "flag")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                    if !areaProjects.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(areaProjects) { proj in
+                                Button {
+                                    store.selectedDestination = .project(proj.id)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        ProjectProgressRing(
+                                            progress: proj.progress,
+                                            size: 18,
+                                            showFraction: proj.totalTaskCount > 0,
+                                            completedCount: proj.completedTaskCount,
+                                            totalCount: proj.totalTaskCount
+                                        )
+                                        Text(proj.title)
+                                            .font(.system(size: 14.5, weight: .semibold))
+                                        Spacer()
+                                        if proj.deadline != nil {
+                                            Image(systemName: "flag")
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                                        }
+                                        Text(store.trf("macos_items_count", max(0, proj.totalTaskCount - proj.completedTaskCount)))
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 11)
+                                    .thingsCardSurface(cornerRadius: 12)
                                 }
-                                Text(store.trf("macos_items_count", max(0, proj.totalTaskCount - proj.completedTaskCount)))
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 11)
-                            .thingsCardSurface(cornerRadius: 12)
-                        }
-                        .buttonStyle(.plain)
-                        .thingsDropTarget(cornerRadius: 12) { payloads in
-                            store.dropTasks(payloads, onto: .project(proj.id))
-                        }
-                        .contextMenu {
-                            Button(store.tr("project_edit_title")) {
-                                store.editingProject = proj
-                            }
-                            Button(store.tr("v2_save_as_template")) {
-                                store.saveProjectAsTemplate(proj.id)
-                            }
-                            Button(store.tr("v2_mark_reviewed")) {
-                                store.markProjectReviewed(proj.id)
-                            }
-                            Button(store.tr("action_duplicate_project")) {
-                                if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("v25_copy_suffix")) {
-                                    store.selectedDestination = .project(copy.id)
+                                .buttonStyle(.plain)
+                                .thingsDropTarget(cornerRadius: 12) { payloads in
+                                    store.dropTasks(payloads, onto: .project(proj.id))
                                 }
-                            }
-                            Button(store.tr("macos_complete_project")) {
-                                try? store.database.setProjectStatus(projectId: proj.id, status: .completed)
-                            }
-                            Divider()
-                            Button(role: .destructive) {
-                                store.deleteProjectWithUndo(proj)
-                            } label: {
-                                Text(store.tr("macos_delete_project"))
+                                .contextMenu {
+                                    Button(store.tr("project_edit_title")) {
+                                        store.editingProject = proj
+                                    }
+                                    Button(store.tr("v2_save_as_template")) {
+                                        store.saveProjectAsTemplate(proj.id)
+                                    }
+                                    Button(store.tr("v2_mark_reviewed")) {
+                                        store.markProjectReviewed(proj.id)
+                                    }
+                                    Button(store.tr("action_duplicate_project")) {
+                                        if let copy = try? store.database.duplicateProject(proj.id, copySuffix: store.tr("v25_copy_suffix")) {
+                                            store.selectedDestination = .project(copy.id)
+                                        }
+                                    }
+                                    Button(store.tr("macos_complete_project")) {
+                                        try? store.database.setProjectStatus(projectId: proj.id, status: .completed)
+                                    }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        store.deleteProjectWithUndo(proj)
+                                    } label: {
+                                        Text(store.tr("macos_delete_project"))
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
 
-            if !looseTasks.isEmpty {
-                Divider()
-                reorderableTaskStack(looseTasks, showSubtitle: false)
-            } else if areaProjects.isEmpty {
-                emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
+                    if !looseTasks.isEmpty {
+                        Divider()
+                        reorderableTaskStack(looseTasks, showSubtitle: false)
+                    } else if areaProjects.isEmpty {
+                        emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
+                    }
+                }
             }
         }
     }

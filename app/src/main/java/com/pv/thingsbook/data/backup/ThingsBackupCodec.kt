@@ -209,7 +209,9 @@ data class BackupPreferencesDto(
     val includeBetaUpdates: Boolean? = null,
     val tagSortMode: String? = null,
     val viewSortMode: String? = null,
-    val savedPerspectivesJson: String? = null
+    val savedPerspectivesJson: String? = null,
+    val workdayStartMinutes: Int? = null,
+    val workdayEndMinutes: Int? = null
 )
 
 data class BackupSummary(

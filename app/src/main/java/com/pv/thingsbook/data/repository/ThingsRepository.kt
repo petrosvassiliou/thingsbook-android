@@ -3627,6 +3627,256 @@ class ThingsRepository @Inject constructor(
         return projectId
     }
 
+    suspend fun createV3RoadmapProjectFromBlueprint(
+        blueprint: com.pv.thingsbook.data.ai.GeminiProjectBlueprintResponse,
+        areaId: String? = null
+    ): String {
+        val defaultProjTitle = tr(
+            en = "New Project",
+            de = "Neues Projekt",
+            fr = "Nouveau projet",
+            it = "Nuovo progetto",
+            es = "Nuevo proyecto"
+        )
+        val sectionPrefix = tr(
+            en = "Section",
+            de = "Abschnitt",
+            fr = "Section",
+            it = "Sezione",
+            es = "Sección"
+        )
+        val trimmedTitle = blueprint.projectTitle.trim().ifEmpty { defaultProjTitle }
+        val now = System.currentTimeMillis()
+        val projectId = UUID.randomUUID().toString()
+        val zone = ZoneId.systemDefault()
+        val todayDate = LocalDate.now(zone)
+        val todayEpoch = todayDate.atStartOfDay(zone).toInstant().toEpochMilli()
+
+        fun dayOffsetMillis(offsetDays: Int): Long =
+            todayDate.plusDays(offsetDays.coerceIn(0, 365).toLong())
+                .atStartOfDay(zone)
+                .toInstant()
+                .toEpochMilli()
+
+        val maxEndOffset = blueprint.headings.maxOfOrNull { h ->
+            h.endDayOffset ?: h.richTasks.maxOfOrNull { it.dayOffset } ?: 10
+        } ?: 10
+
+        database.withTransaction {
+            val projectEntity = ProjectEntity(
+                id = projectId,
+                areaId = areaId,
+                title = trimmedTitle,
+                notes = blueprint.projectNotes,
+                status = ProjectStatus.ACTIVE,
+                scheduleState = ScheduleState.TODAY,
+                whenDate = todayEpoch,
+                deadline = dayOffsetMillis(maxEndOffset.coerceAtLeast(1)),
+                completedAt = null,
+                sortOrder = now.toDouble(),
+                tagIdsJson = "[]",
+                viewMode = "roadmap",
+                createdAt = now,
+                updatedAt = now,
+                isDeleted = false,
+                isDirty = true
+            )
+            database.projectDao().upsert(projectEntity)
+
+            val taskIdByKey = HashMap<String, String>()
+            data class PendingRichTask(
+                val id: String,
+                val headingId: String,
+                val hIndex: Int,
+                val tIndex: Int,
+                val dto: com.pv.thingsbook.data.ai.GeminiRoadmapTaskDto
+            )
+            val pendingTasks = mutableListOf<PendingRichTask>()
+
+            blueprint.headings.forEachIndexed { hIndex, headingDto ->
+                val headingId = UUID.randomUUID().toString()
+                val richList = if (headingDto.richTasks.isNotEmpty()) {
+                    headingDto.richTasks.filter { it.title.isNotBlank() }
+                } else {
+                    headingDto.tasks.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
+                        .mapIndexed { tIdx, tTitle ->
+                            com.pv.thingsbook.data.ai.GeminiRoadmapTaskDto(
+                                key = "h${hIndex}_t$tIdx",
+                                title = tTitle,
+                                dayOffset = hIndex * 4 + tIdx,
+                                durationMinutes = 120,
+                                effortLevel = "MEDIUM",
+                                isMilestone = (hIndex == blueprint.headings.lastIndex && tIdx == headingDto.tasks.lastIndex)
+                            )
+                        }
+                }
+                val startOff = headingDto.startDayOffset ?: richList.minOfOrNull { it.dayOffset } ?: (hIndex * 4)
+                val endOff = maxOf(startOff, headingDto.endDayOffset ?: richList.maxOfOrNull { it.dayOffset } ?: (startOff + 3))
+                database.headingDao().upsert(
+                    HeadingEntity(
+                        id = headingId,
+                        projectId = projectId,
+                        title = headingDto.title.trim().ifEmpty { "$sectionPrefix ${hIndex + 1}" },
+                        startDate = dayOffsetMillis(startOff),
+                        endDate = dayOffsetMillis(endOff),
+                        sortOrder = (hIndex + 1) * 1000.0,
+                        isArchived = false,
+                        createdAt = now,
+                        updatedAt = now,
+                        isDeleted = false,
+                        isDirty = true
+                    )
+                )
+                richList.forEachIndexed { tIndex, rTask ->
+                    val newTaskId = UUID.randomUUID().toString()
+                    val cleanKey = rTask.key.trim()
+                    if (cleanKey.isNotEmpty()) {
+                        taskIdByKey[cleanKey] = newTaskId
+                    }
+                    pendingTasks += PendingRichTask(
+                        id = newTaskId,
+                        headingId = headingId,
+                        hIndex = hIndex,
+                        tIndex = tIndex,
+                        dto = rTask
+                    )
+                }
+            }
+
+            val entitiesToInsert = mutableListOf<TaskEntity>()
+            val checklistsToInsert = mutableListOf<ChecklistItemEntity>()
+
+            for (pt in pendingTasks) {
+                val r = pt.dto
+                val safeOffset = r.dayOffset.coerceIn(0, 365)
+                val itemMillis = dayOffsetMillis(safeOffset)
+                val schedState = if (safeOffset == 0) ScheduleState.TODAY else ScheduleState.UPCOMING
+                val resolvedBlockers = r.dependsOnKeys
+                    .mapNotNull { key -> taskIdByKey[key.trim()] }
+                    .filter { it != pt.id }
+                    .distinct()
+                val blockedJson = kotlinx.serialization.json.Json.encodeToString(
+                    kotlinx.serialization.builtins.ListSerializer(kotlinx.serialization.serializer<String>()),
+                    resolvedBlockers
+                )
+                val normEffort = com.pv.thingsbook.domain.model.EffortLevel.normalize(r.effortLevel) ?: "MEDIUM"
+                val safeDur = r.durationMinutes.coerceIn(15, 48_000)
+
+                entitiesToInsert += TaskEntity(
+                    id = pt.id,
+                    title = r.title.trim(),
+                    notes = r.notes.trim(),
+                    status = TaskStatus.OPEN,
+                    scheduleState = schedState,
+                    whenDate = itemMillis,
+                    deadline = if (r.isMilestone) itemMillis else null,
+                    reminderTime = null,
+                    durationMinutes = safeDur,
+                    completedAt = null,
+                    projectId = projectId,
+                    headingId = pt.headingId,
+                    areaId = areaId,
+                    recurrenceRuleJson = null,
+                    sortOrder = (pt.hIndex + 1) * 1000.0 + (pt.tIndex + 1) * 100.0,
+                    isPinned = false,
+                    isMilestone = r.isMilestone,
+                    effortLevel = normEffort,
+                    blockedByJson = blockedJson,
+                    tagIdsJson = "[]",
+                    createdAt = now,
+                    updatedAt = now,
+                    isDeleted = false,
+                    isDirty = true
+                )
+
+                r.checklist.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
+                    .forEachIndexed { cIdx, cTitle ->
+                        checklistsToInsert += ChecklistItemEntity(
+                            id = UUID.randomUUID().toString(),
+                            taskId = pt.id,
+                            title = cTitle,
+                            isCompleted = false,
+                            sortOrder = (cIdx + 1) * 100.0,
+                            createdAt = now,
+                            updatedAt = now,
+                            isDeleted = false,
+                            isDirty = true
+                        )
+                    }
+            }
+
+            if (entitiesToInsert.isNotEmpty()) {
+                database.taskDao().upsertAll(entitiesToInsert)
+            }
+            for (cl in checklistsToInsert) {
+                database.checklistDao().upsert(cl)
+            }
+        }
+
+        syncRepository.triggerBackgroundSync()
+        return projectId
+    }
+
+    suspend fun applyBatchTaskSchedulesAndDeadlines(
+        updates: List<com.pv.thingsbook.domain.model.CascadedTaskShift>
+    ) {
+        if (updates.isEmpty()) return
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            for (u in updates) {
+                val existing = database.taskDao().getById(u.task.id) ?: continue
+                database.taskDao().upsert(
+                    existing.copy(
+                        scheduleState = u.nextScheduleState,
+                        whenDate = u.nextWhenMillis,
+                        deadline = u.nextDeadlineMillis,
+                        updatedAt = now,
+                        isDirty = true
+                    )
+                )
+            }
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun applyBatchTaskTimeblocks(
+        updates: List<Triple<String, Int?, Int?>>
+    ) {
+        if (updates.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        database.withTransaction {
+            for ((taskId, startMins, durMins) in updates) {
+                val existing = database.taskDao().getById(taskId) ?: continue
+                val cleanStart = startMins?.coerceIn(0, 1439)
+                val cleanDur = durMins?.takeIf { it > 0 }?.coerceIn(5, 48_000)
+                val nextState = if (cleanStart != null && existing.scheduleState in setOf(
+                        ScheduleState.INBOX,
+                        ScheduleState.ANYTIME,
+                        ScheduleState.SOMEDAY
+                    )
+                ) {
+                    ScheduleState.TODAY
+                } else {
+                    existing.scheduleState
+                }
+                val nextWhen = if (cleanStart != null && existing.whenDate == null) todayEpoch else existing.whenDate
+                database.taskDao().upsert(
+                    existing.copy(
+                        scheduleState = nextState,
+                        whenDate = nextWhen,
+                        scheduledStartMinutes = cleanStart,
+                        durationMinutes = cleanDur,
+                        updatedAt = now,
+                        isDirty = true
+                    )
+                )
+            }
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
     // =========================================================================
     // v2.0 Project Templates & Markdown / JSON Outline Importer
     // =========================================================================

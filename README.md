@@ -4,16 +4,16 @@
 
 # Thingsbook
 
-**Native GTD & Visual Project Planning Suite for Android, ChromeOS & macOS (`v3.0.1`, Build `112`)**
+**Native GTD & Visual Project Planning Suite for Android, ChromeOS & macOS (`v3.1.0`, Build `113`)**
 
-[![Version](https://img.shields.io/badge/version-3.0.1%20(Build%20112)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v3.0.1)
+[![Version](https://img.shields.io/badge/version-3.1.0%20(Build%20113)-248BFD?style=flat-square)](https://github.com/petrosvassiliou/thingsbook-android/releases/tag/v3.1.0)
 [![Android](https://img.shields.io/badge/Android%20%26%20Googlebook-100%25%20Kotlin%20%2B%20Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](#1-thingsbook-for-android--googlebook-os-native-apk--v300)
 [![ChromeOS](https://img.shields.io/badge/ChromeOS-Standalone%20Launcher%20PWA-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#2-thingsbook-for-chromeos--web-standalone-pwa--v300)
 [![macOS](https://img.shields.io/badge/macOS-100%25%20Swift%20%2B%20SwiftUI%20Universal-000000?style=flat-square&logo=apple&logoColor=white)](#3-thingsbook-for-macos-native-universal-app--v300)
-[![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES%20(650%20keys)-6E56CF?style=flat-square)](#localization-5-languages)
+[![Languages](https://img.shields.io/badge/i18n-DE%20%7C%20EN%20%7C%20FR%20%7C%20IT%20%7C%20ES%20(675%20keys)-6E56CF?style=flat-square)](#localization-5-languages)
 [![Encryption](https://img.shields.io/badge/backup-AES--256--GCM-16A34A?style=flat-square)](#offline-first-storage-backups--cloud-sync)
 
-[**📱 Download Android APK (v3.0.1)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-v3.0.1-GTD-Full.apk) · [**🍎 Download macOS Universal DMG (v3.0.1)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.0.1/Thingsbook-macOS-v3.0.1-Universal.dmg) · [**💻 Launch ChromeOS / Web App**](https://thingsbook-prod.web.app) · [**📦 GitHub Releases**](https://github.com/petrosvassiliou/thingsbook-android/releases/latest) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
+[**📱 Download Android APK (v3.1.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.1.0/Thingsbook-v3.1.0-GTD-Full.apk) · [**🍎 Download macOS Universal DMG (v3.1.0)**](https://github.com/petrosvassiliou/thingsbook-android/releases/download/v3.1.0/Thingsbook-macOS-v3.1.0-Universal.dmg) · [**💻 Launch ChromeOS / Web App**](https://thingsbook-prod.web.app) · [**📦 GitHub Releases**](https://github.com/petrosvassiliou/thingsbook-android/releases/latest) · [**🇩🇪 Deutsch**](#-deutsche-dokumentation)
 
 </div>
 
@@ -24,6 +24,15 @@
 > **EN:** **Thingsbook** is an independent software project and is **in no way affiliated with, endorsed, or sponsored by Cultured Code GmbH & Co. KG** (the creators of *Things* / *Things 3*). Thingsbook operates **100% independently** and has **no data connection, interface, or compatibility with the official "Things Cloud" or any Cultured Code servers**. All data is stored strictly locally on your device (Room/SQLite on Android, IndexedDB on ChromeOS, SQLite3 + WAL on macOS) and optionally synced via this project's own independent Firebase Firestore backend.
 >
 > **DE:** Dieses Projekt ist eine komplett unabhängige Eigenentwicklung und steht in **keinerlei geschäftlicher, technischer oder rechtlicher Verbindung zur Cultured Code GmbH & Co. KG** (den Entwicklern von *Things* / *Things 3*). **Thingsbook funktioniert zu 100 % eigenständig** und besitzt **keinerlei Datenverbindung, Schnittstelle oder Kompatibilität zur offiziellen „Things Cloud“ oder sonstigen Servern von Cultured Code**. Alle Daten werden ausschließlich lokal auf dem jeweiligen Gerät (Android, ChromeOS, macOS) sowie optional im eigenen Firebase-Firestore-Backend des Projekts gespeichert.
+
+---
+
+## ✨ What’s New in `v3.1.0` (Build `113`)
+
+1. **📊 Area Portfolio Timeline with Collapsible Project Lanes & Vector PDF / High-DPI PNG Export:** Switch any Area into `Portfolio Timeline` mode to view stacked project summary bars with overlaid **45° Royal-Violet Milestone Diamonds (`◆`)**, expand projects inline to drag Phase/Task bars, present in Full-Screen (`F` / `⌃⌘F`), and export multi-page **A4 Vector PDFs** or **High-DPI PNGs**.
+2. **🔗 Smart Push-on-Conflict Cascading Dependencies + Multi-Task Undo:** Dragging a prerequisite task forward automatically cascades overlapping `Waiting On` dependents forward in real time (preserving slack when non-overlapping) with atomic `Cmd+Z` / `Ctrl+Z` Undo across all platforms.
+3. **⚖️ Configurable Workday Hours & 7-Day Workload Forecast:** Set custom **Workday Start / End** hours in Settings (synced in `.tbbackup`) and track a **7-Day Workload** strip + daily overload indicators across **Upcoming** and the **Wide-Screen Inspector**.
+4. **🧠 `v3`-Aware Gemini Roadmap Architect & `"Plan My Day"` Auto-Timeblocker:** Generate complete Gantt projects with dated Phases, `◆` Milestones, Effort, Durations & Dependencies, or click **`✨ Plan My Day`** in **Today** to preview, tweak (`±15m`), and apply conflict-free focus blocks around your calendar (`675` localized keys across `DE`, `EN`, `FR`, `IT`, `ES`).
 
 ---
 

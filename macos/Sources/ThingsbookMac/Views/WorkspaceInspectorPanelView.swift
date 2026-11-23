@@ -813,10 +813,19 @@ public struct WorkspaceInspectorPanelView: View {
     @ViewBuilder
     private var overviewInspectorContent: some View {
         todayCapacityAndProgressCard
+        inspectorWorkloadForecastCard
         todayMiniTimelineCard
         upcomingDeadlinesAndMilestonesCard
         if !visiblePinnedOpenTasks.isEmpty {
             pinnedTasksCard
+        }
+    }
+
+    @ViewBuilder
+    private var inspectorWorkloadForecastCard: some View {
+        let forecast = store.sevenDayWorkloadForecast()
+        if !forecast.isEmpty {
+            SevenDayWorkloadStripCard(store: store, forecast: forecast, compact: true)
         }
     }
 
@@ -847,18 +856,24 @@ public struct WorkspaceInspectorPanelView: View {
 
         let cal = Calendar.current
         let sod = cal.startOfDay(for: Date())
-        let dayStart = cal.date(byAdding: .hour, value: 9, to: sod) ?? sod
-        let dayEnd = cal.date(byAdding: .hour, value: 17, to: sod) ?? sod.addingTimeInterval(8 * 3600)
+        let nextSod = cal.date(byAdding: .day, value: 1, to: sod) ?? sod.addingTimeInterval(86_400)
+        let normBounds = TodayCapacityCalculator.normalizeWorkdayBounds(
+            startMinutes: store.preferences.workdayStartMinutes,
+            endMinutes: store.preferences.workdayEndMinutes
+        )
+        let totalWorkdayMinutes = Double(max(60, normBounds.endMinutes - normBounds.startMinutes))
         let cap = TodayCapacityCalculator.compute(
             tasks: openToday,
             calendarEvents: store.todayTimelineCalendarEvents(),
-            dayStartMillis: Int64(dayStart.timeIntervalSince1970 * 1000.0),
-            dayEndMillis: Int64(dayEnd.timeIntervalSince1970 * 1000.0)
+            dayStartMillis: DateEpochConverter.startOfDayMillis(for: sod, calendar: cal),
+            dayEndMillis: DateEpochConverter.startOfDayMillis(for: nextSod, calendar: cal),
+            workdayStartMinutes: normBounds.startMinutes,
+            workdayEndMinutes: normBounds.endMinutes
         )
         let plannedStr = TodayCapacityCalculator.formatMinutes(cap.plannedMinutes)
         let freeStr = TodayCapacityCalculator.formatMinutes(cap.freeMinutes)
         let capacityText = store.trf("v30_today_capacity_summary", plannedStr, freeStr)
-        let capacityLoadFraction = min(1.0, max(0.0, Double(480 - cap.freeMinutes) / 480.0))
+        let capacityLoadFraction = min(1.0, max(0.0, (totalWorkdayMinutes - Double(cap.freeMinutes)) / totalWorkdayMinutes))
         let barFraction = totalTodayCount > 0 ? max(completionFraction, capacityLoadFraction * 0.35) : capacityLoadFraction
 
         return VStack(alignment: .leading, spacing: 10) {

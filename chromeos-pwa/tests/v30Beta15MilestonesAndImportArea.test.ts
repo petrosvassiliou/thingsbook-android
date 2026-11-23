@@ -184,7 +184,7 @@ test('Milestone & External Import Area translations are defined across all 5 lan
   assert.equal(TRANSLATIONS.fr.milestoneLabel, 'Jalon');
   assert.equal(TRANSLATIONS.it.milestoneLabel, 'Traguardo');
   assert.equal(TRANSLATIONS.es.milestoneLabel, 'Hito');
-  assert.ok(APP_VERSION.startsWith('3.0.'));
+  assert.ok(APP_VERSION.startsWith('3.'));
 });
 
 test('localDb persists isMilestone across normalizeTask, upsertTask, batchDuplicateTasks, blueprint instantiation, and Asana import', async () => {

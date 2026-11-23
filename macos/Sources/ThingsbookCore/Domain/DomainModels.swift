@@ -1891,6 +1891,9 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var tagSortMode: String
     public var viewSortMode: String
     public var savedPerspectives: [SavedPerspective]
+    public var areaViewModes: [String: String]
+    public var workdayStartMinutes: Int
+    public var workdayEndMinutes: Int
 
     public init(
         localOnlyDbMode: Bool = false,
@@ -1909,7 +1912,10 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         menuBarSelectedProjectId: String? = nil,
         tagSortMode: String = "alpha",
         viewSortMode: String = "manual",
-        savedPerspectives: [SavedPerspective] = []
+        savedPerspectives: [SavedPerspective] = [],
+        areaViewModes: [String: String] = [:],
+        workdayStartMinutes: Int = TodayCapacityCalculator.defaultWorkdayStartMinutes,
+        workdayEndMinutes: Int = TodayCapacityCalculator.defaultWorkdayEndMinutes
     ) {
         self.localOnlyDbMode = localOnlyDbMode
         self.sidebarVisible = sidebarVisible
@@ -1928,6 +1934,13 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.tagSortMode = tagSortMode
         self.viewSortMode = viewSortMode
         self.savedPerspectives = savedPerspectives
+        self.areaViewModes = areaViewModes
+        let normalizedBounds = TodayCapacityCalculator.normalizeWorkdayBounds(
+            startMinutes: workdayStartMinutes,
+            endMinutes: workdayEndMinutes
+        )
+        self.workdayStartMinutes = normalizedBounds.startMinutes
+        self.workdayEndMinutes = normalizedBounds.endMinutes
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1936,6 +1949,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         case biometricLockEnabled, autoUpdateCheckEnabled, includeBetaUpdates
         case hideSampleSetupBanner, menuBarSelectedProjectId
         case tagSortMode, viewSortMode, savedPerspectives
+        case areaViewModes, workdayStartMinutes, workdayEndMinutes
     }
 
     public init(from decoder: Decoder) throws {
@@ -1957,6 +1971,12 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         self.tagSortMode = try c.decodeIfPresent(String.self, forKey: .tagSortMode) ?? "alpha"
         self.viewSortMode = try c.decodeIfPresent(String.self, forKey: .viewSortMode) ?? "manual"
         self.savedPerspectives = try c.decodeIfPresent([SavedPerspective].self, forKey: .savedPerspectives) ?? []
+        self.areaViewModes = try c.decodeIfPresent([String: String].self, forKey: .areaViewModes) ?? [:]
+        let rawStart = try c.decodeIfPresent(Int.self, forKey: .workdayStartMinutes) ?? TodayCapacityCalculator.defaultWorkdayStartMinutes
+        let rawEnd = try c.decodeIfPresent(Int.self, forKey: .workdayEndMinutes) ?? TodayCapacityCalculator.defaultWorkdayEndMinutes
+        let normalizedBounds = TodayCapacityCalculator.normalizeWorkdayBounds(startMinutes: rawStart, endMinutes: rawEnd)
+        self.workdayStartMinutes = normalizedBounds.startMinutes
+        self.workdayEndMinutes = normalizedBounds.endMinutes
     }
 
     private static let storageKey = "thingsbook_macos_preferences_v1"
@@ -2014,6 +2034,7 @@ public enum UndoActionKind: Equatable, Sendable {
     case taskDeleted(taskId: String, title: String)
     case tasksDeleted([String])
     case tasksMoved(snapshots: [TaskPlacementSnapshot], spawnedRecurringTaskIds: [String] = [])
+    case headingDatesChanged(headingId: String, previousStart: Int64?, previousEnd: Int64?)
     case projectDeleted(projectId: String, title: String, previousTaskProjects: [String: DetachedTaskPlacement], deletedTaskIds: [String] = [])
 }
 
@@ -3315,13 +3336,75 @@ public enum PerspectiveFilterEngine {
     }
 }
 
+public struct DayWorkloadSummary: Equatable, Hashable, Sendable, Identifiable {
+    public var id: Int { epochDay }
+    public let epochDay: Int
+    public let dayStartMillis: Int64
+    public let plannedTaskMinutes: Int
+    public let busyCalendarMinutes: Int
+    public let freeWorkdayMinutes: Int
+    public let totalWorkdayMinutes: Int
+    public let taskCount: Int
+
+    public init(
+        epochDay: Int,
+        dayStartMillis: Int64,
+        plannedTaskMinutes: Int,
+        busyCalendarMinutes: Int,
+        freeWorkdayMinutes: Int,
+        totalWorkdayMinutes: Int,
+        taskCount: Int
+    ) {
+        self.epochDay = epochDay
+        self.dayStartMillis = dayStartMillis
+        self.plannedTaskMinutes = plannedTaskMinutes
+        self.busyCalendarMinutes = busyCalendarMinutes
+        self.freeWorkdayMinutes = freeWorkdayMinutes
+        self.totalWorkdayMinutes = totalWorkdayMinutes
+        self.taskCount = taskCount
+    }
+
+    public var totalUsedMinutes: Int {
+        plannedTaskMinutes + busyCalendarMinutes
+    }
+
+    public var overloadedByMinutes: Int {
+        max(0, totalUsedMinutes - totalWorkdayMinutes)
+    }
+
+    public var isOverloaded: Bool {
+        overloadedByMinutes > 0
+    }
+
+    public var loadFraction: Double {
+        if totalWorkdayMinutes <= 0 {
+            return totalUsedMinutes > 0 ? 1.0 : 0.0
+        }
+        return min(1.5, max(0.0, Double(totalUsedMinutes) / Double(totalWorkdayMinutes)))
+    }
+}
+
 public enum TodayCapacityCalculator {
-    public static func compute(
+    public static let defaultWorkdayStartMinutes: Int = 540
+    public static let defaultWorkdayEndMinutes: Int = 1020
+
+    public static func normalizeWorkdayBounds(
+        startMinutes: Int,
+        endMinutes: Int
+    ) -> (startMinutes: Int, endMinutes: Int) {
+        let safeStart = min(23 * 60, max(0, startMinutes))
+        let safeEnd = min(24 * 60, max(safeStart + 60, endMinutes))
+        return (safeStart, safeEnd)
+    }
+
+    public static func computeBreakdown(
         tasks: [TaskItem],
         calendarEvents: [CalendarEventItem],
         dayStartMillis: Int64,
-        dayEndMillis: Int64
-    ) -> (plannedMinutes: Int, freeMinutes: Int) {
+        dayEndMillis: Int64,
+        workdayStartMinutes: Int = defaultWorkdayStartMinutes,
+        workdayEndMinutes: Int = defaultWorkdayEndMinutes
+    ) -> (plannedMinutes: Int, busyMinutes: Int, freeMinutes: Int, totalWorkdayMinutes: Int) {
         let plannedMinutes = tasks.reduce(0) { acc, task in
             guard !task.isDeleted, task.status == .open else { return acc }
             if let dur = task.durationMinutes, dur > 0 {
@@ -3333,16 +3416,40 @@ public enum TodayCapacityCalculator {
             return acc
         }
 
-        let totalWindowMinutes = max(0, Int((dayEndMillis - dayStartMillis) / 60_000))
-        guard totalWindowMinutes > 0 else {
-            return (plannedMinutes: plannedMinutes, freeMinutes: 0)
+        let (normStart, normEnd) = normalizeWorkdayBounds(
+            startMinutes: workdayStartMinutes,
+            endMinutes: workdayEndMinutes
+        )
+
+        let isLegacyPreSlicedDefaultWindow = (workdayStartMinutes == defaultWorkdayStartMinutes
+            && workdayEndMinutes == defaultWorkdayEndMinutes
+            && dayEndMillis > dayStartMillis
+            && (dayEndMillis - dayStartMillis) < 20 * 3_600_000)
+
+        let windowStartMs: Int64
+        let windowEndMs: Int64
+        let totalWorkdayMinutes: Int
+
+        if isLegacyPreSlicedDefaultWindow {
+            windowStartMs = dayStartMillis
+            windowEndMs = dayEndMillis
+            totalWorkdayMinutes = max(0, Int((dayEndMillis - dayStartMillis) / 60_000))
+        } else {
+            windowStartMs = dayStartMillis + Int64(normStart) * 60_000
+            let rawEndMs = dayStartMillis + Int64(normEnd) * 60_000
+            windowEndMs = dayEndMillis > windowStartMs ? min(dayEndMillis, rawEndMs) : rawEndMs
+            totalWorkdayMinutes = max(0, min(24 * 60, Int((windowEndMs - windowStartMs) / 60_000)))
+        }
+
+        guard totalWorkdayMinutes > 0 else {
+            return (plannedMinutes: plannedMinutes, busyMinutes: 0, freeMinutes: 0, totalWorkdayMinutes: 0)
         }
 
         let clampedIntervals: [(Int64, Int64)] = calendarEvents
             .filter { !$0.isAllDay }
             .compactMap { ev in
-                let start = max(dayStartMillis, ev.startMillis)
-                let end = min(dayEndMillis, ev.endMillis)
+                let start = max(windowStartMs, ev.startMillis)
+                let end = min(windowEndMs, ev.endMillis)
                 return end > start ? (start, end) : nil
             }
             .sorted { $0.0 < $1.0 }
@@ -3359,8 +3466,99 @@ public enum TodayCapacityCalculator {
         let busyEventMinutes = mergedIntervals.reduce(0) { acc, span in
             acc + max(0, Int((span.1 - span.0) / 60_000))
         }
-        let freeMinutes = max(0, totalWindowMinutes - busyEventMinutes - plannedMinutes)
-        return (plannedMinutes: plannedMinutes, freeMinutes: freeMinutes)
+        let freeMinutes = max(0, totalWorkdayMinutes - busyEventMinutes - plannedMinutes)
+        return (
+            plannedMinutes: plannedMinutes,
+            busyMinutes: busyEventMinutes,
+            freeMinutes: freeMinutes,
+            totalWorkdayMinutes: totalWorkdayMinutes
+        )
+    }
+
+    public static func compute(
+        tasks: [TaskItem],
+        calendarEvents: [CalendarEventItem],
+        dayStartMillis: Int64,
+        dayEndMillis: Int64 = 0,
+        workdayStartMinutes: Int = defaultWorkdayStartMinutes,
+        workdayEndMinutes: Int = defaultWorkdayEndMinutes
+    ) -> (plannedMinutes: Int, freeMinutes: Int) {
+        let breakdown = computeBreakdown(
+            tasks: tasks,
+            calendarEvents: calendarEvents,
+            dayStartMillis: dayStartMillis,
+            dayEndMillis: dayEndMillis,
+            workdayStartMinutes: workdayStartMinutes,
+            workdayEndMinutes: workdayEndMinutes
+        )
+        return (plannedMinutes: breakdown.plannedMinutes, freeMinutes: breakdown.freeMinutes)
+    }
+
+    public static func computeSevenDayForecast(
+        todayTasks: [TaskItem],
+        allOpenTasks: [TaskItem],
+        calendarEvents: [CalendarEventItem],
+        todayMillis: Int64,
+        daysCount: Int = 7,
+        workdayStartMinutes: Int = defaultWorkdayStartMinutes,
+        workdayEndMinutes: Int = defaultWorkdayEndMinutes,
+        calendar: Calendar = .current
+    ) -> [DayWorkloadSummary] {
+        let safeDays = min(30, max(1, daysCount))
+        let (normStart, normEnd) = normalizeWorkdayBounds(
+            startMinutes: workdayStartMinutes,
+            endMinutes: workdayEndMinutes
+        )
+        let configuredWorkdayMinutes = max(60, normEnd - normStart)
+        let todayEpochDay = DateEpochConverter.epochDay(forMillis: todayMillis, calendar: calendar)
+
+        var seenToday = Set<String>()
+        let deduplicatedToday = todayTasks.filter {
+            !$0.isDeleted && $0.status == .open && seenToday.insert($0.id).inserted
+        }
+
+        var futureTasksByDay: [Int: [TaskItem]] = [:]
+        for task in allOpenTasks {
+            guard !task.isDeleted, task.status == .open else { continue }
+            if task.scheduleState == .today || task.scheduleState == .thisEvening { continue }
+            guard let targetMs = task.whenDate ?? task.deadline else { continue }
+            let targetDay = DateEpochConverter.epochDay(forMillis: targetMs, calendar: calendar)
+            if targetDay > todayEpochDay && targetDay < todayEpochDay + safeDays {
+                futureTasksByDay[targetDay, default: []].append(task)
+            }
+        }
+
+        return (0..<safeDays).map { offset in
+            let dayEpoch = todayEpochDay + offset
+            let dayDate = DateEpochConverter.date(fromEpochDay: dayEpoch, calendar: calendar)
+            let dayStartMs = DateEpochConverter.startOfDayMillis(for: dayDate, calendar: calendar)
+            let nextDayDate = calendar.date(byAdding: .day, value: 1, to: dayDate)
+                ?? dayDate.addingTimeInterval(86_400)
+            let dayEndMs = DateEpochConverter.startOfDayMillis(for: nextDayDate, calendar: calendar)
+
+            let dayTasks = offset == 0 ? deduplicatedToday : (futureTasksByDay[dayEpoch] ?? [])
+            let dayEvents = calendarEvents.filter { ev in
+                !ev.isAllDay && ev.endMillis > dayStartMs && ev.startMillis < dayEndMs
+            }
+
+            let breakdown = computeBreakdown(
+                tasks: dayTasks,
+                calendarEvents: dayEvents,
+                dayStartMillis: dayStartMs,
+                dayEndMillis: dayEndMs,
+                workdayStartMinutes: normStart,
+                workdayEndMinutes: normEnd
+            )
+            return DayWorkloadSummary(
+                epochDay: dayEpoch,
+                dayStartMillis: dayStartMs,
+                plannedTaskMinutes: breakdown.plannedMinutes,
+                busyCalendarMinutes: breakdown.busyMinutes,
+                freeWorkdayMinutes: breakdown.freeMinutes,
+                totalWorkdayMinutes: configuredWorkdayMinutes,
+                taskCount: dayTasks.count
+            )
+        }
     }
 
     public static func formatMinutes(_ minutes: Int) -> String {
@@ -3959,6 +4157,451 @@ public enum ProjectRoadmapEngine {
         }
 
         return (resolvedSchedule, nextWhen, nextDeadline)
+    }
+
+    private static func resolveRawTaskSpanEpochDays(
+        task: TaskItem,
+        calendar: Calendar
+    ) -> (startDay: Int, endDay: Int)? {
+        if task.isMilestone {
+            guard let targetMillis = task.deadline ?? task.whenDate else { return nil }
+            let targetDay = DateEpochConverter.epochDay(forMillis: targetMillis, calendar: calendar)
+            return (targetDay, targetDay)
+        }
+        let spanDays = durationSpanDays(for: task.durationMinutes)
+        if let whenMs = task.whenDate, let deadlineMs = task.deadline {
+            let wDay = DateEpochConverter.epochDay(forMillis: whenMs, calendar: calendar)
+            let dDay = DateEpochConverter.epochDay(forMillis: deadlineMs, calendar: calendar)
+            return (min(wDay, dDay), max(wDay, dDay))
+        } else if let whenMs = task.whenDate {
+            let sDay = DateEpochConverter.epochDay(forMillis: whenMs, calendar: calendar)
+            return (sDay, sDay + spanDays - 1)
+        } else if let deadlineMs = task.deadline {
+            let eDay = DateEpochConverter.epochDay(forMillis: deadlineMs, calendar: calendar)
+            return (eDay - (spanDays - 1), eDay)
+        }
+        return nil
+    }
+
+    /// Smart Push-on-Conflict Dependency Cascade:
+    /// Shifts `anchorTask` by `deltaDays`, then runs a cycle-safe BFS over open downstream tasks
+    /// (`status == .open && !isDeleted`) whose `blockedByTaskIds` reference an upstream shifted task.
+    /// Downstream tasks are pushed forward ONLY when `blockerNewEndDay >= depEffectiveStartDay`,
+    /// preserving slack when there is no overlap and never pulling downstream tasks backward.
+    public static func computeSmartDependencyCascade(
+        anchorTask: TaskItem,
+        deltaDays: Int,
+        projectTasks: [TaskItem],
+        todayMillis: Int64,
+        calendar: Calendar = .current
+    ) -> [CascadedTaskShift] {
+        guard deltaDays != 0 else { return [] }
+        let todayDay = DateEpochConverter.epochDay(forMillis: todayMillis, calendar: calendar)
+
+        var taskById: [String: TaskItem] = [anchorTask.id: anchorTask]
+        var orderedInputTasks: [TaskItem] = [anchorTask]
+        for t in projectTasks where !t.isDeleted && t.status != .canceled {
+            if taskById[t.id] == nil {
+                orderedInputTasks.append(t)
+            }
+            taskById[t.id] = t
+        }
+
+        var dependentsByBlocker: [String: [TaskItem]] = [:]
+        for t in orderedInputTasks where t.status == .open && !t.isDeleted {
+            var seenBlockers = Set<String>()
+            for rawBlocker in t.blockedByTaskIds {
+                let clean = rawBlocker.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !clean.isEmpty, clean != t.id, seenBlockers.insert(clean).inserted {
+                    dependentsByBlocker[clean, default: []].append(t)
+                }
+            }
+        }
+
+        var baseSpanByTaskId: [String: (startDay: Int, endDay: Int)] = [:]
+        for t in orderedInputTasks {
+            if let span = resolveRawTaskSpanEpochDays(task: t, calendar: calendar) {
+                baseSpanByTaskId[t.id] = span
+            }
+        }
+        if baseSpanByTaskId[anchorTask.id] == nil {
+            let durDays = anchorTask.isMilestone ? 1 : durationSpanDays(for: anchorTask.durationMinutes)
+            baseSpanByTaskId[anchorTask.id] = (todayDay, todayDay + durDays - 1)
+        }
+
+        var appliedDeltaByTaskId: [String: Int] = [anchorTask.id: deltaDays]
+        var orderedShiftedIds: [String] = [anchorTask.id]
+        var queue: [String] = [anchorTask.id]
+        var head = 0
+        var guardCount = 0
+        let maxIterations = max(16, taskById.count * 4)
+
+        while head < queue.count && guardCount < maxIterations {
+            guardCount += 1
+            let currentId = queue[head]
+            head += 1
+
+            guard let curBase = baseSpanByTaskId[currentId] else { continue }
+            let curDelta = appliedDeltaByTaskId[currentId] ?? 0
+            let curShiftedEnd = curBase.endDay + curDelta
+
+            for dep in dependentsByBlocker[currentId] ?? [] {
+                guard dep.id != anchorTask.id,
+                      let depBase = baseSpanByTaskId[dep.id] else {
+                    continue
+                }
+                let existingDepDelta = appliedDeltaByTaskId[dep.id] ?? 0
+                let depEffectiveStart = depBase.startDay + existingDepDelta
+                if curShiftedEnd >= depEffectiveStart {
+                    let pushNeeded = (curShiftedEnd + 1) - depEffectiveStart
+                    let nextDepDelta = existingDepDelta + pushNeeded
+                    if nextDepDelta > existingDepDelta {
+                        if appliedDeltaByTaskId[dep.id] == nil {
+                            orderedShiftedIds.append(dep.id)
+                        }
+                        appliedDeltaByTaskId[dep.id] = nextDepDelta
+                        queue.append(dep.id)
+                    }
+                }
+            }
+        }
+
+        var results: [CascadedTaskShift] = []
+        for taskId in orderedShiftedIds {
+            guard let taskDelta = appliedDeltaByTaskId[taskId],
+                  taskDelta != 0,
+                  let targetTask = taskById[taskId] else {
+                continue
+            }
+            let shifted = shiftTaskDates(
+                task: targetTask,
+                deltaDays: taskDelta,
+                todayMillis: todayMillis,
+                calendar: calendar
+            )
+            results.append(
+                CascadedTaskShift(
+                    task: targetTask,
+                    deltaDays: taskDelta,
+                    nextScheduleState: shifted.scheduleState,
+                    nextWhenMillis: shifted.whenDate,
+                    nextDeadlineMillis: shifted.deadline,
+                    isAnchor: taskId == anchorTask.id
+                )
+            )
+        }
+        return results
+    }
+
+    public static func computeCascadeDeltaPreviewMap(
+        anchorTask: TaskItem,
+        deltaDays: Int,
+        projectTasks: [TaskItem],
+        todayMillis: Int64,
+        calendar: Calendar = .current
+    ) -> [String: Int] {
+        guard deltaDays != 0 else { return [:] }
+        let shifts = computeSmartDependencyCascade(
+            anchorTask: anchorTask,
+            deltaDays: deltaDays,
+            projectTasks: projectTasks,
+            todayMillis: todayMillis,
+            calendar: calendar
+        )
+        return Dictionary(uniqueKeysWithValues: shifts.map { ($0.task.id, $0.deltaDays) })
+    }
+
+    public static func buildAreaPortfolioLayout(
+        area: Area,
+        projects: [Project],
+        headings: [Heading],
+        tasks: [TaskItem],
+        todayMillis: Int64,
+        calendar: Calendar = .current
+    ) -> AreaPortfolioRoadmapLayout {
+        let todayEpochDay = DateEpochConverter.epochDay(forMillis: todayMillis, calendar: calendar)
+        let activeProjects = projects
+            .filter { !$0.isDeleted && $0.status == .active && $0.areaId == area.id }
+            .sorted { lhs, rhs in
+                if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+                return lhs.id < rhs.id
+            }
+
+        let headingsByProject = Dictionary(
+            grouping: headings.filter { !$0.isDeleted && !$0.isArchived },
+            by: \.projectId
+        )
+        let tasksByProject = Dictionary(
+            grouping: tasks.filter { !$0.isDeleted && $0.status != .canceled && $0.projectId != nil },
+            by: { $0.projectId! }
+        )
+
+        var projectLanes: [AreaPortfolioProjectLane] = []
+        var unscheduledProjects: [Project] = []
+
+        for proj in activeProjects {
+            let projHeadings = headingsByProject[proj.id] ?? []
+            let projTasks = tasksByProject[proj.id] ?? []
+            let subLayout = buildLayout(
+                project: proj,
+                headings: projHeadings,
+                tasks: projTasks,
+                todayMillis: todayMillis,
+                calendar: calendar
+            )
+
+            var candidateStarts: [Int] = []
+            var candidateEnds: [Int] = []
+            for pb in subLayout.phaseBars {
+                candidateStarts.append(pb.startEpochDay)
+                candidateEnds.append(pb.endEpochDay)
+            }
+            for tb in subLayout.allTaskBars {
+                candidateStarts.append(tb.startEpochDay)
+                candidateEnds.append(tb.endEpochDay)
+            }
+            if let whenMs = proj.whenDate {
+                candidateStarts.append(DateEpochConverter.epochDay(forMillis: whenMs, calendar: calendar))
+            }
+            if let dlMs = proj.deadline {
+                candidateEnds.append(DateEpochConverter.epochDay(forMillis: dlMs, calendar: calendar))
+            }
+
+            if candidateStarts.isEmpty && candidateEnds.isEmpty {
+                unscheduledProjects.append(proj)
+            } else {
+                let combined = candidateStarts + candidateEnds
+                let rawMin = combined.min() ?? todayEpochDay
+                let rawMax = combined.max() ?? rawMin
+                let startDay = min(rawMin, rawMax)
+                let endDay = max(startDay, rawMax)
+                let milestones = subLayout.allTaskBars.filter { $0.isMilestone || $0.task.isMilestone }
+                projectLanes.append(
+                    AreaPortfolioProjectLane(
+                        project: proj,
+                        projectLayout: subLayout,
+                        summaryStartEpochDay: startDay,
+                        summaryEndEpochDay: endDay,
+                        milestoneBars: milestones
+                    )
+                )
+            }
+        }
+
+        let leadingBufferDays = 3
+        let minTimelineDays = 21
+        let trailingBufferDays = 7
+
+        let minScheduled = projectLanes.map(\.summaryStartEpochDay).min()
+        let maxScheduled = projectLanes.map(\.summaryEndEpochDay).max()
+        let defaultStart = todayEpochDay - leadingBufferDays
+        let windowStart = (minScheduled != nil && minScheduled! < defaultStart)
+            ? (minScheduled! - 1)
+            : defaultStart
+        let minRequiredEnd = windowStart + minTimelineDays - 1
+        let rawEnd = maxScheduled != nil
+            ? max(minRequiredEnd, maxScheduled! + trailingBufferDays)
+            : minRequiredEnd
+
+        let anchorDate = DateEpochConverter.date(fromEpochDay: maxScheduled ?? todayEpochDay, calendar: calendar)
+        let twoMonthsLater = calendar.date(byAdding: .month, value: 2, to: anchorDate)
+            ?? anchorDate.addingTimeInterval(60.0 * 86_400.0)
+        let twoMonthCapDay = DateEpochConverter.epochDay(for: twoMonthsLater, calendar: calendar)
+        let maxAllowedEnd = max(minRequiredEnd, twoMonthCapDay)
+        let windowEnd = min(rawEnd, maxAllowedEnd)
+
+        return AreaPortfolioRoadmapLayout(
+            area: area,
+            todayEpochDay: todayEpochDay,
+            startEpochDay: windowStart,
+            endEpochDay: windowEnd,
+            projectLanes: projectLanes,
+            unscheduledProjects: unscheduledProjects
+        )
+    }
+
+    public static func toExportablePortfolioLayout(
+        portfolioLayout: AreaPortfolioRoadmapLayout,
+        expandedProjectIds: Set<String> = [],
+        calendar: Calendar = .current
+    ) -> (project: Project, headings: [Heading], layout: ProjectRoadmapLayout) {
+        let totalTasks = portfolioLayout.projectLanes.reduce(0) { $0 + $1.project.totalTaskCount }
+        let doneTasks = portfolioLayout.projectLanes.reduce(0) { $0 + $1.project.completedTaskCount }
+        let maxDeadline = portfolioLayout.projectLanes.compactMap(\.project.deadline).max()
+        let startMillis = DateEpochConverter.startOfDayMillis(
+            for: DateEpochConverter.date(fromEpochDay: portfolioLayout.startEpochDay, calendar: calendar),
+            calendar: calendar
+        )
+
+        let syntheticProject = Project(
+            id: "area_export_\(portfolioLayout.area.id)",
+            areaId: portfolioLayout.area.id,
+            title: portfolioLayout.area.title,
+            notes: "",
+            status: .active,
+            scheduleState: .anytime,
+            whenDate: startMillis,
+            deadline: maxDeadline,
+            completedAt: nil,
+            sortOrder: portfolioLayout.area.sortOrder,
+            tagIds: portfolioLayout.area.tagIds,
+            viewMode: "roadmap",
+            totalTaskCount: totalTasks,
+            completedTaskCount: doneTasks,
+            createdAt: portfolioLayout.area.createdAt,
+            updatedAt: portfolioLayout.area.updatedAt
+        )
+
+        var syntheticHeadings: [Heading] = []
+        var phaseBars: [RoadmapPhaseBar] = []
+        var taskBarsByHeading: [String: [RoadmapTaskBar]] = [:]
+        var allTaskBars: [RoadmapTaskBar] = []
+        var dependencyEdges: [RoadmapDependencyEdge] = []
+
+        for (idx, pLane) in portfolioLayout.projectLanes.enumerated() {
+            let hStartMs = DateEpochConverter.startOfDayMillis(
+                for: DateEpochConverter.date(fromEpochDay: pLane.summaryStartEpochDay, calendar: calendar),
+                calendar: calendar
+            )
+            let hEndMs = DateEpochConverter.startOfDayMillis(
+                for: DateEpochConverter.date(fromEpochDay: pLane.summaryEndEpochDay, calendar: calendar),
+                calendar: calendar
+            )
+            let synHeading = Heading(
+                id: pLane.projectId,
+                projectId: syntheticProject.id,
+                title: pLane.project.title,
+                sortOrder: Double(idx + 1) * 100.0,
+                isArchived: false,
+                startDate: hStartMs,
+                endDate: hEndMs,
+                createdAt: pLane.project.createdAt,
+                updatedAt: pLane.project.updatedAt
+            )
+            syntheticHeadings.append(synHeading)
+            phaseBars.append(
+                RoadmapPhaseBar(
+                    heading: synHeading,
+                    startEpochDay: pLane.summaryStartEpochDay,
+                    endEpochDay: pLane.summaryEndEpochDay,
+                    hasExplicitDates: true
+                )
+            )
+
+            let isExpanded = expandedProjectIds.contains(pLane.projectId)
+            let sourceBars = isExpanded ? pLane.projectLayout.allTaskBars : pLane.milestoneBars
+            let remapped = sourceBars.map { tb in
+                RoadmapTaskBar(
+                    task: tb.task,
+                    headingId: synHeading.id,
+                    startEpochDay: tb.startEpochDay,
+                    endEpochDay: tb.endEpochDay,
+                    isMilestone: tb.isMilestone
+                )
+            }
+            taskBarsByHeading[synHeading.id] = remapped
+            allTaskBars.append(contentsOf: remapped)
+            if isExpanded {
+                dependencyEdges.append(contentsOf: pLane.projectLayout.dependencyEdges)
+            }
+        }
+
+        let exportLayout = ProjectRoadmapLayout(
+            projectId: syntheticProject.id,
+            todayEpochDay: portfolioLayout.todayEpochDay,
+            startEpochDay: portfolioLayout.startEpochDay,
+            endEpochDay: portfolioLayout.endEpochDay,
+            phaseBars: phaseBars,
+            generalTaskBars: [],
+            taskBarsByHeading: taskBarsByHeading,
+            allTaskBars: allTaskBars,
+            dependencyEdges: dependencyEdges,
+            unscheduledTasks: []
+        )
+        return (syntheticProject, syntheticHeadings, exportLayout)
+    }
+}
+
+public struct CascadedTaskShift: Equatable, Sendable {
+    public let task: TaskItem
+    public let deltaDays: Int
+    public let nextScheduleState: ScheduleState
+    public let nextWhenMillis: Int64?
+    public let nextDeadlineMillis: Int64?
+    public let isAnchor: Bool
+
+    public init(
+        task: TaskItem,
+        deltaDays: Int,
+        nextScheduleState: ScheduleState,
+        nextWhenMillis: Int64?,
+        nextDeadlineMillis: Int64?,
+        isAnchor: Bool
+    ) {
+        self.task = task
+        self.deltaDays = deltaDays
+        self.nextScheduleState = nextScheduleState
+        self.nextWhenMillis = nextWhenMillis
+        self.nextDeadlineMillis = nextDeadlineMillis
+        self.isAnchor = isAnchor
+    }
+}
+
+public struct AreaPortfolioProjectLane: Identifiable, Equatable, Sendable {
+    public var id: String { project.id }
+    public var projectId: String { project.id }
+    public let project: Project
+    public let projectLayout: ProjectRoadmapLayout
+    public let summaryStartEpochDay: Int
+    public let summaryEndEpochDay: Int
+    public let milestoneBars: [RoadmapTaskBar]
+
+    public init(
+        project: Project,
+        projectLayout: ProjectRoadmapLayout,
+        summaryStartEpochDay: Int,
+        summaryEndEpochDay: Int,
+        milestoneBars: [RoadmapTaskBar]
+    ) {
+        self.project = project
+        self.projectLayout = projectLayout
+        self.summaryStartEpochDay = summaryStartEpochDay
+        self.summaryEndEpochDay = max(summaryStartEpochDay, summaryEndEpochDay)
+        self.milestoneBars = milestoneBars
+    }
+
+    public var spanDays: Int {
+        max(1, summaryEndEpochDay - summaryStartEpochDay + 1)
+    }
+}
+
+public struct AreaPortfolioRoadmapLayout: Equatable, Sendable {
+    public let area: Area
+    public let todayEpochDay: Int
+    public let startEpochDay: Int
+    public let endEpochDay: Int
+    public let projectLanes: [AreaPortfolioProjectLane]
+    public let unscheduledProjects: [Project]
+
+    public init(
+        area: Area,
+        todayEpochDay: Int,
+        startEpochDay: Int,
+        endEpochDay: Int,
+        projectLanes: [AreaPortfolioProjectLane],
+        unscheduledProjects: [Project]
+    ) {
+        self.area = area
+        self.todayEpochDay = todayEpochDay
+        self.startEpochDay = startEpochDay
+        self.endEpochDay = max(startEpochDay, endEpochDay)
+        self.projectLanes = projectLanes
+        self.unscheduledProjects = unscheduledProjects
+    }
+
+    public var totalDays: Int {
+        max(1, endEpochDay - startEpochDay + 1)
     }
 }
 

@@ -8,6 +8,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.geometry.Offset
 import com.pv.thingsbook.domain.model.ProjectRoadmapEngine
 import com.pv.thingsbook.domain.model.ProjectWorkspaceMode
+import com.pv.thingsbook.domain.model.DayWorkloadSummary
+import com.pv.thingsbook.domain.model.computeMultiDayWorkloadForecast
+import com.pv.thingsbook.ui.components.AreaPortfolioRoadmapWorkspace
+import com.pv.thingsbook.ui.components.AreaWorkspaceSegmentedSwitcher
+import com.pv.thingsbook.ui.components.SevenDayWorkloadStripCard
 import com.pv.thingsbook.ui.components.CompactMobileDragDropDock
 import com.pv.thingsbook.ui.components.MagicPlusDropMode
 import com.pv.thingsbook.ui.components.MagicPlusPositionalDropHandler
@@ -399,6 +404,12 @@ fun ThingsSmartViewScreen(
     val openTaskIds by viewModel.openTaskIds.collectAsState()
     val calendarEventsEnabledTop by viewModel.calendarEventsEnabled.collectAsState()
     val rawTodayCalendarEventsTop by viewModel.todayCalendarEvents.collectAsState()
+    val upcomingCalendarEventsByDateTop by viewModel.upcomingCalendarEventsByDate.collectAsState()
+    val workdayStartMinutesTop by viewModel.workdayStartMinutes.collectAsState()
+    val workdayEndMinutesTop by viewModel.workdayEndMinutes.collectAsState()
+    val areaViewModesTop by viewModel.areaViewModes.collectAsState()
+    val geminiInitialTabTop by viewModel.geminiInitialTab.collectAsState()
+    val geminiDayPlanPreviewTop by viewModel.geminiDayPlanPreview.collectAsState()
     val allHeadingsTop by viewModel.allHeadings.collectAsState()
     val currentEpochDayTop by viewModel.currentEpochDay.collectAsState()
 
@@ -504,7 +515,9 @@ fun ThingsSmartViewScreen(
         rawTodayCalendarEventsTop,
         calendarEventsEnabledTop,
         todayDayStartMillis,
-        todayDayEndMillis
+        todayDayEndMillis,
+        workdayStartMinutesTop,
+        workdayEndMinutesTop
     ) {
         val combinedToday = (todayTasks + eveningTasks).distinctBy { it.id }
         val activeCalEvents = if (calendarEventsEnabledTop) rawTodayCalendarEventsTop else emptyList()
@@ -512,7 +525,41 @@ fun ThingsSmartViewScreen(
             tasks = combinedToday,
             calendarEvents = activeCalEvents,
             dayStartMillis = todayDayStartMillis,
-            dayEndMillis = todayDayEndMillis
+            dayEndMillis = todayDayEndMillis,
+            workdayStartMinutes = workdayStartMinutesTop,
+            workdayEndMinutes = workdayEndMinutesTop
+        )
+    }
+
+    val sevenDayWorkloadForecastTop: List<DayWorkloadSummary> = remember(
+        todayTasks,
+        eveningTasks,
+        allOpenTasks,
+        rawTodayCalendarEventsTop,
+        upcomingCalendarEventsByDateTop,
+        calendarEventsEnabledTop,
+        currentEpochDayTop,
+        workdayStartMinutesTop,
+        workdayEndMinutesTop,
+        zoneTop
+    ) {
+        val combinedToday = (todayTasks + eveningTasks).distinctBy { it.id }
+        val activeTodayCal = if (calendarEventsEnabledTop) rawTodayCalendarEventsTop else emptyList()
+        val activeUpcomingCal = if (calendarEventsEnabledTop) {
+            upcomingCalendarEventsByDateTop.mapKeys { it.key.toEpochDay() }
+        } else {
+            emptyMap()
+        }
+        computeMultiDayWorkloadForecast(
+            todayTasks = combinedToday,
+            allOpenTasks = allOpenTasks,
+            todayCalendarEvents = activeTodayCal,
+            upcomingCalendarEventsByEpochDay = activeUpcomingCal,
+            todayEpochDay = currentEpochDayTop,
+            daysCount = 7,
+            workdayStartMinutes = workdayStartMinutesTop,
+            workdayEndMinutes = workdayEndMinutesTop,
+            zoneId = zoneTop
         )
     }
 
@@ -527,6 +574,10 @@ fun ThingsSmartViewScreen(
         allVisibleViewTasks.map { it.id }
     }
 
+    val currentAreaWorkspaceMode: ProjectWorkspaceMode = remember(currentArea?.id, areaViewModesTop) {
+        currentArea?.id?.let { areaViewModesTop[it] } ?: ProjectWorkspaceMode.LIST
+    }
+
     // Adaptive Layout Detection: Tablets & Foldables (>= 700dp) vs. Android Phones (< 700dp)
     val isTodayTimelineActive = navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) &&
         isTodayTimelineMode &&
@@ -535,7 +586,11 @@ fun ThingsSmartViewScreen(
         currentProject != null &&
         currentProjectWorkspaceMode == ProjectWorkspaceMode.ROADMAP &&
         !isQuickFindOpen
-    val isEffectiveTimelineFullScreen = isTimelineFullScreen && (isTodayTimelineActive || isProjectRoadmapActive)
+    val isAreaRoadmapActive = isAreaView &&
+        currentArea != null &&
+        currentAreaWorkspaceMode == ProjectWorkspaceMode.ROADMAP &&
+        !isQuickFindOpen
+    val isEffectiveTimelineFullScreen = isTimelineFullScreen && (isTodayTimelineActive || isProjectRoadmapActive || isAreaRoadmapActive)
 
     val isChromeOsOrPcHardware = remember(appCtx) {
         val pm = appCtx.packageManager
@@ -1425,6 +1480,11 @@ fun ThingsSmartViewScreen(
                                 currentProject?.let { proj -> viewModel.updateProjectViewMode(proj.id, nextMode) }
                             },
                             currentArea = currentArea,
+                            areaWorkspaceMode = currentAreaWorkspaceMode,
+                            onSelectAreaWorkspaceMode = { nextMode ->
+                                currentArea?.let { a -> viewModel.updateAreaViewMode(a.id, nextMode) }
+                            },
+                            onOpenPlanMyDay = { viewModel.openGeminiDayPlanner() },
                             currentPerspective = currentPerspective,
                             areas = areas,
                             projects = activeProjects,
@@ -1509,6 +1569,8 @@ fun ThingsSmartViewScreen(
                         currentProject = currentProject,
                         projectWorkspaceMode = currentProjectWorkspaceMode,
                         currentArea = currentArea,
+                        areaWorkspaceMode = currentAreaWorkspaceMode,
+                        sevenDayWorkload = sevenDayWorkloadForecastTop,
                         primaryTasks = primaryTasks,
                         filteredEveningTasks = filteredEveningTasks,
                         allVisibleTaskIds = allVisibleTaskIds,
@@ -1556,6 +1618,7 @@ fun ThingsSmartViewScreen(
                                     todayPlannedMinutes = todayCapacitySummary.first,
                                     todayFreeMinutes = todayCapacitySummary.second,
                                     completedTodayCount = completedTodayCount,
+                                    sevenDayWorkload = sevenDayWorkloadForecastTop,
                                     areas = areas,
                                     projects = activeProjects,
                                     todayDate = todayDateTop,
@@ -2757,6 +2820,8 @@ private fun ThingsMainTaskLazyList(
     currentProject: Project? = null,
     projectWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
     currentArea: Area?,
+    areaWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
+    sevenDayWorkload: List<DayWorkloadSummary> = emptyList(),
     primaryTasks: List<TaskItem>,
     filteredEveningTasks: List<TaskItem>,
     allVisibleTaskIds: List<String>,
@@ -3037,6 +3102,51 @@ private fun ThingsMainTaskLazyList(
             )
             return
         }
+    }
+
+    // v3.1 Area Portfolio Timeline Workspace (Collapsible Project Lanes + ◆ Milestones + Smart Cascade)
+    if (isAreaView && currentArea != null && areaWorkspaceMode == ProjectWorkspaceMode.ROADMAP && !isQuickFindOpen) {
+        SideEffect {
+            projectDragController.isProjectListActive = false
+            projectDragController.isGeneralListReorderActive = false
+        }
+        val allHeadingsForArea by viewModel.allHeadings.collectAsState()
+        val allOpenForArea by viewModel.allOpenTasks.collectAsState()
+        val isWideArea = LocalConfiguration.current.screenWidthDp >= 700
+        AreaPortfolioRoadmapWorkspace(
+            area = currentArea,
+            areaProjects = activeProjects.filter { it.areaId == currentArea.id },
+            allHeadings = allHeadingsForArea,
+            allOpenTasks = allOpenForArea,
+            locale = activeLocale,
+            isWideLayout = isWideArea,
+            isFullScreen = isEffectiveTimelineFullScreen,
+            onToggleFullScreen = { viewModel.toggleTimelineFullScreen() },
+            selectedTaskIds = selectedTaskIds,
+            isSelectionModeActive = selectedTaskIds.isNotEmpty(),
+            onSelectSingleTask = { taskId ->
+                if (!isEffectiveTimelineFullScreen) viewModel.selectSingleTask(taskId)
+            },
+            onToggleTaskSelection = { taskId ->
+                if (!isEffectiveTimelineFullScreen) viewModel.toggleTaskSelection(taskId)
+            },
+            onOpenProject = { projId ->
+                viewModel.setTimelineFullScreen(false)
+                viewModel.selectProject(projId)
+            },
+            onShiftHeadingDates = { heading, delta, fallback ->
+                viewModel.shiftHeadingRoadmapDates(heading, delta, fallback)
+            },
+            onShiftTaskDates = { task, delta ->
+                viewModel.shiftTaskRoadmapDates(task, delta)
+            },
+            onOpenTaskEditor = { taskId ->
+                if (!isEffectiveTimelineFullScreen) viewModel.expandTask(taskId)
+            },
+            onShowError = { msg -> viewModel.showUiMessage(msg) },
+            modifier = modifier.imePadding()
+        )
+        return
     }
 
     val navScopeKey = navTarget.scrollScopeKey()
@@ -3456,6 +3566,17 @@ private fun ThingsMainTaskLazyList(
                 .groupBy({ it.first }, { it.second to it.third })
 
             val allUpcomingDates = (groupedUpcoming.keys + upcomingMilestonesByDate.keys).toSortedSet()
+            val workloadByEpochDay = sevenDayWorkload.associateBy { it.epochDay }
+
+            if (sevenDayWorkload.isNotEmpty()) {
+                item(key = "upcoming_7day_workload_strip") {
+                    SevenDayWorkloadStripCard(
+                        forecast = sevenDayWorkload,
+                        locale = activeLocale,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                    )
+                }
+            }
 
             var cumulativeTaskOffset = 0
             allUpcomingDates.forEachIndexed { groupIdx, targetDate ->
@@ -3472,6 +3593,7 @@ private fun ThingsMainTaskLazyList(
                 } else {
                     emptyList()
                 }
+                val dayWorkload = workloadByEpochDay[targetDate.toEpochDay()]
                 val groupBaseIndex = cumulativeTaskOffset
                 cumulativeTaskOffset += dayTasks.size
                 item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {
@@ -3479,7 +3601,9 @@ private fun ThingsMainTaskLazyList(
                         date = targetDate,
                         todayDate = todayDate,
                         locale = activeLocale,
-                        isFirstGroup = groupIdx == 0
+                        isFirstGroup = groupIdx == 0,
+                        dayWorkload = dayWorkload,
+                        calendarEventsEnabled = calendarEventsEnabled
                     )
                 }
                 if (dayEvents.isNotEmpty()) {
@@ -3986,6 +4110,9 @@ private fun ThingsModalsOverlay(
             onSetGroupTodayByProjectOrArea = { viewModel.setGroupTodayByProjectOrArea(it) },
             showPerspectivesInSidebar = showPerspectivesInSidebar,
             onSetShowPerspectivesInSidebar = viewModel::setShowPerspectivesInSidebar,
+            workdayStartMinutes = workdayStartMinutesTop,
+            workdayEndMinutes = workdayEndMinutesTop,
+            onSetWorkdayBounds = { s, e -> viewModel.setWorkdayBounds(s, e) },
             biometricAppLockEnabled = biometricAppLockEnabled,
             onSetBiometricAppLockEnabled = { viewModel.setBiometricAppLockEnabled(it) },
             onSetLocalOnlyDbMode = { viewModel.setLocalOnlyDbMode(it) },
@@ -4049,14 +4176,24 @@ private fun ThingsModalsOverlay(
 
     // Gemini AI Hub Modal (Brain Dump + Project Architect in EN, DE, IT, FR, ES)
     if (isGeminiModalOpen) {
+        val todayOpenMap = remember(todayTasks, eveningTasks) {
+            (todayTasks + eveningTasks).associateBy { it.id }
+        }
         GeminiAssistantModal(
             isProcessing = isGeminiBusy,
             currentApiKey = geminiApiKey,
+            initialTab = geminiInitialTabTop,
             errorMessage = geminiErrorMessage,
+            dayPlanPreview = geminiDayPlanPreviewTop,
+            todayOpenTasksById = todayOpenMap,
             onClearError = { viewModel.clearGeminiErrorMessage() },
             onUpdateApiKey = { viewModel.updateGeminiApiKey(it) },
             onSubmitBrainDump = { raw -> viewModel.submitGeminiBrainDump(raw, activeLocale) },
             onSubmitProjectArchitect = { goal -> viewModel.submitGeminiProjectArchitect(goal, activeLocale) },
+            onGenerateDayPlan = { includeScheduled ->
+                viewModel.requestGeminiDayTimeblockPlan(includeScheduled, activeLocale)
+            },
+            onApplyDayPlan = { blocks -> viewModel.applyGeminiDayTimeblockPlan(blocks) },
             onDismiss = { viewModel.setGeminiModalOpen(false) }
         )
     }
@@ -5722,6 +5859,9 @@ private fun ViewTitleHeader(
     projectWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
     onSelectProjectWorkspaceMode: (ProjectWorkspaceMode) -> Unit = {},
     currentArea: Area?,
+    areaWorkspaceMode: ProjectWorkspaceMode = ProjectWorkspaceMode.LIST,
+    onSelectAreaWorkspaceMode: (ProjectWorkspaceMode) -> Unit = {},
+    onOpenPlanMyDay: () -> Unit = {},
     currentPerspective: SavedPerspective? = null,
     areas: List<Area>,
     projects: List<Project>,
@@ -6455,7 +6595,7 @@ private fun ViewTitleHeader(
             }
         }
 
-        // Row 2 Sort & Quick Import Controls for Area & Perspective Detail views
+        // Row 2 Sort, Area Portfolio Mode Switcher & Quick Import Controls for Area & Perspective Detail views
         if ((currentPerspective != null || (currentArea != null && !isRenamingAreaInline)) && supportsViewSorting) {
             Spacer(modifier = Modifier.height(8.dp))
             FlowRow(
@@ -6463,10 +6603,18 @@ private fun ViewTitleHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                ViewSortMenuPill(
-                    viewSortMode = viewSortMode,
-                    onSelectViewSortMode = onSelectViewSortMode
-                )
+                if (currentArea != null) {
+                    AreaWorkspaceSegmentedSwitcher(
+                        currentMode = areaWorkspaceMode,
+                        onSelectMode = onSelectAreaWorkspaceMode
+                    )
+                }
+                if (currentArea == null || areaWorkspaceMode != ProjectWorkspaceMode.ROADMAP) {
+                    ViewSortMenuPill(
+                        viewSortMode = viewSortMode,
+                        onSelectViewSortMode = onSelectViewSortMode
+                    )
+                }
                 if (currentArea != null) {
                     ThingsHoverTooltip(text = stringResource(R.string.v30_external_import_export_tab)) {
                         ThingsTagPill(
@@ -6478,37 +6626,72 @@ private fun ViewTitleHeader(
             }
         }
 
-        // v3.0 Today Capacity Summary Pill (Glacier-Blue Soft Bento pill shown whenever plannedMinutes > 0)
-        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) && todayPlannedMinutes > 0) {
-            val plannedFmt = formatDurationCompact(todayPlannedMinutes) ?: "${todayPlannedMinutes}m"
-            val freeFmt = formatDurationCompact(todayFreeMinutes) ?: "0m"
-            val capacityText = if (calendarEventsEnabled) {
-                stringResource(R.string.v30_today_capacity_summary, plannedFmt, freeFmt)
-            } else {
-                stringResource(R.string.v30_today_planned_only, plannedFmt)
-            }
+        // v3.0 / v3.1 Today Capacity Summary Pill + "Plan My Day" AI Auto-Timeblocker Shortcut
+        if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.TODAY)) {
             Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = colors.thingsBlueSoft,
-                border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Schedule,
-                        contentDescription = null,
-                        tint = colors.thingsBlue,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = capacityText,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.thingsBlue
-                    )
+                if (todayPlannedMinutes > 0) {
+                    val plannedFmt = formatDurationCompact(todayPlannedMinutes) ?: "${todayPlannedMinutes}m"
+                    val freeFmt = formatDurationCompact(todayFreeMinutes) ?: "0m"
+                    val capacityText = if (calendarEventsEnabled) {
+                        stringResource(R.string.v30_today_capacity_summary, plannedFmt, freeFmt)
+                    } else {
+                        stringResource(R.string.v30_today_planned_only, plannedFmt)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.thingsBlueSoft,
+                        border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Schedule,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = capacityText,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.thingsBlue
+                            )
+                        }
+                    }
+                }
+                ThingsHoverTooltip(text = stringResource(R.string.v31_gemini_plan_day_desc)) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.cardSurface,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onOpenPlanMyDay() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.v31_gemini_plan_day_tab),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.primaryText
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -9412,7 +9595,9 @@ private fun UpcomingDayGroupHeader(
     date: LocalDate,
     todayDate: LocalDate,
     locale: Locale,
-    isFirstGroup: Boolean
+    isFirstGroup: Boolean,
+    dayWorkload: DayWorkloadSummary? = null,
+    calendarEventsEnabled: Boolean = false
 ) {
     val colors = ThingsTheme.colors
     val tomorrowLabel = stringResource(R.string.date_tomorrow)
@@ -9445,24 +9630,57 @@ private fun UpcomingDayGroupHeader(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = dayMonthText,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = colors.primaryText
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = dayMonthText,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primaryText
+                    )
                 )
-            )
-            Text(
-                text = subtitleText,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Normal,
-                    color = colors.secondaryText
-                ),
-                modifier = Modifier.padding(bottom = 1.dp)
-            )
+                Text(
+                    text = subtitleText,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Normal,
+                        color = colors.secondaryText
+                    ),
+                    modifier = Modifier.padding(bottom = 1.dp)
+                )
+            }
+
+            if (dayWorkload != null && dayWorkload.plannedTaskMinutes > 0) {
+                val plannedFmt = formatDurationCompact(dayWorkload.plannedTaskMinutes) ?: "${dayWorkload.plannedTaskMinutes}m"
+                val pillText = if (dayWorkload.isOverloaded) {
+                    stringResource(
+                        R.string.v31_workload_overloaded_short,
+                        formatDurationCompact(dayWorkload.overloadedByMinutes)
+                    )
+                } else if (calendarEventsEnabled) {
+                    val freeFmt = formatDurationCompact(dayWorkload.freeWorkdayMinutes) ?: "0m"
+                    stringResource(R.string.v30_today_capacity_summary, plannedFmt, freeFmt)
+                } else {
+                    stringResource(R.string.v30_today_planned_only, plannedFmt)
+                }
+                val pillColor = if (dayWorkload.isOverloaded) colors.deadlineUrgentRed else colors.thingsBlue
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = pillColor.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = pillText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                        color = pillColor,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.5.dp),
+                        maxLines = 1
+                    )
+                }
+            }
         }
         Spacer(modifier = Modifier.height(5.dp))
         HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)

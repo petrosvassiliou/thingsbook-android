@@ -3129,8 +3129,17 @@ private fun RoadmapSynchronizedLanesBody(
                                 isSelectionModeActive = isSelectionModeActive,
                                 locale = locale,
                                 onPreviewDeltaChanged = { delta ->
-                                    if (delta == 0L) livePreviewDeltaDays.remove("task_${tb.taskId}")
-                                    else livePreviewDeltaDays["task_${tb.taskId}"] = delta
+                                    val taskKeys = livePreviewDeltaDays.keys.filter { it.startsWith("task_") }
+                                    taskKeys.forEach { livePreviewDeltaDays.remove(it) }
+                                    if (delta != 0L) {
+                                        val cascadePreview = ProjectRoadmapEngine.computeCascadeDeltaPreviewMap(
+                                            anchorTask = tb.task,
+                                            deltaDays = delta,
+                                            projectTasks = layout.taskBars.map { it.task },
+                                            todayEpochDay = layout.todayEpochDay
+                                        )
+                                        livePreviewDeltaDays.putAll(cascadePreview)
+                                    }
                                 },
                                 onCommitShift = { delta ->
                                     onShiftTaskDates(tb.task, delta)
@@ -5740,5 +5749,918 @@ object RoadmapExporter {
             }
         }
         return if (low <= 0) "" else text.substring(0, low) + ellipsis
+    }
+}
+
+// =============================================================================
+// v3.1 Area Workspace Switcher, 7-Day Workload Forecast & Area Portfolio Timeline
+// =============================================================================
+
+@Composable
+fun AreaWorkspaceSegmentedSwitcher(
+    currentMode: ProjectWorkspaceMode,
+    onSelectMode: (ProjectWorkspaceMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    val haptics = LocalHapticFeedback.current
+    val items: List<Triple<ProjectWorkspaceMode, Int, ImageVector>> = listOf(
+        Triple(ProjectWorkspaceMode.LIST, R.string.v30_project_mode_list, Icons.Outlined.Checklist),
+        Triple(ProjectWorkspaceMode.ROADMAP, R.string.v31_area_portfolio_timeline, Icons.Outlined.CalendarMonth)
+    )
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(11.dp))
+            .background(colors.tagPillBg)
+            .border(0.75.dp, colors.hairlineDivider, RoundedCornerShape(11.dp))
+            .padding(2.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        items.forEach { (mode, labelRes, icon) ->
+            val selected = (currentMode == mode) || (mode == ProjectWorkspaceMode.LIST && currentMode != ProjectWorkspaceMode.ROADMAP)
+            val label = stringResource(labelRes)
+            ThingsHoverTooltip(text = label) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.5.dp))
+                        .background(if (selected) colors.cardSurface else Color.Transparent)
+                        .then(
+                            if (selected) {
+                                Modifier.border(
+                                    0.75.dp,
+                                    colors.thingsBlue.copy(alpha = 0.35f),
+                                    RoundedCornerShape(8.5.dp)
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .clickable {
+                            if (!selected) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectMode(mode)
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = if (selected) colors.thingsBlue else colors.secondaryText,
+                        modifier = Modifier.size(14.5.dp)
+                    )
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        color = if (selected) colors.thingsBlue else colors.secondaryText,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SevenDayWorkloadStripCard(
+    forecast: List<com.pv.thingsbook.domain.model.DayWorkloadSummary>,
+    locale: Locale,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    if (forecast.isEmpty()) return
+    val colors = ThingsTheme.colors
+    val dowFmt = remember(locale) { DateTimeFormatter.ofPattern("EE", locale) }
+    val overloadedDays = remember(forecast) { forecast.filter { it.isOverloaded } }
+    val maxOverloadMins = remember(overloadedDays) { overloadedDays.maxOfOrNull { it.overloadedByMinutes } ?: 0 }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = colors.cardSurface,
+        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = if (compact) 11.dp else 14.dp, vertical = if (compact) 10.dp else 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.CalendarToday,
+                        contentDescription = null,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.v31_workload_7day_title),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.primaryText
+                    )
+                }
+
+                val statusText = if (maxOverloadMins > 0) {
+                    stringResource(
+                        R.string.v31_workload_overloaded_short,
+                        com.pv.thingsbook.domain.model.formatDurationCompact(maxOverloadMins)
+                    )
+                } else {
+                    stringResource(R.string.v31_workload_balanced)
+                }
+                val statusColor = if (maxOverloadMins > 0) colors.deadlineUrgentRed else colors.logbookGreen
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = statusColor.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        color = statusColor,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.5.dp),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                forecast.take(7).forEachIndexed { idx, day ->
+                    val date = LocalDate.ofEpochDay(day.epochDay)
+                    val barHeightMax = if (compact) 36.dp else 44.dp
+                    val clampedRatio = day.loadFraction.coerceIn(0f, 1f)
+                    val barFillHeight = (barHeightMax.value * clampedRatio).coerceAtLeast(if (day.totalUsedMinutes > 0) 4f else 2f).dp
+                    val barColor = when {
+                        day.isOverloaded -> colors.deadlineUrgentRed
+                        day.loadFraction >= 0.8f -> colors.somedayWarmAmber
+                        day.totalUsedMinutes > 0 -> colors.thingsBlue
+                        else -> colors.hairlineDivider
+                    }
+                    val plannedLbl = if (day.plannedTaskMinutes > 0) {
+                        com.pv.thingsbook.domain.model.formatDurationCompact(day.plannedTaskMinutes)
+                    } else {
+                        "0m"
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = plannedLbl,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                            color = if (day.isOverloaded) colors.deadlineUrgentRed else colors.secondaryText,
+                            maxLines = 1
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(barHeightMax)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(colors.tagPillBg.copy(alpha = 0.65f)),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(barFillHeight)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(barColor)
+                            )
+                        }
+                        Text(
+                            text = date.format(dowFmt).take(2),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.5.sp,
+                                fontWeight = if (idx == 0) FontWeight.ExtraBold else FontWeight.Medium
+                            ),
+                            color = if (idx == 0) colors.thingsBlue else colors.secondaryText,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private sealed interface PortfolioDisplayRow {
+    data class ProjectSummaryRow(
+        val lane: com.pv.thingsbook.domain.model.AreaPortfolioProjectLane,
+        val isExpanded: Boolean
+    ) : PortfolioDisplayRow
+
+    data class SubPhaseRow(
+        val projectId: String,
+        val heading: Heading?,
+        val phaseBar: com.pv.thingsbook.domain.model.RoadmapPhaseBar?,
+        val title: String
+    ) : PortfolioDisplayRow
+
+    data class SubTaskRow(
+        val projectId: String,
+        val taskBar: com.pv.thingsbook.domain.model.RoadmapTaskBar,
+        val peerTasks: List<TaskItem>
+    ) : PortfolioDisplayRow
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AreaPortfolioRoadmapWorkspace(
+    area: Area,
+    areaProjects: List<Project>,
+    allHeadings: List<Heading>,
+    allOpenTasks: List<TaskItem>,
+    locale: Locale,
+    isWideLayout: Boolean,
+    isFullScreen: Boolean = false,
+    onToggleFullScreen: (() -> Unit)? = null,
+    selectedTaskIds: Set<String> = emptySet(),
+    isSelectionModeActive: Boolean = false,
+    onSelectSingleTask: ((String) -> Unit)? = null,
+    onToggleTaskSelection: ((String) -> Unit)? = null,
+    onOpenProject: (String) -> Unit,
+    onShiftHeadingDates: (Heading, Long, Pair<Long, Long>?) -> Unit,
+    onShiftTaskDates: (TaskItem, Long) -> Unit,
+    onOpenTaskEditor: (String) -> Unit,
+    onShowError: (String) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val colors = ThingsTheme.colors
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    val zone = ZoneId.systemDefault()
+    val todayEpochDay = remember { LocalDate.now(zone).toEpochDay() }
+    val generalTitle = stringResource(R.string.v30_board_ungrouped_column)
+
+    val layout = remember(area, areaProjects, allHeadings, allOpenTasks, todayEpochDay) {
+        ProjectRoadmapEngine.buildAreaPortfolioRoadmapLayout(
+            area = area,
+            projectsInArea = areaProjects,
+            allHeadings = allHeadings,
+            allTasks = allOpenTasks,
+            todayEpochDay = todayEpochDay,
+            zoneId = zone
+        )
+    }
+
+    val zoomDayWidths = remember { listOf(30.dp, 42.dp, 58.dp) }
+    var zoomIndex by remember { androidx.compose.runtime.mutableIntStateOf(1) }
+    val dayWidthDp = zoomDayWidths[zoomIndex.coerceIn(0, zoomDayWidths.lastIndex)]
+    val dayWidthPx = with(density) { dayWidthDp.toPx() }
+    val labelColWidth = if (isWideLayout || isFullScreen) 264.dp else 192.dp
+    val horizontalScrollState = rememberScrollState()
+    var expandedProjectIds by remember(area.id) { mutableStateOf<Set<String>>(emptySet()) }
+    val livePreviewDeltaDays = remember { androidx.compose.runtime.mutableStateMapOf<String, Long>() }
+    var showPortfolioPdfExportDialog by remember { mutableStateOf(false) }
+    val exportChooserTitle = stringResource(R.string.v30_roadmap_export)
+
+    val exportBundle = remember(layout, expandedProjectIds, zone) {
+        ProjectRoadmapEngine.toExportablePortfolioLayout(
+            portfolioLayout = layout,
+            expandedProjectIds = expandedProjectIds,
+            zoneId = zone
+        )
+    }
+    val portfolioProjectCounts = remember(layout) {
+        layout.projectLanes.associate { it.projectId to (it.project.completedTaskCount to it.project.totalTaskCount) }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(layout.startEpochDay, layout.todayEpochDay, area.id) {
+        val todayOffsetDays = (layout.todayEpochDay - layout.startEpochDay - 2L).coerceAtLeast(0L)
+        val targetPx = (todayOffsetDays * dayWidthPx).toInt().coerceAtLeast(0)
+        horizontalScrollState.scrollTo(targetPx)
+    }
+
+    val displayRows = remember(layout, expandedProjectIds, generalTitle) {
+        val list = ArrayList<PortfolioDisplayRow>()
+        for (pLane in layout.projectLanes) {
+            val isExp = pLane.projectId in expandedProjectIds
+            list += PortfolioDisplayRow.ProjectSummaryRow(pLane, isExp)
+            if (isExp) {
+                val peerTasks = pLane.projectLayout.taskBars.map { it.task }
+                for (subLane in pLane.projectLayout.lanes) {
+                    if (subLane.heading != null || subLane.taskBars.isNotEmpty()) {
+                        list += PortfolioDisplayRow.SubPhaseRow(
+                            projectId = pLane.projectId,
+                            heading = subLane.heading,
+                            phaseBar = subLane.phaseBar,
+                            title = subLane.heading?.title ?: generalTitle
+                        )
+                        for (tb in subLane.taskBars) {
+                            list += PortfolioDisplayRow.SubTaskRow(
+                                projectId = pLane.projectId,
+                                taskBar = tb,
+                                peerTasks = peerTasks
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        list
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(
+                start = if (isFullScreen) 14.dp else 16.dp,
+                end = if (isFullScreen) 14.dp else 16.dp,
+                top = if (isFullScreen) 10.dp else 4.dp,
+                bottom = if (isFullScreen) 12.dp else 92.dp
+            )
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Toolbar
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (isFullScreen) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.cardSurface,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Folder,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = area.title,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = colors.primaryText
+                            )
+                        }
+                    }
+                }
+
+                if (layout.projectLanes.isNotEmpty()) {
+                    val allExpanded = expandedProjectIds.size >= layout.projectLanes.size
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = colors.cardSurface,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9.dp))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                expandedProjectIds = if (allExpanded) {
+                                    emptySet()
+                                } else {
+                                    layout.projectLanes.mapTo(linkedSetOf()) { it.projectId }
+                                }
+                            }
+                    ) {
+                        Text(
+                            text = stringResource(if (allExpanded) R.string.v31_area_collapse_all else R.string.v31_area_expand_all),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.primaryText,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(9.dp),
+                    color = colors.cardSurface,
+                    border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .clickable {
+                            val todayOffset = (layout.todayEpochDay - layout.startEpochDay - 2L).coerceAtLeast(0L)
+                            coroutineScope.launch {
+                                horizontalScrollState.animateScrollTo((todayOffset * dayWidthPx).toInt())
+                            }
+                        }
+                ) {
+                    Text(
+                        text = stringResource(R.string.v30_roadmap_jump_today),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(9.dp),
+                    color = colors.cardSurface,
+                    border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { zoomIndex = (zoomIndex - 1).coerceAtLeast(0) },
+                            enabled = zoomIndex > 0,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Outlined.Remove, contentDescription = null, modifier = Modifier.size(14.dp))
+                        }
+                        IconButton(
+                            onClick = { zoomIndex = (zoomIndex + 1).coerceAtMost(zoomDayWidths.lastIndex) },
+                            enabled = zoomIndex < zoomDayWidths.lastIndex,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+
+                if (!isFullScreen && layout.projectLanes.isNotEmpty()) {
+                    RoadmapExportMenuPill(
+                        onExportPdf = { showPortfolioPdfExportDialog = true },
+                        onExportPng = {
+                            coroutineScope.launch {
+                                runCatching {
+                                    RoadmapExporter.exportAndShareRoadmap(
+                                        context = context,
+                                        layout = exportBundle.third,
+                                        headingCounts = portfolioProjectCounts,
+                                        locale = locale,
+                                        isDark = colors.isDark,
+                                        asPdf = false,
+                                        exportChooserTitle = exportChooserTitle
+                                    )
+                                }.onFailure { err ->
+                                    onShowError(err.localizedMessage ?: err.message ?: "Export failed")
+                                }
+                            }
+                        }
+                    )
+                }
+
+                if (onToggleFullScreen != null) {
+                    val fsLabel = stringResource(
+                        if (isFullScreen) R.string.v30_timeline_exit_fullscreen else R.string.v30_timeline_fullscreen
+                    )
+                    ThingsHoverTooltip(text = fsLabel) {
+                        Surface(
+                            shape = RoundedCornerShape(9.dp),
+                            color = colors.cardSurface,
+                            border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(9.dp))
+                                .clickable { onToggleFullScreen() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isFullScreen) Icons.Outlined.CloseFullscreen else Icons.Outlined.OpenInFull,
+                                    contentDescription = fsLabel,
+                                    tint = colors.primaryText,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = fsLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (layout.projectLanes.isEmpty() && layout.unscheduledProjects.isEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = colors.cardSurface,
+                border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = stringResource(R.string.v31_area_no_projects_timeline),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.secondaryText,
+                    modifier = Modifier.padding(24.dp)
+                )
+            }
+        } else if (layout.projectLanes.isNotEmpty()) {
+            val rowHeights = remember(displayRows) {
+                displayRows.map { row ->
+                    when (row) {
+                        is PortfolioDisplayRow.ProjectSummaryRow -> 50.dp
+                        is PortfolioDisplayRow.SubPhaseRow -> 44.dp
+                        is PortfolioDisplayRow.SubTaskRow -> TASK_ROW_HEIGHT
+                    }
+                }
+            }
+            val rowTops = remember(rowHeights) {
+                val tops = ArrayList<Dp>(rowHeights.size)
+                var cur = 0.dp
+                for (h in rowHeights) {
+                    tops += cur
+                    cur += h
+                }
+                tops
+            }
+            val totalHeightDp = remember(rowHeights) {
+                rowHeights.fold(0.dp) { acc, d -> acc + d }
+            }
+            val totalTimelineWidthDp = dayWidthDp * layout.totalDays
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = colors.cardSurface,
+                border = BorderStroke(0.85.dp, colors.hairlineDivider),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    RoadmapDayHeaderStrip(
+                        startEpochDay = layout.startEpochDay,
+                        totalDays = layout.totalDays,
+                        todayEpochDay = layout.todayEpochDay,
+                        dayWidthDp = dayWidthDp,
+                        labelColWidth = labelColWidth,
+                        horizontalScrollState = horizontalScrollState,
+                        locale = locale
+                    )
+                    HorizontalDivider(color = colors.hairlineDivider, thickness = 0.85.dp)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(totalHeightDp)
+                    ) {
+                        // Left Pinned Project / Phase / Task Column
+                        Column(
+                            modifier = Modifier
+                                .width(labelColWidth)
+                                .fillMaxHeight()
+                        ) {
+                            displayRows.forEachIndexed { idx, row ->
+                                val hDp = rowHeights[idx]
+                                when (row) {
+                                    is PortfolioDisplayRow.ProjectSummaryRow -> {
+                                        val proj = row.lane.project
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(hDp)
+                                                .background(colors.sidebarBackground.copy(alpha = 0.38f))
+                                                .clickable {
+                                                    expandedProjectIds = if (row.isExpanded) {
+                                                        expandedProjectIds - proj.id
+                                                    } else {
+                                                        expandedProjectIds + proj.id
+                                                    }
+                                                }
+                                                .padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (row.isExpanded) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight,
+                                                contentDescription = null,
+                                                tint = colors.secondaryText,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            ProjectProgressRing(progress = proj.progress, size = 15.dp)
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = proj.title,
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = colors.primaryText,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "${proj.completedTaskCount}/${proj.totalTaskCount}",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                                                    color = colors.secondaryText,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                            ThingsHoverTooltip(text = stringResource(R.string.v31_area_open_project)) {
+                                                TextButton(
+                                                    onClick = { onOpenProject(proj.id) },
+                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                                    modifier = Modifier.height(26.dp)
+                                                ) {
+                                                    Text("↗", style = MaterialTheme.typography.labelMedium, color = colors.thingsBlue)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    is PortfolioDisplayRow.SubPhaseRow -> {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(hDp)
+                                                .background(colors.tagPillBg.copy(alpha = 0.3f))
+                                                .padding(start = 22.dp, end = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = row.title,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = colors.thingsBlue,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    is PortfolioDisplayRow.SubTaskRow -> {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(hDp)
+                                                .clickable { onOpenTaskEditor(row.taskBar.taskId) }
+                                                .padding(start = 30.dp, end = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Text(
+                                                text = if (row.taskBar.isMilestone) "◆ ${row.taskBar.title}" else row.taskBar.title,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.primaryText,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        VerticalDivider(color = colors.hairlineDivider, thickness = 0.85.dp)
+
+                        // Right Synchronized Portfolio Gantt Grid
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .horizontalScroll(horizontalScrollState)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(totalTimelineWidthDp)
+                                    .height(totalHeightDp)
+                            ) {
+                                val todayOffsetDp = dayWidthDp * (layout.todayEpochDay - layout.startEpochDay).toInt()
+                                if (layout.todayEpochDay in layout.startEpochDay..layout.endEpochDay) {
+                                    Box(
+                                        modifier = Modifier
+                                            .offset(x = todayOffsetDp + dayWidthDp / 2)
+                                            .width(1.5.dp)
+                                            .fillMaxHeight()
+                                            .background(colors.thingsBlue.copy(alpha = 0.55f))
+                                    )
+                                }
+
+                                displayRows.forEachIndexed { idx, row ->
+                                    val topDp = rowTops[idx]
+                                    val hDp = rowHeights[idx]
+                                    Box(
+                                        modifier = Modifier
+                                            .offset(y = topDp + hDp - 0.75.dp)
+                                            .fillMaxWidth()
+                                            .height(0.75.dp)
+                                            .background(colors.hairlineDivider.copy(alpha = 0.65f))
+                                    )
+
+                                    when (row) {
+                                        is PortfolioDisplayRow.ProjectSummaryRow -> {
+                                            val pLane = row.lane
+                                            val startIdx = (pLane.summaryStartEpochDay - layout.startEpochDay).toInt()
+                                            val barLeftDp = dayWidthDp * startIdx
+                                            val barWidthDp = (dayWidthDp * pLane.spanDays).coerceAtLeast(dayWidthDp)
+                                            Box(
+                                                modifier = Modifier
+                                                    .offset(x = barLeftDp + 2.dp, y = topDp + 12.dp)
+                                                    .width((barWidthDp - 4.dp).coerceAtLeast(18.dp))
+                                                    .height(26.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(colors.thingsBlue.copy(alpha = 0.16f))
+                                                    .border(1.2.dp, colors.thingsBlue.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                                                    .clickable { onOpenProject(pLane.projectId) }
+                                                    .padding(horizontal = 8.dp),
+                                                contentAlignment = Alignment.CenterStart
+                                            ) {
+                                                Text(
+                                                    text = pLane.project.title,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                    color = colors.thingsBlue,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+
+                                            // Overlay ◆ Royal-Violet Milestone Diamonds when collapsed!
+                                            if (!row.isExpanded) {
+                                                val royalViolet = Color(0xFF7C3AED)
+                                                pLane.milestoneBars.forEach { mb ->
+                                                    val mIdx = (mb.startEpochDay - layout.startEpochDay).toInt()
+                                                    val mCenterDp = dayWidthDp * mIdx + dayWidthDp / 2
+                                                    ThingsHoverTooltip(text = "◆ ${mb.title}") {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .offset(x = mCenterDp - 7.dp, y = topDp + 18.dp)
+                                                                .size(14.dp)
+                                                                .graphicsLayer { rotationZ = 45f }
+                                                                .clip(RoundedCornerShape(3.dp))
+                                                                .background(royalViolet)
+                                                                .border(1.2.dp, Color.White, RoundedCornerShape(3.dp))
+                                                                .clickable { onOpenTaskEditor(mb.taskId) }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        is PortfolioDisplayRow.SubPhaseRow -> {
+                                            val pb = row.phaseBar
+                                            val heading = row.heading
+                                            if (pb != null && heading != null) {
+                                                RoadmapDraggablePhaseBar(
+                                                    phaseBar = pb,
+                                                    startEpochDayWindow = layout.startEpochDay,
+                                                    endEpochDayWindow = layout.endEpochDay,
+                                                    topDp = topDp,
+                                                    rowHeightDp = hDp,
+                                                    totalTimelineWidthDp = totalTimelineWidthDp,
+                                                    dayWidthDp = dayWidthDp,
+                                                    dayWidthPx = dayWidthPx,
+                                                    previewDelta = livePreviewDeltaDays["phase_${heading.id}"] ?: 0L,
+                                                    onPreviewDeltaChanged = { delta ->
+                                                        if (delta == 0L) livePreviewDeltaDays.remove("phase_${heading.id}")
+                                                        else livePreviewDeltaDays["phase_${heading.id}"] = delta
+                                                    },
+                                                    onCommitShift = { delta ->
+                                                        onShiftHeadingDates(heading, delta, pb.startEpochDay to pb.endEpochDay)
+                                                    },
+                                                    readOnly = isFullScreen
+                                                )
+                                            }
+                                        }
+
+                                        is PortfolioDisplayRow.SubTaskRow -> {
+                                            val tb = row.taskBar
+                                            RoadmapDraggableTaskBar(
+                                                taskBar = tb,
+                                                startEpochDayWindow = layout.startEpochDay,
+                                                endEpochDayWindow = layout.endEpochDay,
+                                                todayEpochDay = layout.todayEpochDay,
+                                                topDp = topDp,
+                                                totalTimelineWidthDp = totalTimelineWidthDp,
+                                                dayWidthDp = dayWidthDp,
+                                                dayWidthPx = dayWidthPx,
+                                                previewDelta = livePreviewDeltaDays["task_${tb.taskId}"] ?: 0L,
+                                                isSelected = tb.taskId in selectedTaskIds,
+                                                isSelectionModeActive = isSelectionModeActive,
+                                                locale = locale,
+                                                onPreviewDeltaChanged = { delta ->
+                                                    val keys = livePreviewDeltaDays.keys.filter { it.startsWith("task_") }
+                                                    keys.forEach { livePreviewDeltaDays.remove(it) }
+                                                    if (delta != 0L) {
+                                                        livePreviewDeltaDays.putAll(
+                                                            ProjectRoadmapEngine.computeCascadeDeltaPreviewMap(
+                                                                anchorTask = tb.task,
+                                                                deltaDays = delta,
+                                                                projectTasks = row.peerTasks,
+                                                                todayEpochDay = layout.todayEpochDay
+                                                            )
+                                                        )
+                                                    }
+                                                },
+                                                onCommitShift = { delta ->
+                                                    onShiftTaskDates(tb.task, delta)
+                                                },
+                                                onSelectSingleTask = onSelectSingleTask?.let { fn -> { fn(tb.taskId) } },
+                                                onToggleTaskSelection = onToggleTaskSelection?.let { fn -> { fn(tb.taskId) } },
+                                                onClickTask = { onOpenTaskEditor(tb.taskId) },
+                                                readOnly = isFullScreen
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!isFullScreen && layout.unscheduledProjects.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(13.dp),
+                color = colors.cardSurface,
+                border = BorderStroke(0.75.dp, colors.hairlineDivider),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "${stringResource(R.string.v31_area_unscheduled_projects)} (${layout.unscheduledProjects.size})",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.secondaryText
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        layout.unscheduledProjects.forEach { proj ->
+                            Surface(
+                                shape = RoundedCornerShape(9.dp),
+                                color = colors.tagPillBg,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .clickable { onOpenProject(proj.id) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    ProjectProgressRing(progress = proj.progress, size = 14.dp)
+                                    Text(
+                                        text = proj.title,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.primaryText
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!isFullScreen && showPortfolioPdfExportDialog && layout.projectLanes.isNotEmpty()) {
+        RoadmapPdfExportDialog(
+            project = exportBundle.first,
+            projectHeadings = exportBundle.second,
+            primaryTasks = exportBundle.third.taskBars.map { it.task },
+            layout = exportBundle.third,
+            locale = locale,
+            onDismiss = { showPortfolioPdfExportDialog = false },
+            onConfirmExport = { config ->
+                showPortfolioPdfExportDialog = false
+                coroutineScope.launch {
+                    runCatching {
+                        RoadmapExporter.exportPdf(
+                            context = context,
+                            project = exportBundle.first,
+                            layout = exportBundle.third,
+                            config = config,
+                            headingCounts = portfolioProjectCounts,
+                            locale = locale,
+                            isDark = colors.isDark,
+                            exportChooserTitle = exportChooserTitle
+                        )
+                    }.onFailure { err ->
+                        onShowError(err.localizedMessage ?: err.message ?: "Export failed")
+                    }
+                }
+            }
+        )
     }
 }

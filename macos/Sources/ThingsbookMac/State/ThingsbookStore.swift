@@ -817,6 +817,7 @@ public final class ThingsbookStore: ObservableObject {
 
     // MARK: - v2.0 Weekly Review, Stalled Projects, Templates & Timeblocking
 
+    public static let stalledNoNextActionGraceMillis: Int64 = 86_400_000
     public static let stalledReviewThresholdMillis: Int64 = 14 * 86_400_000
 
     public func projectStalledInfo(
@@ -826,8 +827,29 @@ public final class ThingsbookStore: ObservableObject {
         guard project.status == .active, !project.isDeleted, project.scheduleState != .someday else {
             return (false, false, false)
         }
-        let hasOpenNextAction = allOpenTasks.contains { $0.projectId == project.id }
+        var hasOpenNextAction = false
+        var latestTaskActivityAt: Int64 = 0
+        for t in allOpenTasks where t.projectId == project.id {
+            hasOpenNextAction = true
+            latestTaskActivityAt = max(latestTaskActivityAt, t.createdAt, t.updatedAt, t.completedAt ?? 0)
+        }
+        for t in logbookTasks where t.projectId == project.id {
+            latestTaskActivityAt = max(latestTaskActivityAt, t.createdAt, t.updatedAt, t.completedAt ?? 0)
+        }
+
+        let activityAnchor = max(
+            project.createdAt,
+            project.updatedAt,
+            project.lastReviewedAt ?? 0,
+            latestTaskActivityAt
+        )
+        if !hasOpenNextAction &&
+            activityAnchor > 0 &&
+            (nowMillis - activityAnchor) < Self.stalledNoNextActionGraceMillis {
+            return (false, false, false)
+        }
         let hasNoNextAction = !hasOpenNextAction
+
         let reviewAnchor: Int64
         if let lr = project.lastReviewedAt, lr > 0 {
             reviewAnchor = lr

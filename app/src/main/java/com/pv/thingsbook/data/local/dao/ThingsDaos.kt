@@ -82,7 +82,8 @@ interface ProjectDao {
         """
         SELECT p.*,
             (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0 AND t.status != 'CANCELED') AS totalTaskCount,
-            (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0 AND t.status = 'COMPLETED') AS completedTaskCount
+            (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0 AND t.status = 'COMPLETED') AS completedTaskCount,
+            (SELECT MAX(CASE WHEN COALESCE(t.completedAt, 0) > t.updatedAt THEN COALESCE(t.completedAt, 0) ELSE t.updatedAt END) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0) AS lastTaskActivityAt
         FROM projects p
         WHERE p.isDeleted = 0 AND p.status = 'ACTIVE'
         ORDER BY p.sortOrder ASC

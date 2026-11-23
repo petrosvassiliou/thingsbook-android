@@ -4672,22 +4672,12 @@ export const App: React.FC = () => {
                       {/* Row 1: Generous Full-Width Project Title + Compact [✓ Complete], [✏️ Edit] & [⋯ Project Menu] */}
                       <div className="view-title-row project-header-title-row">
                         <div className="view-title-left project-title-left">
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            data-testid="project-progress-complete-btn"
-                            title={t.actionComplete}
-                            aria-label={t.actionComplete}
-                            style={{ padding: '4px 5px', borderRadius: 8 }}
-                            onClick={() => void requestCompleteProject(project)}
-                          >
-                            <ProjectProgressRing
-                              completed={doneProjTasks}
-                              total={allProjTasks.length}
-                              size={26}
-                              isProjectCompleted={project.status === 'COMPLETED'}
-                            />
-                          </button>
+                          <ProjectProgressRing
+                            completed={doneProjTasks}
+                            total={allProjTasks.length}
+                            size={26}
+                            isProjectCompleted={project.status === 'COMPLETED'}
+                          />
                           <h1
                             className="view-title project-view-title"
                             title={project.title}

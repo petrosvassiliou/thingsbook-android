@@ -65,6 +65,7 @@ data class Project(
     val viewMode: String? = null,
     val totalTaskCount: Int = 0,
     val completedTaskCount: Int = 0,
+    val lastTaskActivityAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
     val isDeleted: Boolean = false

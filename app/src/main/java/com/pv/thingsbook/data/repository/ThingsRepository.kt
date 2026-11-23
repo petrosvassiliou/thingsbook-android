@@ -5656,6 +5656,7 @@ class ThingsRepository @Inject constructor(
         viewMode = project.viewMode,
         totalTaskCount = totalTaskCount,
         completedTaskCount = completedTaskCount,
+        lastTaskActivityAt = lastTaskActivityAt,
         createdAt = project.createdAt,
         updatedAt = project.updatedAt,
         isDeleted = project.isDeleted

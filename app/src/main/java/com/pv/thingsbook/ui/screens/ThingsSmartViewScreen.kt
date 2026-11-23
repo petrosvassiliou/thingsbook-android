@@ -6318,23 +6318,10 @@ private fun ViewTitleHeader(
                             }
                             is ActiveNavigationTarget.ProjectDetail -> {
                                 val projTitle = currentProject?.title ?: stringResource(R.string.entity_project)
-                                ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .pointerHoverIcon(PointerIcon.Hand)
-                                            .clickable(enabled = currentProject != null) {
-                                                currentProject?.let { onCompleteProject(it.id) }
-                                            }
-                                            .padding(horizontal = 3.dp, vertical = 5.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        ProjectProgressRing(
-                                            progress = currentProject?.progress ?: 0f,
-                                            size = 26.dp
-                                        )
-                                    }
-                                }
+                                ProjectProgressRing(
+                                    progress = currentProject?.progress ?: 0f,
+                                    size = 26.dp
+                                )
                                 ThingsHoverTooltip(
                                     text = projTitle,
                                     modifier = Modifier.weight(1f)

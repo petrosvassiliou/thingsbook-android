@@ -767,25 +767,16 @@ public struct SmartViewCanvas: View {
                 // Row 1: Generous Full-Width Project Title Row (never breaks mid-word)
                 let isAllProjectTasksDone = project.totalTaskCount > 0 && project.completedTaskCount >= project.totalTaskCount
                 HStack(alignment: .center, spacing: 12) {
-                    Button {
-                        store.requestCompleteProject(project)
-                    } label: {
-                        ProjectProgressRing(
-                            progress: project.progress,
-                            size: 22,
-                            tint: ThingsMacPalette.accentBlue,
-                            isCompleted: project.status == .completed,
-                            showFraction: project.totalTaskCount > 0,
-                            completedCount: project.completedTaskCount,
-                            totalCount: project.totalTaskCount
-                        )
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 4)
-                        .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+                    ProjectProgressRing(
+                        progress: project.progress,
+                        size: 22,
+                        tint: ThingsMacPalette.accentBlue,
+                        isCompleted: project.status == .completed,
+                        showFraction: project.totalTaskCount > 0,
+                        completedCount: project.completedTaskCount,
+                        totalCount: project.totalTaskCount
+                    )
                     .fixedSize()
-                    .thingsTooltip(store.tr("macos_complete_project"))
 
                     Text(project.title)
                         .font(.system(size: 27, weight: .bold))

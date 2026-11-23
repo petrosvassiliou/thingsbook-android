@@ -578,6 +578,35 @@ class V2UpgradeAndFeaturesTest {
         assertNull(StalledProjectDetector.evaluateProject(healthyProject, nowMillis = now))
         assertNull(StalledProjectDetector.evaluateProject(somedayProject, nowMillis = now))
 
+        // Brand-new empty project (< 24h) and recently completed 3/3 project (< 24h) must NOT trigger attention
+        val brandNewEmptyProject = healthyProject.copy(
+            id = "p-brand-new",
+            totalTaskCount = 0,
+            completedTaskCount = 0,
+            createdAt = now - 2L * 3_600_000L,
+            updatedAt = now - 2L * 3_600_000L,
+            lastReviewedAt = null
+        )
+        val justFinishedAllTasksProject = healthyProject.copy(
+            id = "p-just-done",
+            totalTaskCount = 3,
+            completedTaskCount = 3,
+            createdAt = fifteenDaysAgo,
+            updatedAt = fifteenDaysAgo,
+            lastReviewedAt = null,
+            lastTaskActivityAt = now - 3L * 3_600_000L
+        )
+        val finishedYesterdayProject = justFinishedAllTasksProject.copy(
+            id = "p-done-25h",
+            lastTaskActivityAt = now - 25L * 3_600_000L
+        )
+        assertNull(StalledProjectDetector.evaluateProject(brandNewEmptyProject, nowMillis = now))
+        assertNull(StalledProjectDetector.evaluateProject(justFinishedAllTasksProject, nowMillis = now))
+        assertEquals(
+            StalledProjectReason.NO_NEXT_ACTION,
+            StalledProjectDetector.evaluateProject(finishedYesterdayProject, nowMillis = now)?.reason
+        )
+
         // Requires attention: hasNoNextAction == true, isUnreviewed == false
         val emptyEval = StalledProjectDetector.evaluateProject(noNextActionProject, nowMillis = now)
         assertNotNull(emptyEval)
@@ -772,9 +801,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(114, BuildConfig.VERSION_CODE)
-        assertEquals("3.1.1", BuildConfig.VERSION_NAME)
-        assertFalse("3.1.1 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(115, BuildConfig.VERSION_CODE)
+        assertEquals("3.1.2", BuildConfig.VERSION_NAME)
+        assertFalse("3.1.2 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),

@@ -533,6 +533,34 @@ test('Stalled Project Detector & Timeblocking Daily Timeline interleaving + conf
   assert.equal(evaluateProjectStalledStatus(projReviewedYesterday, tasksForStalled, now).isStalled, false);
   assert.equal(evaluateProjectStalledStatus(projSomeday, tasksForStalled, now).isStalled, false);
 
+  // Brand-new empty project (< 24h) and 3/3 completed project (< 24h) must NOT trigger attention
+  const projBrandNew = makeProject({
+    id: 'p-brand-new',
+    title: 'Brand New Empty',
+    createdAt: now - 2 * 3_600_000,
+    updatedAt: now - 2 * 3_600_000
+  });
+  const projAllDoneToday = makeProject({
+    id: 'p-all-done-today',
+    title: 'NexusTS',
+    createdAt: now - 20 * dayMs,
+    updatedAt: now - 20 * dayMs
+  });
+  const doneTodayTask = makeTask({
+    id: 'tk-done-today',
+    projectId: 'p-all-done-today',
+    status: 'COMPLETED',
+    createdAt: now - 5 * dayMs,
+    updatedAt: now - 2 * 3_600_000,
+    completedAt: now - 2 * 3_600_000
+  });
+  assert.equal(evaluateProjectStalledStatus(projBrandNew, [], now).isStalled, false);
+  assert.equal(evaluateProjectStalledStatus(projAllDoneToday, [doneTodayTask], now).isStalled, false);
+  assert.equal(
+    evaluateProjectStalledStatus(projAllDoneToday, [doneTodayTask], now + 23 * 3_600_000).reason,
+    'no_next_action'
+  );
+
   const stalledList = detectStalledProjects(
     [projSomeday, projReviewedYesterday, projStale16d, projNoActions],
     tasksForStalled,

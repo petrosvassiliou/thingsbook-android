@@ -1582,6 +1582,7 @@ data class StalledProjectStatus(
 }
 
 object StalledProjectDetector {
+    const val ONE_DAY_MILLIS: Long = 24L * 60L * 60L * 1000L
     const val FOURTEEN_DAYS_MILLIS: Long = 14L * 24L * 60L * 60L * 1000L
 
     fun evaluateProject(
@@ -1595,8 +1596,22 @@ object StalledProjectDetector {
         ) {
             return null
         }
-        val hasNoNextAction = openNextActionCount <= 0
+        val taskActivity = project.lastTaskActivityAt ?: 0L
         val lastReviewed = project.lastReviewedAt
+        val activityAnchor = maxOf(
+            project.createdAt,
+            project.updatedAt,
+            lastReviewed ?: 0L,
+            taskActivity
+        )
+        if (openNextActionCount <= 0 &&
+            activityAnchor > 0L &&
+            (nowMillis - activityAnchor) < ONE_DAY_MILLIS
+        ) {
+            return null
+        }
+        val hasNoNextAction = openNextActionCount <= 0
+
         val reviewAnchor = if (lastReviewed != null && lastReviewed > 0L) {
             lastReviewed
         } else {

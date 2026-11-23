@@ -53,10 +53,14 @@ export interface StalledProjectEvaluation {
   daysSinceActivity: number;
 }
 
+export const STALLED_NO_NEXT_ACTION_GRACE_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Evaluates whether an open project is "Stalled" according to GTD Weekly Review rules:
  * - Only non-deleted, ACTIVE projects that are not parked in SOMEDAY can be stalled.
- * - Stalled if it has 0 open next actions OR hasn't been updated/reviewed in 14+ days.
+ * - Stalled for `no_next_action` if it has 0 open next actions AND at least 24 hours have passed
+ *   since the project or its tasks were last created/updated/completed/reviewed.
+ * - Stalled for `inactive_14d` if it hasn't had activity/review in 14+ days.
  */
 export function evaluateProjectStalledStatus(
   project: ProjectRecord,
@@ -65,6 +69,17 @@ export function evaluateProjectStalledStatus(
 ): StalledProjectEvaluation {
   const projectTasks = tasks.filter((t) => !t.isDeleted && t.projectId === project.id);
   const openTasks = projectTasks.filter((t) => t.status === 'OPEN');
+  const latestTaskActivityAt = projectTasks.reduce(
+    (maxTs, t) => Math.max(maxTs, t.createdAt || 0, t.updatedAt || 0, t.completedAt || 0),
+    0
+  );
+
+  const activityAnchor = Math.max(
+    project.createdAt || 0,
+    project.updatedAt || 0,
+    project.lastReviewedAt || 0,
+    latestTaskActivityAt
+  );
 
   const reviewAnchor =
     project.lastReviewedAt != null && project.lastReviewedAt > 0
@@ -88,13 +103,23 @@ export function evaluateProjectStalledStatus(
     };
   }
 
+  const noNextActionElapsedMs = Math.max(0, nowMillis - activityAnchor);
   if (openTasks.length === 0) {
+    if (activityAnchor > 0 && noNextActionElapsedMs < STALLED_NO_NEXT_ACTION_GRACE_MS) {
+      return {
+        isStalled: false,
+        reason: null,
+        openTasksCount: 0,
+        lastActivityAt: activityAnchor,
+        daysSinceActivity: 0
+      };
+    }
     return {
       isStalled: true,
       reason: 'no_next_action',
       openTasksCount: 0,
-      lastActivityAt: reviewAnchor,
-      daysSinceActivity
+      lastActivityAt: activityAnchor,
+      daysSinceActivity: Math.floor(noNextActionElapsedMs / 86_400_000)
     };
   }
 

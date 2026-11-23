@@ -602,10 +602,10 @@ class V2UpgradeAndFeaturesTest {
         )
         assertNull(StalledProjectDetector.evaluateProject(brandNewEmptyProject, nowMillis = now))
         assertNull(StalledProjectDetector.evaluateProject(justFinishedAllTasksProject, nowMillis = now))
-        assertEquals(
-            StalledProjectReason.NO_NEXT_ACTION,
-            StalledProjectDetector.evaluateProject(finishedYesterdayProject, nowMillis = now)?.reason
-        )
+        val finishedYesterdayEval = StalledProjectDetector.evaluateProject(finishedYesterdayProject, nowMillis = now)
+        assertNotNull(finishedYesterdayEval)
+        assertTrue(finishedYesterdayEval!!.hasNoNextAction)
+        assertEquals(StalledProjectReason.BOTH, finishedYesterdayEval.reason)
 
         // Requires attention: hasNoNextAction == true, isUnreviewed == false
         val emptyEval = StalledProjectDetector.evaluateProject(noNextActionProject, nowMillis = now)

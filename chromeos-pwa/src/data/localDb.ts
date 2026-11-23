@@ -258,6 +258,7 @@ export function updatePreferences(patch: Partial<AppPreferences>): AppPreference
 export type UndoEventKind =
   | 'task_completed'
   | 'task_deleted'
+  | 'project_completed'
   | 'project_deleted'
   | 'tasks_updated'
   | 'roadmap_rescheduled'
@@ -3395,6 +3396,71 @@ export class ThingsLocalDb {
 
       await this.refreshSnapshot();
       this.triggerSync();
+    });
+  }
+
+  /**
+   * Completes a Project with atomic Undo snapshot (optionally completing remaining OPEN non-deleted tasks).
+   */
+  async completeProjectWithUndo(
+    projectId: string,
+    completeOpenTasks: boolean = false
+  ): Promise<boolean> {
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction(['projects', 'tasks'], 'readwrite');
+      const proj = (await tx.objectStore('projects').get(projectId)) as ProjectRecord | undefined;
+      if (!proj || proj.isDeleted) {
+        await tx.done;
+        return false;
+      }
+
+      const prevTasks: TaskRecord[] = [];
+      if (completeOpenTasks) {
+        const tasks = (await tx.objectStore('tasks').getAll()) as TaskRecord[];
+        for (const t of tasks) {
+          if (t.projectId === projectId && !t.isDeleted && t.status === 'OPEN') {
+            prevTasks.push({ ...t });
+            await tx.objectStore('tasks').put({
+              ...t,
+              status: 'COMPLETED',
+              completedAt: now,
+              updatedAt: Math.max(now, t.updatedAt + 1),
+              isDirty: true
+            } satisfies TaskRecord);
+          }
+        }
+      }
+
+      const prevProject: ProjectRecord = { ...proj };
+      await tx.objectStore('projects').put({
+        ...proj,
+        status: 'COMPLETED',
+        completedAt: now,
+        updatedAt: Math.max(now, proj.updatedAt + 1),
+        isDirty: true
+      } satisfies ProjectRecord);
+
+      await tx.done;
+
+      this.lastUndoSnapshot = {
+        tasks: prevTasks,
+        checklistItems: [],
+        projects: [prevProject],
+        headings: [],
+        attachments: [],
+        spawnedTaskIds: []
+      };
+      this.emitUndoEvent({
+        kind: 'project_completed',
+        entityTitle: prevProject.title,
+        count: 1 + prevTasks.length
+      });
+
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return true;
     });
   }
 

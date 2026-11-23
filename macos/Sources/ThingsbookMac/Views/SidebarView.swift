@@ -821,7 +821,7 @@ public struct SidebarView: View {
                 }
             }
             Button(store.tr("macos_complete_project")) {
-                try? store.database.setProjectStatus(projectId: proj.id, status: .completed)
+                store.requestCompleteProject(proj)
             }
             Divider()
             Button(role: .destructive) {

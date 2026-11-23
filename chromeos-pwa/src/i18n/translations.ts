@@ -295,6 +295,12 @@ export interface TranslationStrings {
   v31GeminiPlanDayEmpty: string;
   v31GeminiPlanDayAppliedUndo: (count: number) => string;
   v31GeminiPlanDayReplan: string;
+  v31ProjectCompleteBtn: string;
+  v31ProjectCompleteConfirmTitle: string;
+  v31ProjectCompleteConfirmBody: (title: string, count?: number) => string;
+  v31ProjectCompleteAllTodos: string;
+  v31ProjectCompleteAsIs: string;
+  v31ProjectCompletedUndo: (title: string) => string;
   settingsBiometricLockTitle: string;
   settingsBiometricLockDesc: string;
   appLockTitle: string;
@@ -842,6 +848,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31GeminiPlanDayEmpty: 'All Today to-dos are already timeblocked or completed',
     v31GeminiPlanDayAppliedUndo: (count) => `Applied ${count} timeblocks to Today`,
     v31GeminiPlanDayReplan: 'Include already timeblocked to-dos',
+    v31ProjectCompleteBtn: 'Complete',
+    v31ProjectCompleteConfirmTitle: 'Complete Project?',
+    v31ProjectCompleteConfirmBody: (title, count = 0) =>
+      `“${title}” still has ${count} open to-dos. Mark all open to-dos as completed too, or complete the project as-is?`,
+    v31ProjectCompleteAllTodos: 'Complete All & Finish',
+    v31ProjectCompleteAsIs: 'Complete Project Only',
+    v31ProjectCompletedUndo: (title) => `Project “${title}” completed`,
     settingsBiometricLockTitle: 'Biometric / PIN App Lock',
     settingsBiometricLockDesc:
       'Require fingerprint, face unlock, or device PIN when opening Thingsbook (off by default).',
@@ -1398,6 +1411,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31GeminiPlanDayEmpty: 'Alle Heute-Aufgaben haben bereits einen Zeitblock oder sind erledigt',
     v31GeminiPlanDayAppliedUndo: (count) => `${count} Zeitblöcke auf Heute angewendet`,
     v31GeminiPlanDayReplan: 'Bereits eingeplante Aufgaben neu verteilen',
+    v31ProjectCompleteBtn: 'Abschließen',
+    v31ProjectCompleteConfirmTitle: 'Projekt abschließen?',
+    v31ProjectCompleteConfirmBody: (title, count = 0) =>
+      `„${title}“ enthält noch ${count} offene Aufgaben. Sollen alle offenen Aufgaben ebenfalls erledigt oder das Projekt so abgeschlossen werden?`,
+    v31ProjectCompleteAllTodos: 'Alle erledigen & abschließen',
+    v31ProjectCompleteAsIs: 'Nur Projekt abschließen',
+    v31ProjectCompletedUndo: (title) => `Projekt „${title}“ abgeschlossen`,
     settingsBiometricLockTitle: 'Biometrische App-Sperre (Fingerabdruck / PIN)',
     settingsBiometricLockDesc:
       'Beim Öffnen von Thingsbook Fingerabdruck, Gesichtserkennung oder Geräte-PIN anfordern (standardmäßig deaktiviert).',
@@ -1953,6 +1973,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31GeminiPlanDayEmpty: "Toutes les tâches d'Aujourd'hui sont déjà planifiées ou terminées",
     v31GeminiPlanDayAppliedUndo: (count) => `${count} créneaux appliqués à Aujourd'hui`,
     v31GeminiPlanDayReplan: 'Inclure les tâches déjà planifiées',
+    v31ProjectCompleteBtn: 'Terminer',
+    v31ProjectCompleteConfirmTitle: 'Terminer le projet ?',
+    v31ProjectCompleteConfirmBody: (title, count = 0) =>
+      `« ${title} » contient encore ${count} tâches ouvertes. Tout marquer comme terminé ou terminer le projet tel quel ?`,
+    v31ProjectCompleteAllTodos: 'Tout cocher & terminer',
+    v31ProjectCompleteAsIs: 'Terminer uniquement le projet',
+    v31ProjectCompletedUndo: (title) => `Projet « ${title} » terminé`,
     settingsBiometricLockTitle: 'Verrouillage biométrique / PIN',
     settingsBiometricLockDesc:
       "Exiger l'empreinte digitale, la reconnaissance faciale ou le code PIN à l'ouverture (désactivé par défaut).",
@@ -2510,6 +2537,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31GeminiPlanDayEmpty: 'Tutte le attività di Oggi hanno già un blocco orario o sono completate',
     v31GeminiPlanDayAppliedUndo: (count) => `Applicati ${count} blocchi orari a Oggi`,
     v31GeminiPlanDayReplan: 'Includi attività già pianificate',
+    v31ProjectCompleteBtn: 'Completa',
+    v31ProjectCompleteConfirmTitle: 'Completare il progetto?',
+    v31ProjectCompleteConfirmBody: (title, count = 0) =>
+      `«${title}» ha ancora ${count} attività aperte. Segnare anche le attività come completate o completare il progetto così com'è?`,
+    v31ProjectCompleteAllTodos: 'Completa tutto e chiudi',
+    v31ProjectCompleteAsIs: 'Completa solo il progetto',
+    v31ProjectCompletedUndo: (title) => `Progetto «${title}» completato`,
     settingsBiometricLockTitle: 'Blocco app biometrico / PIN',
     settingsBiometricLockDesc:
       "Richiedi impronta digitale, sblocco facciale o PIN all'apertura (disattivato per impostazione predefinita).",
@@ -3066,6 +3100,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31GeminiPlanDayEmpty: 'Todas las tareas de Hoy ya tienen bloque de tiempo o están completadas',
     v31GeminiPlanDayAppliedUndo: (count) => `Se aplicaron ${count} bloques de tiempo a Hoy`,
     v31GeminiPlanDayReplan: 'Incluir tareas ya programadas',
+    v31ProjectCompleteBtn: 'Completar',
+    v31ProjectCompleteConfirmTitle: '¿Completar proyecto?',
+    v31ProjectCompleteConfirmBody: (title, count = 0) =>
+      `«${title}» aún tiene ${count} tareas abiertas. ¿Marcar también las tareas como completadas o completar el proyecto tal cual?`,
+    v31ProjectCompleteAllTodos: 'Completar todo y cerrar',
+    v31ProjectCompleteAsIs: 'Completar solo el proyecto',
+    v31ProjectCompletedUndo: (title) => `Proyecto «${title}» completado`,
     settingsBiometricLockTitle: 'Bloqueo biométrico / PIN',
     settingsBiometricLockDesc:
       'Requerir huella digital, desbloqueo facial o PIN al abrir Thingsbook (desactivado por defecto).',

@@ -353,6 +353,11 @@ export const App: React.FC = () => {
     project: ProjectRecord;
     associatedTasksCount: number;
   } | null>(null);
+  const [pendingCompleteProject, setPendingCompleteProject] = useState<{
+    project: ProjectRecord;
+    openTasksCount: number;
+  } | null>(null);
+  const undoNavRestoreRef = useRef<{ kind: 'project'; projectId: string } | null>(null);
   const [appLockSetupOpen, setAppLockSetupOpen] = useState(false);
   const [isAppLocked, setIsAppLocked] = useState<boolean>(() => {
     const initial = loadPreferences();
@@ -534,20 +539,25 @@ export const App: React.FC = () => {
     const unsubSync = cloudSync.subscribe(setSyncState);
     const unsubUndo = localDb.subscribeUndo((ev) => {
       if (ev.kind === 'tasks_updated') return;
+      if (ev.kind !== 'project_completed') {
+        undoNavRestoreRef.current = null;
+      }
       const tr = tRef.current;
       const fallbackTitle = ev.entityTitle.trim() || tr.entityNewTodo;
       const msg =
         ev.kind === 'task_completed'
           ? tr.undoTaskCompleted(fallbackTitle)
-          : ev.kind === 'project_deleted'
-            ? tr.undoProjectDeleted(ev.entityTitle.trim() || tr.entityNewProject)
-            : ev.kind === 'roadmap_cascade'
-              ? tr.v31RoadmapCascadeUndo(ev.count)
-              : ev.kind === 'roadmap_rescheduled'
-                ? tr.v31RoadmapRescheduledUndo
-                : ev.kind === 'day_plan_applied'
-                  ? tr.v31GeminiPlanDayAppliedUndo(ev.count)
-                  : tr.undoTaskDeleted(fallbackTitle);
+          : ev.kind === 'project_completed'
+            ? tr.v31ProjectCompletedUndo(ev.entityTitle.trim() || tr.entityNewProject)
+            : ev.kind === 'project_deleted'
+              ? tr.undoProjectDeleted(ev.entityTitle.trim() || tr.entityNewProject)
+              : ev.kind === 'roadmap_cascade'
+                ? tr.v31RoadmapCascadeUndo(ev.count)
+                : ev.kind === 'roadmap_rescheduled'
+                  ? tr.v31RoadmapRescheduledUndo
+                  : ev.kind === 'day_plan_applied'
+                    ? tr.v31GeminiPlanDayAppliedUndo(ev.count)
+                    : tr.undoTaskDeleted(fallbackTitle);
       setUndoBanner({ id: Date.now(), message: msg });
     });
 
@@ -1837,6 +1847,44 @@ export const App: React.FC = () => {
     [snapshot.tasks, executeDeleteProject]
   );
 
+  const executeCompleteProject = useCallback(
+    async (projectId: string, completeOpenTasks: boolean) => {
+      setPendingCompleteProject(null);
+      const wasViewingProject =
+        activeNav.kind === 'project' && activeNav.projectId === projectId;
+      undoNavRestoreRef.current = wasViewingProject
+        ? { kind: 'project', projectId }
+        : null;
+      if (completeOpenTasks) {
+        setExpandedTaskId(null);
+        setSelectedTaskIds([]);
+      }
+      await localDb.completeProjectWithUndo(projectId, completeOpenTasks);
+      if (wasViewingProject) {
+        handleSelectNav({ kind: 'smart', view: 'LOGBOOK' });
+      }
+    },
+    [activeNav, handleSelectNav]
+  );
+
+  const requestCompleteProject = useCallback(
+    async (project: ProjectRecord) => {
+      if (project.status === 'COMPLETED') {
+        await localDb.upsertProject({ id: project.id, status: 'ACTIVE' });
+        return;
+      }
+      const openTasksCount = snapshot.tasks.filter(
+        (tk) => !tk.isDeleted && tk.projectId === project.id && tk.status === 'OPEN'
+      ).length;
+      if (openTasksCount > 0) {
+        setPendingCompleteProject({ project, openTasksCount });
+        return;
+      }
+      await executeCompleteProject(project.id, false);
+    },
+    [snapshot.tasks, executeCompleteProject]
+  );
+
   const handleToggleBiometricAppLock = useCallback(
     (enabled: boolean) => {
       if (enabled) {
@@ -2150,6 +2198,7 @@ export const App: React.FC = () => {
         if (templatesModal.open) return setTemplatesModal((prev) => ({ ...prev, open: false }));
         if (quickShareDraft) return setQuickShareDraft(null);
         if (pendingDeleteProject) return setPendingDeleteProject(null);
+        if (pendingCompleteProject) return setPendingCompleteProject(null);
         if (emptyTrashConfirmOpen) return setEmptyTrashConfirmOpen(false);
         if (appLockSetupOpen) return setAppLockSetupOpen(false);
         if (perspectiveModalState.open) {
@@ -2209,6 +2258,7 @@ export const App: React.FC = () => {
         templatesModal.open ||
         Boolean(quickShareDraft) ||
         Boolean(pendingDeleteProject) ||
+        Boolean(pendingCompleteProject) ||
         emptyTrashConfirmOpen ||
         appLockSetupOpen ||
         perspectiveModalState.open ||
@@ -2335,11 +2385,17 @@ export const App: React.FC = () => {
           setGeminiModalOpen(true);
           return;
         }
-        // Ctrl+Z -> Undo last task completion or deletion (when not typing in a text field)
+        // Ctrl+Z -> Undo last task/project completion or deletion (when not typing in a text field)
         if (lower === 'z' && !e.shiftKey && !inInput) {
           e.preventDefault();
           setUndoBanner(null);
-          void localDb.performUndo();
+          void localDb.performUndo().then((restored) => {
+            if (restored && undoNavRestoreRef.current) {
+              const targetNav = undoNavRestoreRef.current;
+              undoNavRestoreRef.current = null;
+              handleSelectNav(targetNav);
+            }
+          });
           return;
         }
         // Ctrl+D -> Duplicate expanded To-Do, selected To-Dos, or active Project
@@ -2459,6 +2515,7 @@ export const App: React.FC = () => {
     templatesModal.open,
     quickShareDraft,
     pendingDeleteProject,
+    pendingCompleteProject,
     emptyTrashConfirmOpen,
     appLockSetupOpen,
     perspectiveModalState.open,
@@ -4612,15 +4669,25 @@ export const App: React.FC = () => {
                   {/* Project Header (Hidden when Roadmap Full Screen is active) */}
                   {!isRoadmapFullScreen && (
                     <div className="view-header" onClick={(e) => e.stopPropagation()}>
-                      {/* Row 1: Generous Full-Width Project Title + Compact [✏️ Edit] & [⋯ Project Menu] */}
+                      {/* Row 1: Generous Full-Width Project Title + Compact [✓ Complete], [✏️ Edit] & [⋯ Project Menu] */}
                       <div className="view-title-row project-header-title-row">
                         <div className="view-title-left project-title-left">
-                          <ProjectProgressRing
-                            completed={doneProjTasks}
-                            total={allProjTasks.length}
-                            size={26}
-                            isProjectCompleted={project.status === 'COMPLETED'}
-                          />
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            data-testid="project-progress-complete-btn"
+                            title={t.actionComplete}
+                            aria-label={t.actionComplete}
+                            style={{ padding: '4px 5px', borderRadius: 8 }}
+                            onClick={() => void requestCompleteProject(project)}
+                          >
+                            <ProjectProgressRing
+                              completed={doneProjTasks}
+                              total={allProjTasks.length}
+                              size={26}
+                              isProjectCompleted={project.status === 'COMPLETED'}
+                            />
+                          </button>
                           <h1
                             className="view-title project-view-title"
                             title={project.title}
@@ -4649,6 +4716,39 @@ export const App: React.FC = () => {
                         </div>
 
                         <div className="project-header-primary-actions">
+                          {project.status !== 'COMPLETED' && (
+                            <button
+                              type="button"
+                              className="chip-btn"
+                              data-testid="project-complete-header-btn"
+                              title={t.actionComplete}
+                              style={
+                                allProjTasks.length > 0 && doneProjTasks === allProjTasks.length
+                                  ? {
+                                      background:
+                                        'color-mix(in srgb, var(--logbook-green) 14%, transparent)',
+                                      borderColor:
+                                        'color-mix(in srgb, var(--logbook-green) 36%, transparent)',
+                                      color: 'var(--logbook-green)',
+                                      fontWeight: 600
+                                    }
+                                  : undefined
+                              }
+                              onClick={() => void requestCompleteProject(project)}
+                            >
+                              <CheckCircle2
+                                size={13.5}
+                                style={{
+                                  color:
+                                    allProjTasks.length > 0 && doneProjTasks === allProjTasks.length
+                                      ? 'var(--logbook-green)'
+                                      : 'var(--things-blue)'
+                                }}
+                              />
+                              <span>{t.v31ProjectCompleteBtn}</span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             className="chip-btn"
@@ -4742,13 +4842,9 @@ export const App: React.FC = () => {
                                     type="button"
                                     className="dropdown-item"
                                     data-testid="project-complete-btn"
-                                    onClick={async () => {
+                                    onClick={() => {
                                       setProjectHeaderMenuOpen(false);
-                                      await localDb.upsertProject({
-                                        id: project.id,
-                                        status: 'COMPLETED'
-                                      });
-                                      handleSelectNav({ kind: 'smart', view: 'LOGBOOK' });
+                                      void requestCompleteProject(project);
                                     }}
                                   >
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -6617,6 +6713,87 @@ export const App: React.FC = () => {
         />
       )}
 
+      {pendingCompleteProject && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setPendingCompleteProject(null)}
+        >
+          <div
+            className="modal-panel"
+            data-testid="complete-project-confirm-modal"
+            style={{ maxWidth: 440 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CheckCircle2 size={18} style={{ color: 'var(--logbook-green)' }} />
+                <span>{t.v31ProjectCompleteConfirmTitle}</span>
+              </h3>
+              <button
+                type="button"
+                className="icon-btn"
+                title={t.actionCancel}
+                onClick={() => setPendingCompleteProject(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p
+              style={{
+                margin: '0 0 18px',
+                fontSize: 13.5,
+                color: 'var(--text-secondary)',
+                lineHeight: 1.5
+              }}
+            >
+              {t.v31ProjectCompleteConfirmBody(
+                pendingCompleteProject.project.title || t.entityNewProject,
+                pendingCompleteProject.openTasksCount
+              )}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-primary"
+                data-testid="confirm-complete-project-with-tasks"
+                style={{
+                  width: '100%',
+                  padding: '9px 14px',
+                  background: 'var(--logbook-green)',
+                  borderColor: 'var(--logbook-green)'
+                }}
+                onClick={() =>
+                  void executeCompleteProject(pendingCompleteProject.project.id, true)
+                }
+              >
+                <CheckCircle2 size={14} />
+                <span>{t.v31ProjectCompleteAllTodos}</span>
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                data-testid="confirm-complete-project-as-is"
+                style={{ width: '100%', padding: '8.5px 14px' }}
+                onClick={() =>
+                  void executeCompleteProject(pendingCompleteProject.project.id, false)
+                }
+              >
+                <span>{t.v31ProjectCompleteAsIs}</span>
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                data-testid="cancel-complete-project"
+                style={{ width: '100%', padding: '8.5px 14px' }}
+                onClick={() => setPendingCompleteProject(null)}
+              >
+                <span>{t.actionCancel}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {pendingDeleteProject && (
         <div
           className="modal-backdrop"
@@ -6739,10 +6916,17 @@ export const App: React.FC = () => {
           t={t}
           onUndo={() => {
             setUndoBanner(null);
-            void localDb.performUndo();
+            void localDb.performUndo().then((restored) => {
+              if (restored && undoNavRestoreRef.current) {
+                const targetNav = undoNavRestoreRef.current;
+                undoNavRestoreRef.current = null;
+                handleSelectNav(targetNav);
+              }
+            });
           }}
           onDismiss={() => {
             setUndoBanner(null);
+            undoNavRestoreRef.current = null;
             localDb.clearUndoSnapshot();
           }}
         />

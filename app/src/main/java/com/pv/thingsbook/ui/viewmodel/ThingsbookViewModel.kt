@@ -125,6 +125,12 @@ data class PendingProjectDeletePrompt(
     val associatedTaskCount: Int
 )
 
+data class PendingProjectCompletePrompt(
+    val projectId: String,
+    val projectTitle: String,
+    val openTaskCount: Int
+)
+
 class PendingRestoreSession(
     val rawBytes: ByteArray,
     val fileNameHint: String?,
@@ -382,6 +388,10 @@ class ThingsbookViewModel @Inject constructor(
     // Project Deletion Confirmation Prompt State
     private val _pendingProjectDeletePrompt = MutableStateFlow<PendingProjectDeletePrompt?>(null)
     val pendingProjectDeletePrompt: StateFlow<PendingProjectDeletePrompt?> = _pendingProjectDeletePrompt.asStateFlow()
+
+    // Project Completion Confirmation Prompt State
+    private val _pendingProjectCompletePrompt = MutableStateFlow<PendingProjectCompletePrompt?>(null)
+    val pendingProjectCompletePrompt: StateFlow<PendingProjectCompletePrompt?> = _pendingProjectCompletePrompt.asStateFlow()
 
     // Daily Digest & Notification Settings Modal States
     private val _isNotificationSettingsOpen = MutableStateFlow(false)
@@ -1815,10 +1825,70 @@ class ThingsbookViewModel @Inject constructor(
 
     fun completeProject(projectId: String) {
         safeVmScope.launch {
-            repository.updateProjectStatus(projectId, ProjectStatus.COMPLETED)
-            val currentTarget = _navigationTarget.value
-            if (currentTarget is ActiveNavigationTarget.ProjectDetail && currentTarget.projectId == projectId) {
-                _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+            val prevTitle = activeProjects.value.find { it.id == projectId }?.title
+                ?: database.projectDao().getById(projectId)?.title
+            val label = prevTitle?.trim()?.ifEmpty { null } ?: getLocalizedString(R.string.entity_project)
+            val openTaskCount = database.taskDao().getOpenTasksByProject(projectId).size
+            if (openTaskCount > 0) {
+                _pendingProjectCompletePrompt.value = PendingProjectCompletePrompt(
+                    projectId = projectId,
+                    projectTitle = label,
+                    openTaskCount = openTaskCount
+                )
+            } else {
+                executeProjectCompletion(
+                    projectId = projectId,
+                    projectLabel = label,
+                    completeOpenTasks = false
+                )
+            }
+        }
+    }
+
+    fun confirmCompleteProject(completeOpenTasks: Boolean) {
+        val prompt = _pendingProjectCompletePrompt.value ?: return
+        _pendingProjectCompletePrompt.value = null
+        safeVmScope.launch {
+            executeProjectCompletion(
+                projectId = prompt.projectId,
+                projectLabel = prompt.projectTitle,
+                completeOpenTasks = completeOpenTasks
+            )
+        }
+    }
+
+    fun dismissCompleteProjectPrompt() {
+        _pendingProjectCompletePrompt.value = null
+    }
+
+    private suspend fun executeProjectCompletion(
+        projectId: String,
+        projectLabel: String,
+        completeOpenTasks: Boolean
+    ) {
+        val currentTarget = _navigationTarget.value
+        val wasViewingProject = currentTarget is ActiveNavigationTarget.ProjectDetail &&
+            currentTarget.projectId == projectId
+        if (wasViewingProject) {
+            _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+        }
+        if (completeOpenTasks) {
+            _expandedTaskId.value = null
+            clearTaskSelection()
+        }
+        val completedTaskIds = repository.completeProjectWithUndoSupport(
+            projectId = projectId,
+            completeOpenTasks = completeOpenTasks
+        )
+        registerUndoAction(
+            message = getLocalizedString(R.string.v31_project_completed_undo, projectLabel)
+        ) {
+            repository.restoreCompletedProjectSnapshot(
+                projectId = projectId,
+                reopenedTaskIds = completedTaskIds
+            )
+            if (wasViewingProject) {
+                _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
             }
         }
     }
@@ -3411,6 +3481,10 @@ class ThingsbookViewModel @Inject constructor(
                 dismissDeleteProjectPrompt()
                 true
             }
+            _pendingProjectCompletePrompt.value != null -> {
+                dismissCompleteProjectPrompt()
+                true
+            }
             _quickShareDraft.value != null -> {
                 _quickShareDraft.value = null
                 true
@@ -3494,6 +3568,7 @@ class ThingsbookViewModel @Inject constructor(
     fun hasOpenModalOrOverlay(): Boolean {
         return _uiErrorMessage.value != null ||
             _pendingProjectDeletePrompt.value != null ||
+            _pendingProjectCompletePrompt.value != null ||
             _quickShareDraft.value != null ||
             _pendingRestoreSession.value != null ||
             _isBackupCreateDialogOpen.value ||

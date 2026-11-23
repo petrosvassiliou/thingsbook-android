@@ -167,6 +167,7 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var newProjectDefaultAreaId: String? = nil
     @Published public var editingProject: Project? = nil
     @Published public var pendingProjectDeletion: PendingProjectDeletion? = nil
+    @Published public var pendingProjectCompletion: PendingProjectCompletion? = nil
     @Published public var isNewAreaSheetPresented = false
     @Published public var editingArea: Area? = nil
     @Published public var isAreaManagerPresented = false
@@ -203,6 +204,7 @@ public final class ThingsbookStore: ObservableObject {
         if isNewProjectSheetPresented { return "newProject" }
         if editingProject != nil { return "editProject" }
         if pendingProjectDeletion != nil { return "confirmProjectDeletion" }
+        if pendingProjectCompletion != nil { return "confirmProjectCompletion" }
         if isNewAreaSheetPresented { return "newArea" }
         if editingArea != nil { return "editArea" }
         if isAreaManagerPresented { return "areaManager" }
@@ -2115,6 +2117,51 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func requestCompleteProject(_ project: Project) {
+        if project.status == .completed {
+            try? database.setProjectStatus(projectId: project.id, status: .active)
+            return
+        }
+        let openCount = (try? database.countOpenTasksInProject(project.id)) ?? 0
+        if openCount > 0 {
+            pendingProjectCompletion = PendingProjectCompletion(project: project, openTaskCount: openCount)
+        } else {
+            confirmCompleteProject(project, completeOpenTasks: false)
+        }
+    }
+
+    public func confirmCompleteProject(_ project: Project, completeOpenTasks: Bool) {
+        pendingProjectCompletion = nil
+        let wasViewingProject = (selectedDestination == .project(project.id))
+        guard let completedTaskIds = try? database.completeProjectWithUndo(
+            projectId: project.id,
+            completeOpenTasks: completeOpenTasks
+        ) else { return }
+
+        if !completedTaskIds.isEmpty {
+            if let ft = focusTimer, completedTaskIds.contains(ft.taskId) {
+                stopFocusTimer()
+            }
+            NotificationReminderService.shared.cancelTaskReminders(taskIds: completedTaskIds)
+            selectedTaskIds.subtract(completedTaskIds)
+            if let exp = expandedTaskId, completedTaskIds.contains(exp) {
+                expandedTaskId = nil
+            }
+        }
+        if wasViewingProject {
+            selectedDestination = .smartView(.logbook)
+        }
+        presentUndo(
+            message: trf("v31_project_completed_undo", project.title),
+            action: .projectCompleted(
+                projectId: project.id,
+                title: project.title,
+                reopenedTaskIds: completedTaskIds,
+                wasViewingProject: wasViewingProject
+            )
+        )
+    }
+
     public func deleteProjectWithUndo(_ project: Project) {
         let count = (try? database.countNonDeletedTasksInProject(project.id)) ?? 0
         if count > 0 {
@@ -2244,6 +2291,18 @@ public final class ThingsbookStore: ObservableObject {
         case .headingDatesChanged(let headingId, let previousStart, let previousEnd):
             try? database.updateHeadingDates(headingId, startDate: previousStart, endDate: previousEnd)
             reloadSnapshot()
+        case .projectCompleted(let projectId, _, let reopenedTaskIds, let wasViewingProject):
+            try? database.restoreCompletedProject(projectId: projectId, reopenedTaskIds: reopenedTaskIds)
+            reloadSnapshot()
+            if wasViewingProject {
+                selectedDestination = .project(projectId)
+            }
+            if !reopenedTaskIds.isEmpty {
+                NotificationReminderService.shared.syncAllTaskReminders(
+                    openTasks: allOpenTasks,
+                    lang: preferences.language
+                )
+            }
         case .projectDeleted(let projectId, _, let previousTasks, let deletedTaskIds):
             try? database.restoreDeletedProject(
                 projectId: projectId,

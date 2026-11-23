@@ -409,11 +409,11 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.1.0")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.1.0")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 113)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.1.1")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.1.1")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 114)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.1.0", current: "3.0.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.1.1", current: "3.1.0"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))

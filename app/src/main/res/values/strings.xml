@@ -630,4 +630,10 @@
     <string name="v31_gemini_plan_day_empty">All Today to-dos are already timeblocked or completed</string>
     <string name="v31_gemini_plan_day_applied_undo">Applied %1$d timeblocks to Today</string>
     <string name="v31_gemini_plan_day_replan">Include already timeblocked to-dos</string>
+    <string name="v31_project_complete_btn">Complete</string>
+    <string name="v31_project_complete_confirm_title">Complete Project?</string>
+    <string name="v31_project_complete_confirm_body">“%1$s” still has %2$d open to-dos. Mark all open to-dos as completed too, or complete the project as-is?</string>
+    <string name="v31_project_complete_all_todos">Complete All &amp; Finish</string>
+    <string name="v31_project_complete_as_is">Complete Project Only</string>
+    <string name="v31_project_completed_undo">Project “%1$s” completed</string>
 </resources>

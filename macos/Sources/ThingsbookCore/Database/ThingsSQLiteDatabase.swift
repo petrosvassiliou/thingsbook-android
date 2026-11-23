@@ -3036,6 +3036,90 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         }
     }
 
+    public func countOpenTasksInProject(_ projectId: String) throws -> Int {
+        try queue.sync {
+            let stmt = try prepareLocked("SELECT COUNT(*) FROM tasks WHERE project_id = ? AND is_deleted = 0 AND status = 'OPEN';")
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, projectId)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                return Int(sqlite3_column_int(stmt, 0))
+            }
+            return 0
+        }
+    }
+
+    @discardableResult
+    public func completeProjectWithUndo(projectId: String, completeOpenTasks: Bool) throws -> [String] {
+        var didMutate = false
+        let completedTaskIds: [String] = try queue.sync {
+            guard var proj = try fetchProjectByIdLocked(projectId), !proj.isDeleted else { return [] }
+            let now = nowMillis()
+            let rawTagsByTask = (try? fetchAllTaskTagIdsLocked()) ?? [:]
+            return try inTransactionLocked {
+                var closedIds: [String] = []
+                if completeOpenTasks {
+                    var openIds: [String] = []
+                    let q = try prepareLocked("SELECT id FROM tasks WHERE project_id = ? AND is_deleted = 0 AND status = 'OPEN';")
+                    defer { sqlite3_finalize(q) }
+                    bindText(q, 1, projectId)
+                    while sqlite3_step(q) == SQLITE_ROW {
+                        if let tid = colString(q, 0) {
+                            openIds.append(tid)
+                        }
+                    }
+                    for tid in openIds {
+                        if var tk = try fetchTaskByIdLocked(tid) {
+                            let tags = rawTagsByTask[tid] ?? tk.tagIds
+                            let stamp = max(now, tk.updatedAt + 1)
+                            tk.status = .completed
+                            tk.completedAt = stamp
+                            tk.updatedAt = stamp
+                            try upsertTaskLocked(tk, tagIds: tags, isDirty: true)
+                            closedIds.append(tid)
+                        }
+                    }
+                }
+                let pStamp = max(now, proj.updatedAt + 1)
+                proj.status = .completed
+                proj.completedAt = pStamp
+                proj.updatedAt = pStamp
+                try upsertProjectLocked(proj, isDirty: true)
+                didMutate = true
+                return closedIds
+            }
+        }
+        if didMutate { notifyMutation() }
+        return completedTaskIds
+    }
+
+    public func restoreCompletedProject(projectId: String, reopenedTaskIds: [String]) throws {
+        var didMutate = false
+        try queue.sync {
+            guard var proj = try fetchProjectByIdLocked(projectId) else { return }
+            let now = nowMillis()
+            let rawTagsByTask = (try? fetchAllTaskTagIdsLocked()) ?? [:]
+            try inTransactionLocked {
+                let pStamp = max(now, proj.updatedAt + 1)
+                proj.status = .active
+                proj.completedAt = nil
+                proj.updatedAt = pStamp
+                try upsertProjectLocked(proj, isDirty: true)
+                for tid in reopenedTaskIds {
+                    if var tk = try fetchTaskByIdLocked(tid) {
+                        let tags = rawTagsByTask[tid] ?? tk.tagIds
+                        let stamp = max(now, tk.updatedAt + 1)
+                        tk.status = .open
+                        tk.completedAt = nil
+                        tk.updatedAt = stamp
+                        try upsertTaskLocked(tk, tagIds: tags, isDirty: true)
+                    }
+                }
+                didMutate = true
+            }
+        }
+        if didMutate { notifyMutation() }
+    }
+
     /// Soft-deletes project, cascades to headings/attachments, and either cascade-deletes or detaches its tasks; returns affected task map for Undo.
     @discardableResult
     public func softDeleteProject(_ projectId: String, deleteAssociatedTasks: Bool = false) throws -> [String: DetachedTaskPlacement] {

@@ -893,3 +893,69 @@ test('v3.1 deterministic Plan My Day auto-timeblocker schedules conflict-free 15
 
   unsub();
 });
+
+test('v3.1 completeProjectWithUndo supports completing project as-is or with open tasks + atomic Undo', async () => {
+  const { opener } = createInMemoryIdb();
+  const db = new ThingsLocalDb(opener);
+  await db.initialize('en');
+
+  const undoEvents: UndoEventPayload[] = [];
+  const unsub = db.subscribeUndo((ev) => undoEvents.push(ev));
+
+  const proj = await db.upsertProject({
+    title: 'NexusTS'
+  });
+  const doneTask = await db.upsertTask({
+    title: 'Already Done',
+    projectId: proj.id,
+    status: 'COMPLETED'
+  });
+  const openTask1 = await db.upsertTask({
+    title: 'Open Task 1',
+    projectId: proj.id,
+    status: 'OPEN'
+  });
+  const openTask2 = await db.upsertTask({
+    title: 'Open Task 2',
+    projectId: proj.id,
+    status: 'OPEN'
+  });
+
+  // 1) Complete project as-is (leaving open tasks OPEN) + Undo
+  const resAsIs = await db.completeProjectWithUndo(proj.id, false);
+  assert.equal(resAsIs, true);
+  assert.equal(undoEvents.at(-1)?.kind, 'project_completed');
+  assert.equal(undoEvents.at(-1)?.entityTitle, 'NexusTS');
+  assert.equal(undoEvents.at(-1)?.count, 1);
+
+  let snap = db.getSnapshot();
+  assert.equal(snap.projects.find((p) => p.id === proj.id)?.status, 'COMPLETED');
+  assert.equal(snap.tasks.find((t) => t.id === openTask1.id)?.status, 'OPEN');
+  assert.equal(snap.tasks.find((t) => t.id === openTask2.id)?.status, 'OPEN');
+
+  assert.equal(await db.performUndo(), true);
+  snap = db.getSnapshot();
+  assert.equal(snap.projects.find((p) => p.id === proj.id)?.status, 'ACTIVE');
+  assert.equal(snap.projects.find((p) => p.id === proj.id)?.completedAt, null);
+
+  // 2) Complete project AND remaining open tasks + Undo restores both project & reopened tasks (without touching already-done task)
+  const resAll = await db.completeProjectWithUndo(proj.id, true);
+  assert.equal(resAll, true);
+  assert.equal(undoEvents.at(-1)?.kind, 'project_completed');
+  assert.equal(undoEvents.at(-1)?.count, 3);
+
+  snap = db.getSnapshot();
+  assert.equal(snap.projects.find((p) => p.id === proj.id)?.status, 'COMPLETED');
+  assert.equal(snap.tasks.find((t) => t.id === openTask1.id)?.status, 'COMPLETED');
+  assert.equal(snap.tasks.find((t) => t.id === openTask2.id)?.status, 'COMPLETED');
+  assert.equal(snap.tasks.find((t) => t.id === doneTask.id)?.status, 'COMPLETED');
+
+  assert.equal(await db.performUndo(), true);
+  snap = db.getSnapshot();
+  assert.equal(snap.projects.find((p) => p.id === proj.id)?.status, 'ACTIVE');
+  assert.equal(snap.tasks.find((t) => t.id === openTask1.id)?.status, 'OPEN');
+  assert.equal(snap.tasks.find((t) => t.id === openTask2.id)?.status, 'OPEN');
+  assert.equal(snap.tasks.find((t) => t.id === doneTask.id)?.status, 'COMPLETED');
+
+  unsub();
+});

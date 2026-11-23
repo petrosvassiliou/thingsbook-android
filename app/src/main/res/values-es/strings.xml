@@ -630,4 +630,10 @@
     <string name="v31_gemini_plan_day_empty">Todas las tareas de Hoy ya tienen bloque de tiempo o están completadas</string>
     <string name="v31_gemini_plan_day_applied_undo">Se aplicaron %1$d bloques de tiempo a Hoy</string>
     <string name="v31_gemini_plan_day_replan">Incluir tareas ya programadas</string>
+    <string name="v31_project_complete_btn">Completar</string>
+    <string name="v31_project_complete_confirm_title">¿Completar proyecto?</string>
+    <string name="v31_project_complete_confirm_body">«%1$s» aún tiene %2$d tareas abiertas. ¿Marcar también las tareas como completadas o completar el proyecto tal cual?</string>
+    <string name="v31_project_complete_all_todos">Completar todo y cerrar</string>
+    <string name="v31_project_complete_as_is">Completar solo el proyecto</string>
+    <string name="v31_project_completed_undo">Proyecto «%1$s» completado</string>
 </resources>

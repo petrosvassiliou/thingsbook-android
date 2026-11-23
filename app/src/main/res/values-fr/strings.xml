@@ -630,4 +630,10 @@
     <string name="v31_gemini_plan_day_empty">Toutes les tâches d\'Aujourd\'hui sont déjà planifiées ou terminées</string>
     <string name="v31_gemini_plan_day_applied_undo">%1$d créneaux appliqués à Aujourd\'hui</string>
     <string name="v31_gemini_plan_day_replan">Inclure les tâches déjà planifiées</string>
+    <string name="v31_project_complete_btn">Terminer</string>
+    <string name="v31_project_complete_confirm_title">Terminer le projet ?</string>
+    <string name="v31_project_complete_confirm_body">« %1$s » contient encore %2$d tâches ouvertes. Tout marquer comme terminé ou terminer le projet tel quel ?</string>
+    <string name="v31_project_complete_all_todos">Tout cocher &amp; terminer</string>
+    <string name="v31_project_complete_as_is">Terminer uniquement le projet</string>
+    <string name="v31_project_completed_undo">Projet « %1$s » terminé</string>
 </resources>

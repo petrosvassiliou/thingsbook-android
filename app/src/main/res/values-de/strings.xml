@@ -630,4 +630,10 @@
     <string name="v31_gemini_plan_day_empty">Alle Heute-Aufgaben haben bereits einen Zeitblock oder sind erledigt</string>
     <string name="v31_gemini_plan_day_applied_undo">%1$d Zeitblöcke auf Heute angewendet</string>
     <string name="v31_gemini_plan_day_replan">Bereits eingeplante Aufgaben neu verteilen</string>
+    <string name="v31_project_complete_btn">Abschließen</string>
+    <string name="v31_project_complete_confirm_title">Projekt abschließen?</string>
+    <string name="v31_project_complete_confirm_body">„%1$s“ enthält noch %2$d offene Aufgaben. Sollen alle offenen Aufgaben ebenfalls erledigt oder das Projekt so abgeschlossen werden?</string>
+    <string name="v31_project_complete_all_todos">Alle erledigen &amp; abschließen</string>
+    <string name="v31_project_complete_as_is">Nur Projekt abschließen</string>
+    <string name="v31_project_completed_undo">Projekt „%1$s“ abgeschlossen</string>
 </resources>

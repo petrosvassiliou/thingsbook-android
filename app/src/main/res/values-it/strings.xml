@@ -630,4 +630,10 @@
     <string name="v31_gemini_plan_day_empty">Tutte le attività di Oggi hanno già un blocco orario o sono completate</string>
     <string name="v31_gemini_plan_day_applied_undo">Applicati %1$d blocchi orari a Oggi</string>
     <string name="v31_gemini_plan_day_replan">Includi attività già pianificate</string>
+    <string name="v31_project_complete_btn">Completa</string>
+    <string name="v31_project_complete_confirm_title">Completare il progetto?</string>
+    <string name="v31_project_complete_confirm_body">«%1$s» ha ancora %2$d attività aperte. Segnare anche le attività come completate o completare il progetto così com\'è?</string>
+    <string name="v31_project_complete_all_todos">Completa tutto e chiudi</string>
+    <string name="v31_project_complete_as_is">Completa solo il progetto</string>
+    <string name="v31_project_completed_undo">Progetto «%1$s» completato</string>
 </resources>

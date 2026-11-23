@@ -765,17 +765,27 @@ public struct SmartViewCanvas: View {
         } else {
             VStack(alignment: .leading, spacing: 14) {
                 // Row 1: Generous Full-Width Project Title Row (never breaks mid-word)
+                let isAllProjectTasksDone = project.totalTaskCount > 0 && project.completedTaskCount >= project.totalTaskCount
                 HStack(alignment: .center, spacing: 12) {
-                    ProjectProgressRing(
-                        progress: project.progress,
-                        size: 22,
-                        tint: ThingsMacPalette.accentBlue,
-                        isCompleted: project.status == .completed,
-                        showFraction: project.totalTaskCount > 0,
-                        completedCount: project.completedTaskCount,
-                        totalCount: project.totalTaskCount
-                    )
+                    Button {
+                        store.requestCompleteProject(project)
+                    } label: {
+                        ProjectProgressRing(
+                            progress: project.progress,
+                            size: 22,
+                            tint: ThingsMacPalette.accentBlue,
+                            isCompleted: project.status == .completed,
+                            showFraction: project.totalTaskCount > 0,
+                            completedCount: project.completedTaskCount,
+                            totalCount: project.totalTaskCount
+                        )
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                        .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                     .fixedSize()
+                    .thingsTooltip(store.tr("macos_complete_project"))
 
                     Text(project.title)
                         .font(.system(size: 27, weight: .bold))
@@ -788,6 +798,45 @@ public struct SmartViewCanvas: View {
                     Spacer(minLength: 8)
 
                     HStack(spacing: 6) {
+                        if project.status != .completed {
+                            Button {
+                                store.requestCompleteProject(project)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "checkmark.circle")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(isAllProjectTasksDone ? ThingsMacPalette.logbookGreen : ThingsMacPalette.accentBlue)
+                                    Text(store.tr("v31_project_complete_btn"))
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(isAllProjectTasksDone ? ThingsMacPalette.logbookGreen : .primary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 10)
+                                .frame(height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                        .fill(
+                                            isAllProjectTasksDone
+                                                ? ThingsMacPalette.logbookGreen.opacity(0.14)
+                                                : Color.primary.opacity(0.055)
+                                        )
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                        .strokeBorder(
+                                            isAllProjectTasksDone
+                                                ? ThingsMacPalette.logbookGreen.opacity(0.35)
+                                                : Color.primary.opacity(0.08),
+                                            lineWidth: 0.75
+                                        )
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .fixedSize()
+                            .thingsTooltip(store.tr("macos_complete_project"))
+                        }
+
                         Button {
                             store.editingProject = project
                         } label: {
@@ -809,8 +858,7 @@ public struct SmartViewCanvas: View {
                                 store.editingProject = project
                             }
                             Button(store.tr("macos_complete_project")) {
-                                let next: ProjectStatus = project.status == .completed ? .active : .completed
-                                try? store.database.setProjectStatus(projectId: project.id, status: next)
+                                store.requestCompleteProject(project)
                             }
                             Button(store.tr("v2_mark_reviewed")) {
                                 store.markProjectReviewed(project.id)
@@ -1571,7 +1619,7 @@ public struct SmartViewCanvas: View {
                                         }
                                     }
                                     Button(store.tr("macos_complete_project")) {
-                                        try? store.database.setProjectStatus(projectId: proj.id, status: .completed)
+                                        store.requestCompleteProject(proj)
                                     }
                                     Divider()
                                     Button(role: .destructive) {

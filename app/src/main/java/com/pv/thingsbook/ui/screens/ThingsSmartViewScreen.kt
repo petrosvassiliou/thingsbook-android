@@ -185,7 +185,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
@@ -4413,12 +4415,141 @@ private fun ThingsModalsOverlay(
         )
     }
 
+    // Project Completion Confirmation Prompt (when completing a project that still has open to-dos)
+    val pendingProjectCompletePrompt by viewModel.pendingProjectCompletePrompt.collectAsState()
+    pendingProjectCompletePrompt?.let { prompt ->
+        ThingsCompleteProjectConfirmDialog(
+            projectTitle = prompt.projectTitle,
+            openTaskCount = prompt.openTaskCount,
+            onCompleteAllTodosAndFinish = { viewModel.confirmCompleteProject(completeOpenTasks = true) },
+            onCompleteProjectOnly = { viewModel.confirmCompleteProject(completeOpenTasks = false) },
+            onCancel = { viewModel.dismissCompleteProjectPrompt() }
+        )
+    }
+
     // Empty Trash Confirmation Dialog
     if (showEmptyTrashConfirmDialog) {
         ThingsEmptyTrashConfirmDialog(
             onDismiss = onDismissEmptyTrashConfirmDialog,
             onConfirmEmptyTrash = { viewModel.emptyTrash() }
         )
+    }
+}
+
+@Composable
+private fun ThingsCompleteProjectConfirmDialog(
+    projectTitle: String,
+    openTaskCount: Int,
+    onCompleteAllTodosAndFinish: () -> Unit,
+    onCompleteProjectOnly: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth(0.92f)
+                .clip(RoundedCornerShape(18.dp)),
+            color = colors.cardSurface,
+            shape = RoundedCornerShape(18.dp),
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.logbookGreen.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CheckCircleOutline,
+                            contentDescription = null,
+                            tint = colors.logbookGreen,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.v31_project_complete_confirm_title),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.primaryText,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text(
+                    text = stringResource(R.string.v31_project_complete_confirm_body, projectTitle, openTaskCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.secondaryText
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onCompleteAllTodosAndFinish,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.logbookGreen,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(R.string.v31_project_complete_all_todos),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = Color.White
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onCompleteProjectOnly,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, colors.hairlineDivider),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.tagPillBg,
+                            contentColor = colors.primaryText
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(R.string.v31_project_complete_as_is),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                            color = colors.primaryText
+                        )
+                    }
+
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(R.string.action_cancel),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colors.secondaryText
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -6186,10 +6317,23 @@ private fun ViewTitleHeader(
                             }
                             is ActiveNavigationTarget.ProjectDetail -> {
                                 val projTitle = currentProject?.title ?: stringResource(R.string.entity_project)
-                                ProjectProgressRing(
-                                    progress = currentProject?.progress ?: 0f,
-                                    size = 26.dp
-                                )
+                                ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .pointerHoverIcon(PointerIcon.Hand)
+                                            .clickable(enabled = currentProject != null) {
+                                                currentProject?.let { onCompleteProject(it.id) }
+                                            }
+                                            .padding(horizontal = 3.dp, vertical = 5.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        ProjectProgressRing(
+                                            progress = currentProject?.progress ?: 0f,
+                                            size = 26.dp
+                                        )
+                                    }
+                                }
                                 ThingsHoverTooltip(
                                     text = projTitle,
                                     modifier = Modifier.weight(1f)
@@ -6325,10 +6469,71 @@ private fun ViewTitleHeader(
                         }
                     } else if (currentProject != null) {
                         val projIdx = projects.indexOfFirst { it.id == currentProject.id }
+                        val isWideProjectHeader = maxWidth >= 600.dp
+                        val isAllProjectTasksDone = currentProject.totalTaskCount > 0 && currentProject.openTaskCount == 0
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            horizontalArrangement = Arrangement.spacedBy(if (isWideProjectHeader) 6.dp else 2.dp)
                         ) {
+                            if (isWideProjectHeader) {
+                                val pillBg = if (isAllProjectTasksDone) {
+                                    colors.logbookGreen.copy(alpha = 0.14f)
+                                } else {
+                                    colors.tagPillBg
+                                }
+                                val pillBorder = if (isAllProjectTasksDone) {
+                                    colors.logbookGreen.copy(alpha = 0.36f)
+                                } else {
+                                    colors.hairlineDivider
+                                }
+                                val pillTint = if (isAllProjectTasksDone) {
+                                    colors.logbookGreen
+                                } else {
+                                    colors.primaryText
+                                }
+                                ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(pillBg)
+                                            .border(0.75.dp, pillBorder, RoundedCornerShape(10.dp))
+                                            .pointerHoverIcon(PointerIcon.Hand)
+                                            .clickable { onCompleteProject(currentProject.id) }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CheckCircleOutline,
+                                            contentDescription = stringResource(R.string.project_complete_tooltip),
+                                            tint = if (isAllProjectTasksDone) colors.logbookGreen else colors.thingsBlue,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.v31_project_complete_btn),
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = pillTint,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            } else {
+                                ThingsHoverTooltip(text = stringResource(R.string.project_complete_tooltip)) {
+                                    IconButton(
+                                        onClick = { onCompleteProject(currentProject.id) },
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CheckCircleOutline,
+                                            contentDescription = stringResource(R.string.project_complete_tooltip),
+                                            tint = if (isAllProjectTasksDone) colors.logbookGreen else colors.thingsBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
                             ThingsHoverTooltip(text = stringResource(R.string.project_edit_title)) {
                                 IconButton(
                                     onClick = { onEditProject(currentProject) },

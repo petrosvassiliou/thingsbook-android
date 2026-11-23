@@ -2162,6 +2162,90 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    suspend fun completeProjectWithUndoSupport(
+        projectId: String,
+        completeOpenTasks: Boolean
+    ): List<String> {
+        val existing = database.projectDao().getById(projectId) ?: return emptyList()
+        val now = System.currentTimeMillis()
+        var completedTaskIds: List<String> = emptyList()
+
+        database.withTransaction {
+            if (completeOpenTasks) {
+                val openTasks = database.taskDao().getOpenTasksByProject(projectId)
+                if (openTasks.isNotEmpty()) {
+                    completedTaskIds = openTasks.map { it.id }
+                    database.taskDao().upsertAll(
+                        openTasks.map { task ->
+                            task.copy(
+                                status = TaskStatus.COMPLETED,
+                                completedAt = now,
+                                updatedAt = maxOf(now, task.updatedAt + 1L),
+                                isDirty = true
+                            )
+                        }
+                    )
+                }
+            }
+            database.projectDao().upsert(
+                existing.copy(
+                    status = ProjectStatus.COMPLETED,
+                    completedAt = now,
+                    updatedAt = maxOf(now, existing.updatedAt + 1L),
+                    isDirty = true
+                )
+            )
+        }
+
+        completedTaskIds.forEach { reminderScheduler.cancelReminder(it) }
+        syncRepository.triggerBackgroundSync()
+        return completedTaskIds
+    }
+
+    suspend fun restoreCompletedProjectSnapshot(
+        projectId: String,
+        reopenedTaskIds: List<String>
+    ) {
+        val existing = database.projectDao().getById(projectId) ?: return
+        val now = System.currentTimeMillis()
+        val tasksToReschedule = mutableListOf<TaskEntity>()
+
+        database.withTransaction {
+            database.projectDao().upsert(
+                existing.copy(
+                    status = ProjectStatus.ACTIVE,
+                    completedAt = null,
+                    updatedAt = maxOf(now, existing.updatedAt + 1L),
+                    isDirty = true
+                )
+            )
+            if (reopenedTaskIds.isNotEmpty()) {
+                val restoredTasks = reopenedTaskIds.mapNotNull { id ->
+                    database.taskDao().getById(id)?.let { task ->
+                        task.copy(
+                            status = TaskStatus.OPEN,
+                            completedAt = null,
+                            updatedAt = maxOf(now, task.updatedAt + 1L),
+                            isDirty = true
+                        )
+                    }
+                }
+                if (restoredTasks.isNotEmpty()) {
+                    database.taskDao().upsertAll(restoredTasks)
+                    tasksToReschedule.addAll(restoredTasks)
+                }
+            }
+        }
+
+        tasksToReschedule.forEach { task ->
+            val rt = task.reminderTime
+            if (rt != null && rt > now && !task.isDeleted) {
+                reminderScheduler.scheduleExactReminder(task.id, task.title, rt)
+            }
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
     suspend fun updateProjectViewMode(projectId: String, viewMode: String?) {
         val existing = database.projectDao().getById(projectId) ?: return
         val normalized = viewMode?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }

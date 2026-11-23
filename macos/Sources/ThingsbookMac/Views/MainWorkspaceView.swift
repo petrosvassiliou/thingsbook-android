@@ -322,6 +322,26 @@ public struct MainWorkspaceView: View {
         } message: { prompt in
             Text(store.trf("project_delete_prompt_tasks_body", prompt.taskCount))
         }
+        .alert(
+            store.tr("v31_project_complete_confirm_title"),
+            isPresented: Binding(
+                get: { store.pendingProjectCompletion != nil },
+                set: { if !$0 { store.pendingProjectCompletion = nil } }
+            ),
+            presenting: store.pendingProjectCompletion
+        ) { prompt in
+            Button(store.tr("v31_project_complete_all_todos")) {
+                store.confirmCompleteProject(prompt.project, completeOpenTasks: true)
+            }
+            Button(store.tr("v31_project_complete_as_is")) {
+                store.confirmCompleteProject(prompt.project, completeOpenTasks: false)
+            }
+            Button(store.tr("action_cancel"), role: .cancel) {
+                store.pendingProjectCompletion = nil
+            }
+        } message: { prompt in
+            Text(store.trf("v31_project_complete_confirm_body", prompt.project.title, prompt.openTaskCount))
+        }
     }
 
     // MARK: - Keyboard Monitor (Return / Space Open Modal & Escape / Cmd+Return Commit+Dismiss)

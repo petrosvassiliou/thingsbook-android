@@ -2017,6 +2017,17 @@ public struct PendingProjectDeletion: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct PendingProjectCompletion: Identifiable, Equatable, Sendable {
+    public var id: String { project.id }
+    public let project: Project
+    public let openTaskCount: Int
+
+    public init(project: Project, openTaskCount: Int) {
+        self.project = project
+        self.openTaskCount = openTaskCount
+    }
+}
+
 public struct TaskPlacementSnapshot: Equatable, Sendable {
     public let task: TaskItem
     public let tagIds: [String]
@@ -2035,6 +2046,7 @@ public enum UndoActionKind: Equatable, Sendable {
     case tasksDeleted([String])
     case tasksMoved(snapshots: [TaskPlacementSnapshot], spawnedRecurringTaskIds: [String] = [])
     case headingDatesChanged(headingId: String, previousStart: Int64?, previousEnd: Int64?)
+    case projectCompleted(projectId: String, title: String, reopenedTaskIds: [String], wasViewingProject: Bool)
     case projectDeleted(projectId: String, title: String, previousTaskProjects: [String: DetachedTaskPlacement], deletedTaskIds: [String] = [])
 }
 

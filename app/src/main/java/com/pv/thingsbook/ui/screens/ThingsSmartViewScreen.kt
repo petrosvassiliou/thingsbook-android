@@ -6230,6 +6230,7 @@ private fun ViewTitleHeader(
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val isCompactSmartViewHeader = maxWidth < 600.dp && navTarget is ActiveNavigationTarget.SmartView
+            val isWideProjectHeader = maxWidth >= 600.dp
 
             if (isCompactSmartViewHeader && navTarget is ActiveNavigationTarget.SmartView) {
                 Column(
@@ -6469,7 +6470,6 @@ private fun ViewTitleHeader(
                         }
                     } else if (currentProject != null) {
                         val projIdx = projects.indexOfFirst { it.id == currentProject.id }
-                        val isWideProjectHeader = maxWidth >= 600.dp
                         val isAllProjectTasksDone = currentProject.totalTaskCount > 0 && currentProject.openTaskCount == 0
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

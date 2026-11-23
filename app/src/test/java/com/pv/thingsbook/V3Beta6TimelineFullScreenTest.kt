@@ -143,8 +143,8 @@ class V3Beta6TimelineFullScreenTest {
         assertTrue(previewKeyChunk.contains("if (isEffectiveTimelineFullScreen)"))
         assertTrue(previewKeyChunk.contains("viewModel.setTimelineFullScreen(false)"))
         assertEquals(
-            "Both Today Timeline and Project Roadmap must receive isFullScreen = isEffectiveTimelineFullScreen",
-            2,
+            "Today Timeline, Project Roadmap, and Area Portfolio Roadmap must receive isFullScreen = isEffectiveTimelineFullScreen",
+            3,
             Regex("""isFullScreen\s*=\s*isEffectiveTimelineFullScreen""").findAll(smartViewKt).count()
         )
 

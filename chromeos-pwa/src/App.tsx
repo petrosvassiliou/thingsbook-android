@@ -68,8 +68,10 @@ import {
   type TagRecord,
   type TagSortMode,
   type TaskRecord,
+  type ThemeMode,
   type ViewSortMode
 } from './domain/types';
+import type { ParsedSmartSyntax } from './domain/smartSyntaxParser';
 import {
   buildAreaPortfolioRoadmapLayout,
   buildProjectRoadmapLayout,
@@ -155,7 +157,8 @@ import {
   FocusTimerBanner,
   QuickShareModal,
   TrashViewList,
-  UndoSnackbarBanner
+  UndoSnackbarBanner,
+  ZenFocusModal
 } from './components/PowerFeaturesModals';
 import {
   AreaPortfolioRoadmapWorkspace,
@@ -347,6 +350,9 @@ export const App: React.FC = () => {
   // Android v1.7.0 Power Features State
   const [quickShareDraft, setQuickShareDraft] = useState<QuickShareDraft | null>(null);
   const [focusTimer, setFocusTimer] = useState<FocusTimerUiState | null>(null);
+  const [zenFocusOpen, setZenFocusOpen] = useState(false);
+  const focusTimerRef = useRef<FocusTimerUiState | null>(null);
+  focusTimerRef.current = focusTimer;
   const [undoBanner, setUndoBanner] = useState<{ id: number; message: string } | null>(null);
   const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
   const [pendingDeleteProject, setPendingDeleteProject] = useState<{
@@ -506,32 +512,88 @@ export const App: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [prefs.biometricAppLockEnabled, prefs.appLockPinHash]);
 
-  // 25-Minute Focus / Pomodoro Timer Countdown
+  const flushFocusMinutes = useCallback(
+    (timer: FocusTimerUiState | null, roundUpPartial: boolean) => {
+      if (!timer || timer.isBreakMode) return;
+      const secs = timer.sessionFocusedSeconds ?? 0;
+      if (secs <= 0) return;
+      const earned =
+        roundUpPartial && secs >= 30
+          ? Math.max(1, Math.round(secs / 60))
+          : Math.round(secs / 60);
+      if (earned > 0) {
+        void localDb.addTaskActualMinutes(timer.taskId, earned);
+      }
+    },
+    []
+  );
+
+  // 25-Minute Focus / Pomodoro Timer Countdown + v3.2 actualMinutes Session Accumulation
+  const isFocusTimerCountingDown = Boolean(
+    focusTimer && focusTimer.isRunning && focusTimer.remainingSeconds > 0
+  );
   useEffect(() => {
-    if (!focusTimer || !focusTimer.isRunning || focusTimer.remainingSeconds <= 0) return;
+    if (!isFocusTimerCountingDown) return;
     const id = window.setInterval(() => {
-      setFocusTimer((prev) => {
-        if (!prev || !prev.isRunning) return prev;
-        if (prev.remainingSeconds <= 1) {
-          showToast(`🎉 ${tRef.current.focusTimerFinishedTitle}`);
-          return { ...prev, remainingSeconds: 0, isRunning: false };
+      const cur = focusTimerRef.current;
+      if (!cur || !cur.isRunning || cur.remainingSeconds <= 0) return;
+      const nextFocused = cur.isBreakMode
+        ? (cur.sessionFocusedSeconds ?? 0)
+        : (cur.sessionFocusedSeconds ?? 0) + 1;
+      if (cur.remainingSeconds <= 1) {
+        if (!cur.isBreakMode) {
+          flushFocusMinutes({ ...cur, sessionFocusedSeconds: nextFocused }, true);
         }
-        return { ...prev, remainingSeconds: prev.remainingSeconds - 1 };
-      });
+        showToast(
+          cur.isBreakMode
+            ? `☕ ${tRef.current.v32ZenBackToFocus}`
+            : `🎉 ${tRef.current.focusTimerFinishedTitle}`
+        );
+        const finishedState: FocusTimerUiState = {
+          ...cur,
+          remainingSeconds: 0,
+          isRunning: false,
+          sessionFocusedSeconds: 0
+        };
+        focusTimerRef.current = finishedState;
+        setFocusTimer(finishedState);
+        return;
+      }
+      const nextState: FocusTimerUiState = {
+        ...cur,
+        remainingSeconds: cur.remainingSeconds - 1,
+        sessionFocusedSeconds: nextFocused
+      };
+      focusTimerRef.current = nextState;
+      setFocusTimer(nextState);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [focusTimer, showToast]);
+  }, [
+    isFocusTimerCountingDown,
+    focusTimer?.taskId,
+    focusTimer?.isBreakMode,
+    flushFocusMinutes,
+    showToast
+  ]);
 
-  // Keep Focus Timer title synced or close if task was deleted/completed
+  // Keep Focus Timer title synced or flush & close if task was deleted/completed
   useEffect(() => {
-    if (!focusTimer) return;
+    if (!focusTimer) {
+      if (zenFocusOpen) setZenFocusOpen(false);
+      return;
+    }
     const liveTask = snapshot.tasks.find((tk) => tk.id === focusTimer.taskId);
     if (!liveTask || liveTask.isDeleted || liveTask.status !== 'OPEN') {
+      if (liveTask && !liveTask.isDeleted && liveTask.status !== 'OPEN') {
+        flushFocusMinutes(focusTimerRef.current, true);
+      }
+      focusTimerRef.current = null;
       setFocusTimer(null);
+      setZenFocusOpen(false);
     } else if (liveTask.title !== focusTimer.taskTitle) {
       setFocusTimer((prev) => (prev ? { ...prev, taskTitle: liveTask.title } : null));
     }
-  }, [snapshot.tasks, focusTimer]);
+  }, [snapshot.tasks, focusTimer, zenFocusOpen, flushFocusMinutes]);
 
   // Initialize DB, Cloud Sync, Undo, Launcher Shortcuts, Share Target, Reminder Actions, Auto Update Check, and PWA Install Listener
   useEffect(() => {
@@ -1084,6 +1146,19 @@ export const App: React.FC = () => {
   );
 
   const todayStartMs = useMemo(() => startOfDayEpoch(new Date(endOfToday)), [endOfToday]);
+
+  const logbookFocused7dMinutes = useMemo(() => {
+    const cutoff = todayStartMs - 6 * 86_400_000;
+    let sum = 0;
+    for (const tk of logbookTasks) {
+      if (tk.status !== 'COMPLETED') continue;
+      const ts = tk.completedAt ?? tk.updatedAt;
+      if (ts >= cutoff && tk.actualMinutes != null && tk.actualMinutes > 0) {
+        sum += Math.trunc(tk.actualMinutes);
+      }
+    }
+    return sum;
+  }, [logbookTasks, todayStartMs]);
 
   const perspectiveTasksMap = useMemo(() => {
     const map = new Map<string, TaskRecord[]>();
@@ -1770,23 +1845,178 @@ export const App: React.FC = () => {
     []
   );
 
-  // Android v1.7.0 + v2.0 Timeblock Focus Timer Callback
+  // Android v1.7.0 + v2.0 + v3.2 Zen Focus & actualMinutes Timer Callbacks
   const handleStartFocusTimer = useCallback(
     (taskId: string, taskTitle: string, durationMinutes?: number | null) => {
+      if (focusTimerRef.current) {
+        flushFocusMinutes(focusTimerRef.current, true);
+      }
       const mins =
         durationMinutes != null && Number.isFinite(durationMinutes) && durationMinutes > 0
           ? Math.max(1, Math.min(720, Math.trunc(durationMinutes)))
           : 25;
       const secs = mins * 60;
-      setFocusTimer({
+      const nextTimer: FocusTimerUiState = {
         taskId,
         taskTitle,
         totalSeconds: secs,
         remainingSeconds: secs,
-        isRunning: true
-      });
+        isRunning: true,
+        sessionFocusedSeconds: 0,
+        isBreakMode: false
+      };
+      focusTimerRef.current = nextTimer;
+      setFocusTimer(nextTimer);
     },
-    []
+    [flushFocusMinutes]
+  );
+
+  const handleStopFocusTimer = useCallback(() => {
+    flushFocusMinutes(focusTimerRef.current, true);
+    focusTimerRef.current = null;
+    setFocusTimer(null);
+    setZenFocusOpen(false);
+  }, [flushFocusMinutes]);
+
+  const handleCompleteFocusTimerTask = useCallback(() => {
+    const cur = focusTimerRef.current;
+    if (!cur) return;
+    flushFocusMinutes(cur, true);
+    const tid = cur.taskId;
+    focusTimerRef.current = null;
+    setFocusTimer(null);
+    setZenFocusOpen(false);
+    void localDb.upsertTask({ id: tid, status: 'COMPLETED' });
+  }, [flushFocusMinutes]);
+
+  const handleStartFocusBreak = useCallback(() => {
+    const cur = focusTimerRef.current;
+    if (!cur) return;
+    flushFocusMinutes(cur, true);
+    const breakState: FocusTimerUiState = {
+      taskId: cur.taskId,
+      taskTitle: cur.taskTitle,
+      totalSeconds: 300,
+      remainingSeconds: 300,
+      isRunning: true,
+      sessionFocusedSeconds: 0,
+      isBreakMode: true
+    };
+    focusTimerRef.current = breakState;
+    setFocusTimer(breakState);
+  }, [flushFocusMinutes]);
+
+  const handleBackToFocusFromBreak = useCallback(() => {
+    const cur = focusTimerRef.current;
+    if (!cur) return;
+    const liveTask = snapshot.tasks.find((tk) => tk.id === cur.taskId);
+    const mins =
+      liveTask?.durationMinutes != null &&
+      Number.isFinite(liveTask.durationMinutes) &&
+      liveTask.durationMinutes > 0
+        ? Math.max(1, Math.min(720, Math.trunc(liveTask.durationMinutes)))
+        : 25;
+    const secs = mins * 60;
+    const nextFocus: FocusTimerUiState = {
+      taskId: cur.taskId,
+      taskTitle: liveTask?.title ?? cur.taskTitle,
+      totalSeconds: secs,
+      remainingSeconds: secs,
+      isRunning: true,
+      sessionFocusedSeconds: 0,
+      isBreakMode: false
+    };
+    focusTimerRef.current = nextFocus;
+    setFocusTimer(nextFocus);
+  }, [snapshot.tasks]);
+
+  const handleCycleThemeMode = useCallback(() => {
+    const nextTheme: ThemeMode =
+      prefs.themeMode === 'system'
+        ? 'light'
+        : prefs.themeMode === 'light'
+          ? 'dark'
+          : 'system';
+    updatePrefs({ themeMode: nextTheme });
+    showToast(`✓ ${t.v32CmdToggleTheme}`);
+  }, [prefs.themeMode, updatePrefs, showToast, t.v32CmdToggleTheme]);
+
+  const handleCreateSmartTaskFromPalette = useCallback(
+    async (parsed: ParsedSmartSyntax) => {
+      const todayEpoch = startOfDayEpoch();
+      const tomorrowEpoch = addDaysLocal(todayEpoch, 1);
+      let projectId: string | null = null;
+      let areaId: string | null = null;
+      let scheduleState: TaskRecord['scheduleState'] = 'INBOX';
+      let whenDate: number | null = parsed.whenDate;
+
+      if (parsed.matchedProject) {
+        projectId = parsed.matchedProject.id;
+        areaId = null;
+        scheduleState = parsed.scheduleState ?? 'ANYTIME';
+      } else if (parsed.matchedArea) {
+        projectId = null;
+        areaId = parsed.matchedArea.id;
+        scheduleState = parsed.scheduleState ?? 'ANYTIME';
+      } else if (parsed.scheduleState != null) {
+        scheduleState = parsed.scheduleState;
+        if (activeNav.kind === 'project') {
+          projectId = activeNav.projectId;
+        } else if (activeNav.kind === 'area') {
+          areaId = activeNav.areaId;
+        }
+      } else if (activeNav.kind === 'project') {
+        projectId = activeNav.projectId;
+        scheduleState = 'ANYTIME';
+      } else if (activeNav.kind === 'area') {
+        areaId = activeNav.areaId;
+        scheduleState = 'ANYTIME';
+      } else if (activeNav.kind === 'smart') {
+        if (activeNav.view === 'TODAY') {
+          scheduleState = 'TODAY';
+          whenDate = todayEpoch;
+        } else if (activeNav.view === 'UPCOMING') {
+          scheduleState = 'UPCOMING';
+          whenDate = tomorrowEpoch;
+        } else if (activeNav.view === 'ANYTIME') {
+          scheduleState = 'ANYTIME';
+        } else if (activeNav.view === 'SOMEDAY') {
+          scheduleState = 'SOMEDAY';
+        } else {
+          scheduleState = 'INBOX';
+        }
+      }
+
+      const minOrder =
+        openTasks.length > 0
+          ? openTasks.reduce((m, tk) => Math.min(m, tk.sortOrder), Infinity)
+          : null;
+      const mergedTags = Array.from(
+        new Set([
+          ...parsed.matchedTagIds,
+          ...(selectedFilterTagId ? [selectedFilterTagId] : [])
+        ])
+      );
+
+      const created = await localDb.upsertTask({
+        title: parsed.cleanTitle || t.entityNewTodo,
+        scheduleState,
+        whenDate,
+        reminderTime: parsed.reminderTime,
+        deadline: parsed.deadline,
+        durationMinutes: parsed.durationMinutes,
+        tagIds: mergedTags,
+        isMilestone: parsed.isMilestone,
+        projectId,
+        areaId,
+        sortOrder: computeMidpointSortOrder(
+          null,
+          minOrder != null && Number.isFinite(minOrder) ? minOrder : null
+        )
+      });
+      showToast(`✓ ${created.title}`);
+    },
+    [activeNav, openTasks, selectedFilterTagId, showToast, t.entityNewTodo]
   );
 
   const handleDuplicateTask = useCallback(
@@ -2194,6 +2424,7 @@ export const App: React.FC = () => {
           target.isContentEditable);
 
       if (e.key === 'Escape') {
+        if (zenFocusOpen) return setZenFocusOpen(false);
         if (weeklyReviewModal.open) return setWeeklyReviewModal((prev) => ({ ...prev, open: false }));
         if (templatesModal.open) return setTemplatesModal((prev) => ({ ...prev, open: false }));
         if (quickShareDraft) return setQuickShareDraft(null);
@@ -2254,6 +2485,7 @@ export const App: React.FC = () => {
       const inInteractiveControl =
         inInput || Boolean(target?.closest('button, a, [role="button"]'));
       const anyOtherModalOpen =
+        zenFocusOpen ||
         weeklyReviewModal.open ||
         templatesModal.open ||
         Boolean(quickShareDraft) ||
@@ -2511,6 +2743,7 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     isAppLocked,
+    zenFocusOpen,
     weeklyReviewModal.open,
     templatesModal.open,
     quickShareDraft,
@@ -3282,7 +3515,7 @@ export const App: React.FC = () => {
               >
                 <Search size={14} />
                 <span className="topbar-label-hide-xs">{t.quickFindTitle}</span>
-                <kbd className="topbar-label-hide-sm">Ctrl+F</kbd>
+                <kbd className="topbar-label-hide-sm">Ctrl+K</kbd>
               </button>
             </div>
 
@@ -3421,7 +3654,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* Inline Quick Find Section directly under Top Bar */}
+        {/* Inline Quick Find & Unified Command Palette directly under Top Bar */}
         {!isAnyTimelineFullScreen && quickFindOpen && (
           <InlineQuickFind
             areas={snapshot.areas}
@@ -3429,9 +3662,58 @@ export const App: React.FC = () => {
             tasks={snapshot.tasks}
             checklistItems={snapshot.checklistItems}
             tags={snapshot.tags}
+            activeProject={activeProjectRecord}
+            activeArea={activeAreaRecord}
+            focusTimer={focusTimer}
             lang={lang}
             t={t}
             onNavigate={(nav, highlightId) => handleSelectNav(nav, highlightId)}
+            onCreateSmartTask={(parsed) => void handleCreateSmartTaskFromPalette(parsed)}
+            onPlanMyDay={() => {
+              setGeminiModalTab('planday');
+              setGeminiModalOpen(true);
+            }}
+            onOpenAiArchitect={() => {
+              setGeminiModalTab('braindump');
+              setGeminiModalOpen(true);
+            }}
+            onOpenWeeklyReview={() => setWeeklyReviewModal({ open: true, step: 1 })}
+            onCompleteActiveProject={
+              activeProjectRecord
+                ? () => void requestCompleteProject(activeProjectRecord)
+                : undefined
+            }
+            onSwitchProjectViewMode={
+              activeProjectRecord
+                ? (mode) => {
+                    if (mode !== 'roadmap') setIsTimelineFullScreen(false);
+                    void localDb.setProjectViewMode(activeProjectRecord.id, mode);
+                  }
+                : undefined
+            }
+            onSwitchAreaViewMode={
+              activeAreaRecord
+                ? (mode) => {
+                    if (mode !== 'roadmap') setIsTimelineFullScreen(false);
+                    const nextModes: Record<string, 'list' | 'roadmap'> = {
+                      ...(prefs.areaViewModes ?? {}),
+                      [activeAreaRecord.id]: mode
+                    };
+                    const updated = localDb.updatePreferences({ areaViewModes: nextModes });
+                    setPrefs(updated);
+                  }
+                : undefined
+            }
+            onOpenZenFocus={() => setZenFocusOpen(true)}
+            onOpenTemplates={() =>
+              setTemplatesModal({
+                open: true,
+                tab: 'gallery',
+                areaId: defaultAreaIdForNewProject
+              })
+            }
+            onCycleTheme={handleCycleThemeMode}
+            onOpenSettings={() => setSettingsModalOpen(true)}
             onClose={() => setQuickFindOpen(false)}
           />
         )}
@@ -3521,12 +3803,9 @@ export const App: React.FC = () => {
                       : null
                   )
                 }
-                onCompleteTask={() => {
-                  const tid = focusTimer.taskId;
-                  setFocusTimer(null);
-                  void localDb.upsertTask({ id: tid, status: 'COMPLETED' });
-                }}
-                onStop={() => setFocusTimer(null)}
+                onCompleteTask={handleCompleteFocusTimerTask}
+                onStop={handleStopFocusTimer}
+                onOpenZen={() => setZenFocusOpen(true)}
                 onSelectTask={(tid) => {
                   setSelectedTaskIds([]);
                   setExpandedTaskId(tid);
@@ -3628,6 +3907,17 @@ export const App: React.FC = () => {
                             {t.todayCapacitySummary(
                               formatStandaloneDuration(todayCapacity.plannedMinutes),
                               formatStandaloneDuration(todayCapacity.freeMinutes)
+                            )}
+                          </span>
+                        )}
+
+                        {activeNav.view === 'LOGBOOK' && logbookFocused7dMinutes > 0 && (
+                          <span
+                            className="today-capacity-pill"
+                            data-testid="logbook-focused-7d-pill"
+                          >
+                            {t.v32LogbookFocused7d(
+                              formatStandaloneDuration(logbookFocused7dMinutes)
                             )}
                           </span>
                         )}
@@ -6599,11 +6889,42 @@ export const App: React.FC = () => {
         />
       )}
 
+      {zenFocusOpen && focusTimer && (
+        <ZenFocusModal
+          timer={focusTimer}
+          task={snapshot.tasks.find((tk) => tk.id === focusTimer.taskId && !tk.isDeleted) ?? null}
+          checklistItems={snapshot.checklistItems}
+          t={t}
+          onTogglePause={() =>
+            setFocusTimer((prev) =>
+              prev ? { ...prev, isRunning: !prev.isRunning } : null
+            )
+          }
+          onAddFiveMinutes={() =>
+            setFocusTimer((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    totalSeconds: prev.totalSeconds + 5 * 60,
+                    remainingSeconds: prev.remainingSeconds + 5 * 60
+                  }
+                : null
+            )
+          }
+          onStartBreak={handleStartFocusBreak}
+          onBackToFocus={handleBackToFocusFromBreak}
+          onCompleteTask={handleCompleteFocusTimerTask}
+          onMinimize={() => setZenFocusOpen(false)}
+          onStop={handleStopFocusTimer}
+        />
+      )}
+
       {quickShareDraft && (
         <QuickShareModal
           draft={quickShareDraft}
           projects={snapshot.projects}
           areas={snapshot.areas}
+          tags={snapshot.tags}
           lang={lang}
           t={t}
           onClose={() => setQuickShareDraft(null)}
@@ -6667,16 +6988,23 @@ export const App: React.FC = () => {
                 ? openTasks.reduce((m, tk) => Math.min(m, tk.sortOrder), Infinity)
                 : null;
             const whenDate =
-              payload.scheduleState === 'TODAY' || payload.scheduleState === 'THIS_EVENING'
-                ? startOfDayEpoch()
-                : null;
+              payload.whenDate !== undefined
+                ? payload.whenDate
+                : payload.scheduleState === 'TODAY' || payload.scheduleState === 'THIS_EVENING'
+                  ? startOfDayEpoch()
+                  : null;
             const created = await localDb.upsertTask({
               title: payload.title,
               notes: payload.notes,
               scheduleState: payload.scheduleState,
               whenDate,
+              reminderTime: payload.reminderTime ?? null,
+              deadline: payload.deadline ?? null,
+              durationMinutes: payload.durationMinutes ?? null,
+              tagIds: payload.tagIds ?? [],
+              isMilestone: payload.isMilestone,
               projectId: payload.projectId,
-              areaId: payload.areaId,
+              areaId: payload.projectId ? null : payload.areaId,
               sortOrder: computeMidpointSortOrder(
                 null,
                 minOrder != null && Number.isFinite(minOrder) ? minOrder : null
@@ -6692,6 +7020,7 @@ export const App: React.FC = () => {
                 payload.scheduleState === 'THIS_EVENING'
                   ? 'TODAY'
                   : payload.scheduleState === 'TODAY' ||
+                      payload.scheduleState === 'UPCOMING' ||
                       payload.scheduleState === 'ANYTIME' ||
                       payload.scheduleState === 'SOMEDAY'
                     ? payload.scheduleState

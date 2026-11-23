@@ -499,6 +499,7 @@ export class ThingsLocalDb {
         tagIds: [],
         scheduledStartMinutes: null,
         durationMinutes: null,
+        actualMinutes: null,
         isPinned: false,
         isMilestone: false,
         effortLevel: null,
@@ -770,6 +771,7 @@ export class ThingsLocalDb {
     reminderTime?: number | null;
     scheduledStartMinutes?: number | null;
     durationMinutes?: number | null;
+    actualMinutes?: number | null;
     isPinned?: boolean;
     isMilestone?: boolean;
     effortLevel?: EffortLevel | null;
@@ -917,6 +919,15 @@ export class ThingsLocalDb {
         ? Math.max(1, Math.min(48_000, Math.trunc(rawDuration)))
         : null;
 
+    const rawActual =
+      params.actualMinutes !== undefined
+        ? params.actualMinutes
+        : (existing?.actualMinutes ?? null);
+    const actualMinutes =
+      rawActual != null && Number.isFinite(rawActual) && rawActual > 0
+        ? Math.max(1, Math.min(48_000, Math.trunc(rawActual)))
+        : null;
+
     let resolvedTagIds = Array.from(
       new Set(params.tagIds !== undefined ? params.tagIds : (existing?.tagIds ?? []))
     );
@@ -957,6 +968,7 @@ export class ThingsLocalDb {
           : null,
       scheduledStartMinutes,
       durationMinutes,
+      actualMinutes,
       isPinned: params.isPinned !== undefined ? Boolean(params.isPinned) : Boolean(existing?.isPinned),
       isMilestone:
         params.isMilestone !== undefined
@@ -1049,6 +1061,7 @@ export class ThingsLocalDb {
     reminderTime?: number | null;
     scheduledStartMinutes?: number | null;
     durationMinutes?: number | null;
+    actualMinutes?: number | null;
     isPinned?: boolean;
     isMilestone?: boolean;
     effortLevel?: EffortLevel | null;
@@ -1072,6 +1085,37 @@ export class ThingsLocalDb {
     });
   }
 
+  async addTaskActualMinutes(taskId: string, deltaMinutes: number): Promise<void> {
+    const delta = Math.trunc(Number(deltaMinutes));
+    if (!taskId || !Number.isFinite(delta) || delta <= 0) return;
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const now = Date.now();
+      const tx = db.transaction('tasks', 'readwrite');
+      const existing = (await tx.store.get(taskId)) as TaskRecord | undefined;
+      if (!existing || existing.isDeleted) {
+        await tx.done;
+        return;
+      }
+      const prevActual =
+        existing.actualMinutes != null &&
+        Number.isFinite(existing.actualMinutes) &&
+        existing.actualMinutes > 0
+          ? Math.trunc(existing.actualMinutes)
+          : 0;
+      const nextActual = Math.max(1, Math.min(48_000, prevActual + delta));
+      await tx.store.put({
+        ...existing,
+        actualMinutes: nextActual,
+        updatedAt: Math.max(now, existing.updatedAt + 1),
+        isDirty: true
+      } satisfies TaskRecord);
+      await tx.done;
+      await this.refreshSnapshot();
+      this.triggerSync();
+    });
+  }
+
   async batchUpdateTasks(
     taskIds: string[],
     patch: {
@@ -1080,6 +1124,7 @@ export class ThingsLocalDb {
       whenDate?: number | null;
       scheduledStartMinutes?: number | null;
       durationMinutes?: number | null;
+      actualMinutes?: number | null;
       isPinned?: boolean;
       isMilestone?: boolean;
       effortLevel?: EffortLevel | null;
@@ -1391,6 +1436,7 @@ export class ThingsLocalDb {
       id: newTaskId,
       status: 'OPEN',
       completedAt: null,
+      actualMinutes: null,
       scheduleState: nextSchedule,
       whenDate: nextWhen,
       deadline: nextDeadline,
@@ -1455,6 +1501,7 @@ export class ThingsLocalDb {
             (primary.whenDate ?? 0) < nextWhen ? nextReminder : primary.reminderTime,
           scheduledStartMinutes: nextStartMin,
           durationMinutes: nextDurMin,
+          actualMinutes: (primary.whenDate ?? 0) < nextWhen ? null : (primary.actualMinutes ?? null),
           updatedAt: Math.max(now, primary.updatedAt + 1),
           isDirty: true
         });
@@ -1800,6 +1847,7 @@ export class ThingsLocalDb {
           reminderTime: null,
           scheduledStartMinutes: null,
           durationMinutes: null,
+          actualMinutes: null,
           recurrenceRule: null,
           tagIds: [],
           projectId: null,
@@ -1863,6 +1911,7 @@ export class ThingsLocalDb {
               reminderTime: null,
               scheduledStartMinutes: null,
               durationMinutes: null,
+              actualMinutes: null,
               recurrenceRule: null,
               tagIds: [],
               projectId: null,
@@ -1987,6 +2036,7 @@ export class ThingsLocalDb {
             reminderTime: null,
             scheduledStartMinutes: null,
             durationMinutes: null,
+            actualMinutes: null,
             recurrenceRule: null,
             tagIds: [],
             isDeleted: true,
@@ -2148,6 +2198,7 @@ export class ThingsLocalDb {
           title: newTitle,
           status: 'OPEN',
           completedAt: null,
+          actualMinutes: null,
           reminderTime: src.reminderTime != null && src.reminderTime > now ? src.reminderTime : null,
           isPinned: Boolean(src.isPinned),
           isMilestone: Boolean(src.isMilestone),
@@ -3528,6 +3579,7 @@ export class ThingsLocalDb {
             headingId: mappedHeadingId,
             status: 'OPEN',
             completedAt: null,
+            actualMinutes: null,
             reminderTime: null,
             isMilestone: Boolean(t.isMilestone),
             createdAt: now,
@@ -4800,6 +4852,7 @@ export class ThingsLocalDb {
           if (!remoteWithHint.id) continue;
           const {
             omittedTimeblockFields,
+            omittedActualMinutesField,
             omittedPinnedField,
             omittedMilestoneField,
             omittedV30TaskFields,
@@ -4900,6 +4953,16 @@ export class ThingsLocalDb {
                 ? (local.assigneeId ?? null)
                 : (remote.assigneeId ?? null);
 
+            const resolvedActualMinutes = remote.isDeleted
+              ? null
+              : omittedActualMinutesField && local !== undefined
+                ? (local.actualMinutes ?? null)
+                : remote.actualMinutes != null &&
+                    Number.isFinite(remote.actualMinutes) &&
+                    remote.actualMinutes > 0
+                  ? Math.max(1, Math.min(48_000, Math.trunc(remote.actualMinutes)))
+                  : null;
+
             await taskStore.put({
               ...remote,
               updatedAt: clampedTs,
@@ -4909,6 +4972,7 @@ export class ThingsLocalDb {
               durationMinutes: keepLocalTimeblock
                 ? (local?.durationMinutes ?? null)
                 : (remote.durationMinutes ?? null),
+              actualMinutes: resolvedActualMinutes,
               isPinned: resolvedPinned,
               isMilestone: resolvedMilestone,
               effortLevel: resolvedEffort,
@@ -5028,6 +5092,12 @@ export class ThingsLocalDb {
       }
       return maxUpdatedAt;
     });
+  }
+
+  async applyRemoteBatch(
+    batch: Parameters<ThingsLocalDb['applyRemoteDeltas']>[0]
+  ): Promise<number> {
+    return this.applyRemoteDeltas(batch);
   }
 
   // ==================== Full Backup (.tbbackup) & Restore ====================

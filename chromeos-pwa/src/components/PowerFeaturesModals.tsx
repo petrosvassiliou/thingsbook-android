@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Share2,
   X,
@@ -21,24 +21,45 @@ import {
   Clock,
   Mic,
   MicOff,
-  Sparkles
+  Sparkles,
+  CalendarDays,
+  Flag,
+  Hourglass,
+  Diamond,
+  LayoutGrid,
+  Maximize2,
+  Minimize2,
+  Coffee,
+  CheckSquare,
+  Circle,
+  Plus
 } from 'lucide-react';
 import type {
   AreaRecord,
+  ChecklistItemRecord,
   FocusTimerUiState,
   ProjectRecord,
   QuickShareDraft,
   ScheduleState,
   SupportedLang,
+  TagRecord,
   TaskRecord
 } from '../domain/types';
 import type { TranslationStrings } from '../i18n/translations';
-import { MarkdownNotesField } from './MarkdownNotesField';
 import {
+  DetectedNotesLinksRow,
+  FormattedMarkdownText,
+  MarkdownNotesField
+} from './MarkdownNotesField';
+import {
+  extractDetectedLinksFromNotes,
   registerPlatformWebAuthnCredential,
   sha256Hex,
   verifyPlatformWebAuthnCredential
 } from '../domain/powerUtils';
+import { parseSmartTaskSyntax } from '../domain/smartSyntaxParser';
+import { formatStandaloneDuration } from '../domain/v2Utils';
+import { localDb } from '../data/localDb';
 
 const SPEECH_BCP47_BY_LANG: Record<SupportedLang, string> = {
   en: 'en-US',
@@ -89,21 +110,30 @@ export interface SmartParseDestination {
   scheduleState: ScheduleState;
 }
 
+export interface QuickShareSavePayload {
+  title: string;
+  notes: string;
+  scheduleState: ScheduleState;
+  whenDate?: number | null;
+  reminderTime?: number | null;
+  deadline?: number | null;
+  durationMinutes?: number | null;
+  tagIds?: string[];
+  isMilestone?: boolean;
+  projectId: string | null;
+  areaId: string | null;
+}
+
 export const QuickShareModal: React.FC<{
   draft: QuickShareDraft;
   projects: ProjectRecord[];
   areas: AreaRecord[];
+  tags?: TagRecord[];
   lang?: SupportedLang;
   t: TranslationStrings;
   onClose: () => void;
   onToast?: (msg: string) => void;
-  onSave: (payload: {
-    title: string;
-    notes: string;
-    scheduleState: ScheduleState;
-    projectId: string | null;
-    areaId: string | null;
-  }) => void;
+  onSave: (payload: QuickShareSavePayload) => void;
   onSmartParseWithGemini?: (
     rawText: string,
     destination: SmartParseDestination
@@ -112,6 +142,7 @@ export const QuickShareModal: React.FC<{
   draft,
   projects,
   areas,
+  tags = [],
   lang = 'en',
   t,
   onClose,
@@ -215,17 +246,47 @@ export const QuickShareModal: React.FC<{
 
   const submittedRef = useRef(false);
 
+  const parsedSmart = useMemo(
+    () =>
+      parseSmartTaskSyntax(title, {
+        tags,
+        projects,
+        areas,
+        lang
+      }),
+    [title, tags, projects, areas, lang]
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (submittedRef.current) return;
     submittedRef.current = true;
-    const resolvedTitle = title.trim() || t.entityNewTodo;
+    const rawTrimmed = title.trim();
+    const resolvedTitle = parsedSmart.hasAnyMatch
+      ? parsedSmart.cleanTitle || rawTrimmed || t.entityNewTodo
+      : rawTrimmed || t.entityNewTodo;
+    const resolvedProjectId = parsedSmart.matchedProject
+      ? parsedSmart.matchedProject.id
+      : projectId;
+    const resolvedAreaId = parsedSmart.matchedProject
+      ? parsedSmart.matchedProject.areaId
+      : parsedSmart.matchedArea
+        ? parsedSmart.matchedArea.id
+        : areaId;
+    const resolvedSchedule = parsedSmart.scheduleState ?? scheduleState;
+
     onSave({
       title: resolvedTitle,
       notes: notes.trim(),
-      scheduleState,
-      projectId,
-      areaId
+      scheduleState: resolvedSchedule,
+      whenDate: parsedSmart.scheduleState != null ? parsedSmart.whenDate : undefined,
+      reminderTime: parsedSmart.reminderTime ?? null,
+      deadline: parsedSmart.deadline ?? null,
+      durationMinutes: parsedSmart.durationMinutes ?? null,
+      tagIds: parsedSmart.matchedTagIds,
+      isMilestone: parsedSmart.isMilestone ? true : undefined,
+      projectId: resolvedProjectId,
+      areaId: resolvedAreaId
     });
   };
 
@@ -325,6 +386,59 @@ export const QuickShareModal: React.FC<{
                 </button>
               )}
             </div>
+
+            {parsedSmart.hasAnyMatch && (
+              <div
+                className="v32-smart-syntax-strip"
+                data-testid="quick-share-smart-syntax-preview"
+              >
+                <span className="v32-smart-syntax-label">{t.v32SmartSyntaxDetected}</span>
+                <div className="v32-smart-syntax-pills">
+                  {parsedSmart.scheduleState != null && (
+                    <span className="meta-badge today">
+                      <CalendarDays size={10.5} />
+                      <span>{parsedSmart.whenLabel || parsedSmart.scheduleState}</span>
+                    </span>
+                  )}
+                  {parsedSmart.deadline != null && (
+                    <span className="meta-badge urgent">
+                      <Flag size={10.5} />
+                      <span>{parsedSmart.deadlineLabel}</span>
+                    </span>
+                  )}
+                  {parsedSmart.durationMinutes != null && (
+                    <span className="meta-badge duration-badge">
+                      <Hourglass size={10} />
+                      <span>{formatStandaloneDuration(parsedSmart.durationMinutes)}</span>
+                    </span>
+                  )}
+                  {parsedSmart.isMilestone && (
+                    <span className="meta-badge milestone-badge">
+                      <Diamond size={10} />
+                      <span>{t.milestoneLabel}</span>
+                    </span>
+                  )}
+                  {parsedSmart.matchedProject && (
+                    <span className="meta-badge">
+                      <Folder size={10.5} />
+                      <span>{parsedSmart.matchedProject.title}</span>
+                    </span>
+                  )}
+                  {!parsedSmart.matchedProject && parsedSmart.matchedArea && (
+                    <span className="meta-badge">
+                      <Folder size={10.5} />
+                      <span>{parsedSmart.matchedArea.title}</span>
+                    </span>
+                  )}
+                  {parsedSmart.matchedTags.map((tg) => (
+                    <span key={tg.id} className="meta-badge">
+                      <LayoutGrid size={9.5} />
+                      <span>#{tg.title}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {parseError && (
               <div style={{ fontSize: 12.2, color: 'var(--deadline-red)' }}>{parseError}</div>
@@ -435,6 +549,7 @@ export const FocusTimerBanner: React.FC<{
   onCompleteTask: () => void;
   onStop: () => void;
   onSelectTask: (taskId: string) => void;
+  onOpenZen?: () => void;
 }> = ({
   timer,
   t,
@@ -442,12 +557,14 @@ export const FocusTimerBanner: React.FC<{
   onAddFiveMinutes,
   onCompleteTask,
   onStop,
-  onSelectTask
+  onSelectTask,
+  onOpenZen
 }) => {
   const mins = Math.floor(timer.remainingSeconds / 60);
   const secs = timer.remainingSeconds % 60;
   const formattedTime = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   const isFinished = timer.remainingSeconds <= 0;
+  const isBreak = Boolean(timer.isBreakMode);
   const progressPct =
     timer.totalSeconds > 0
       ? Math.min(
@@ -458,7 +575,7 @@ export const FocusTimerBanner: React.FC<{
 
   return (
     <div
-      className={`focus-timer-banner ${isFinished ? 'finished' : ''}`}
+      className={`focus-timer-banner ${isFinished ? 'finished' : ''} ${isBreak ? 'break-mode' : ''}`}
       data-testid="focus-timer-banner"
       onClick={(e) => e.stopPropagation()}
     >
@@ -469,18 +586,35 @@ export const FocusTimerBanner: React.FC<{
           onClick={() => onSelectTask(timer.taskId)}
         >
           <span className="focus-timer-badge">
-            <Timer size={15} />
+            {isBreak ? <Coffee size={15} /> : <Timer size={15} />}
             <span className="focus-timer-clock">{formattedTime}</span>
           </span>
           <span className="focus-timer-info">
             <span className="focus-timer-label">
-              {isFinished ? t.focusTimerFinishedTitle : t.focusTimerActiveLabel}
+              {isFinished
+                ? t.focusTimerFinishedTitle
+                : isBreak
+                  ? t.v32ZenBreakActive
+                  : t.focusTimerActiveLabel}
             </span>
             <span className="focus-timer-task-title">{timer.taskTitle || t.entityNewTodo}</span>
           </span>
         </button>
 
         <div className="focus-timer-actions">
+          {onOpenZen && (
+            <button
+              type="button"
+              className="chip-btn"
+              data-testid="focus-banner-zen-btn"
+              onClick={onOpenZen}
+              title={t.v32ZenExpandTooltip}
+              aria-label={t.v32ZenExpandTooltip}
+            >
+              <Maximize2 size={12.5} />
+              <span>{t.v32ZenFocusTitle}</span>
+            </button>
+          )}
           {!isFinished && (
             <button
               type="button"
@@ -522,6 +656,331 @@ export const FocusTimerBanner: React.FC<{
 
       <div className="focus-timer-progress-track">
         <div className="focus-timer-progress-fill" style={{ width: `${progressPct}%` }} />
+      </div>
+    </div>
+  );
+};
+
+// ==================== 2b. Full-Window Soft Bento Zen Focus Modal (v3.2) ====================
+
+export const ZenFocusModal: React.FC<{
+  timer: FocusTimerUiState;
+  task: TaskRecord | null;
+  checklistItems: ChecklistItemRecord[];
+  t: TranslationStrings;
+  onTogglePause: () => void;
+  onAddFiveMinutes: () => void;
+  onStartBreak: () => void;
+  onBackToFocus: () => void;
+  onCompleteTask: () => void;
+  onMinimize: () => void;
+  onStop: () => void;
+}> = ({
+  timer,
+  task,
+  checklistItems,
+  t,
+  onTogglePause,
+  onAddFiveMinutes,
+  onStartBreak,
+  onBackToFocus,
+  onCompleteTask,
+  onMinimize,
+  onStop
+}) => {
+  const [newChecklistTitle, setNewChecklistTitle] = useState('');
+
+  const mins = Math.floor(timer.remainingSeconds / 60);
+  const secs = timer.remainingSeconds % 60;
+  const formattedTime = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  const isFinished = timer.remainingSeconds <= 0;
+  const isBreak = Boolean(timer.isBreakMode);
+
+  const progressFraction =
+    timer.totalSeconds > 0
+      ? Math.min(
+          1,
+          Math.max(0, (timer.totalSeconds - timer.remainingSeconds) / timer.totalSeconds)
+        )
+      : 1;
+  const progressPct = Math.round(progressFraction * 100);
+
+  const radius = 84;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference * (1 - progressFraction);
+
+  const activeChecklists = useMemo(
+    () =>
+      checklistItems
+        .filter((c) => !c.isDeleted && c.taskId === timer.taskId)
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+    [checklistItems, timer.taskId]
+  );
+  const doneChecklistCount = activeChecklists.filter((c) => c.isCompleted).length;
+
+  const savedActual =
+    task?.actualMinutes != null && Number.isFinite(task.actualMinutes) && task.actualMinutes > 0
+      ? Math.trunc(task.actualMinutes)
+      : 0;
+  const liveSessionMins = !isBreak ? Math.floor((timer.sessionFocusedSeconds ?? 0) / 60) : 0;
+  const totalFocusedMins = savedActual + liveSessionMins;
+  const estimatedMins =
+    task?.durationMinutes != null &&
+    Number.isFinite(task.durationMinutes) &&
+    task.durationMinutes > 0
+      ? Math.trunc(task.durationMinutes)
+      : null;
+
+  const focusedBadgeText =
+    estimatedMins != null
+      ? t.v32ActualVsEstimated(
+          formatStandaloneDuration(totalFocusedMins),
+          formatStandaloneDuration(estimatedMins)
+        )
+      : totalFocusedMins > 0
+        ? t.v32ActualFocusedShort(formatStandaloneDuration(totalFocusedMins))
+        : null;
+
+  const commitAddChecklist = async () => {
+    const clean = newChecklistTitle.trim();
+    if (!clean) return;
+    setNewChecklistTitle('');
+    await localDb.addChecklistItems(timer.taskId, [clean]);
+  };
+
+  const notesText = task?.notes?.trim() ?? '';
+
+  return (
+    <div
+      className="modal-backdrop v32-zen-focus-backdrop"
+      data-testid="zen-focus-modal"
+      onClick={onMinimize}
+    >
+      <div
+        className={`v32-zen-focus-card ${isBreak ? 'break-mode' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Top Bar */}
+        <div className="v32-zen-header">
+          <span className={`v32-zen-mode-pill ${isBreak ? 'break' : ''}`}>
+            {isBreak ? <Coffee size={14} /> : <Timer size={14} />}
+            <span>{isBreak ? t.v32ZenBreakActive : t.v32ZenFocusTitle}</span>
+          </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="chip-btn"
+              data-testid="zen-minimize-btn"
+              title={t.v32ZenMinimize}
+              onClick={onMinimize}
+            >
+              <Minimize2 size={13} />
+              <span>{t.v32ZenMinimize}</span>
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title={t.focusTimerStop}
+              aria-label={t.focusTimerStop}
+              onClick={onStop}
+            >
+              <X size={17} />
+            </button>
+          </div>
+        </div>
+
+        {/* Center Ring + Clock + Task Title */}
+        <div className="v32-zen-hero">
+          <div className="v32-zen-ring-wrap">
+            <svg className="v32-zen-ring-svg" viewBox="0 0 192 192" aria-hidden="true">
+              <circle
+                className="v32-zen-ring-track"
+                cx="96"
+                cy="96"
+                r={radius}
+                fill="none"
+                strokeWidth="8"
+              />
+              <circle
+                className={`v32-zen-ring-progress ${isBreak ? 'break' : ''}`}
+                cx="96"
+                cy="96"
+                r={radius}
+                fill="none"
+                strokeWidth="8"
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+                transform="rotate(-90 96 96)"
+              />
+            </svg>
+            <div className="v32-zen-clock-center">
+              <div className="v32-zen-clock" data-testid="zen-focus-clock">
+                {formattedTime}
+              </div>
+              <div className="v32-zen-clock-sub">
+                {isFinished
+                  ? t.focusTimerFinishedTitle
+                  : timer.isRunning
+                    ? isBreak
+                      ? t.v32ZenShortBreak
+                      : t.focusTimerActiveLabel
+                    : t.focusTimerPause}
+              </div>
+            </div>
+          </div>
+
+          <div className="v32-zen-progress-bar" aria-hidden="true">
+            <div
+              className={`v32-zen-progress-fill ${isBreak ? 'break' : ''}`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+
+          <h2 className="v32-zen-task-title" data-testid="zen-focus-task-title">
+            {task?.title || timer.taskTitle || t.entityNewTodo}
+          </h2>
+
+          {focusedBadgeText && (
+            <span
+              className="today-capacity-pill"
+              data-testid="zen-focus-actual-badge"
+            >
+              <Timer size={12.5} />
+              <span>{focusedBadgeText}</span>
+            </span>
+          )}
+        </div>
+
+        {/* Notes + Live Interactive Checklist Scroll Area */}
+        <div className="v32-zen-scroll-content">
+          {notesText && (
+            <div className="v32-zen-bento-box" data-testid="zen-focus-notes">
+              <div className="v32-zen-notes-text">
+                <FormattedMarkdownText text={notesText} />
+              </div>
+              <DetectedNotesLinksRow links={extractDetectedLinksFromNotes(notesText)} />
+            </div>
+          )}
+
+          <div className="v32-zen-bento-box" data-testid="zen-focus-checklist">
+            <div className="v32-zen-section-head">
+              <CheckSquare size={13.5} style={{ color: 'var(--things-blue)' }} />
+              <span>
+                {t.actionChecklist} ({doneChecklistCount}/{activeChecklists.length})
+              </span>
+            </div>
+
+            {activeChecklists.length > 0 && (
+              <div className="v32-zen-checklist-items">
+                {activeChecklists.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`v32-zen-checklist-row ${item.isCompleted ? 'done' : ''}`}
+                    data-testid={`zen-checklist-item-${item.id}`}
+                    onClick={() =>
+                      void localDb.updateChecklistItem(item.id, {
+                        isCompleted: !item.isCompleted
+                      })
+                    }
+                  >
+                    <span className={`checklist-circle ${item.isCompleted ? 'done' : ''}`}>
+                      {item.isCompleted && <Check size={10} strokeWidth={3} />}
+                    </span>
+                    <span className="v32-zen-checklist-label">{item.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="checklist-add-row checklist-add-boxed" style={{ marginTop: 8 }}>
+              <Circle size={13} style={{ color: 'var(--things-blue)', flexShrink: 0 }} />
+              <input
+                type="text"
+                className="checklist-input"
+                data-testid="zen-checklist-add-input"
+                value={newChecklistTitle}
+                placeholder={t.placeholderAddChecklist}
+                onChange={(e) => setNewChecklistTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newChecklistTitle.trim()) {
+                    e.preventDefault();
+                    void commitAddChecklist();
+                  }
+                }}
+              />
+              {newChecklistTitle.trim() && (
+                <button
+                  type="button"
+                  className="chip-btn active"
+                  data-testid="zen-checklist-add-btn"
+                  title={t.actionChecklist}
+                  onClick={() => void commitAddChecklist()}
+                >
+                  <Plus size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Controls */}
+        <div className="v32-zen-controls">
+          {!isFinished && (
+            <button
+              type="button"
+              className="btn-secondary"
+              data-testid="zen-pause-resume-btn"
+              onClick={onTogglePause}
+            >
+              {timer.isRunning ? <Pause size={14} /> : <Play size={14} />}
+              <span>{timer.isRunning ? t.focusTimerPause : t.focusTimerResume}</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="btn-secondary"
+            data-testid="zen-plus-5m-btn"
+            onClick={onAddFiveMinutes}
+          >
+            <span>{t.focusTimerPlus5m}</span>
+          </button>
+
+          {isBreak ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              data-testid="zen-back-to-focus-btn"
+              onClick={onBackToFocus}
+            >
+              <Timer size={14} />
+              <span>{t.v32ZenBackToFocus}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-secondary"
+              data-testid="zen-short-break-btn"
+              onClick={onStartBreak}
+            >
+              <Coffee size={14} />
+              <span>{t.v32ZenShortBreak}</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="btn-primary"
+            data-testid="zen-complete-btn"
+            onClick={onCompleteTask}
+          >
+            <Check size={14} />
+            <span>{t.actionComplete}</span>
+          </button>
+        </div>
       </div>
     </div>
   );

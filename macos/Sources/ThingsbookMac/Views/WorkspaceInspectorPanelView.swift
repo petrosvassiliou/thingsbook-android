@@ -484,6 +484,13 @@ public struct WorkspaceInspectorPanelView: View {
                             store.setTaskStandaloneDuration(task.id, durationMinutes: nil)
                         }
                     }
+                    if (task.actualMinutes ?? 0) > 0 {
+                        Button(store.tr("v32_reset_actual_time"), role: .destructive) {
+                            draftSaveTask?.cancel()
+                            commitDraftEditsIfNeeded()
+                            store.setTaskActualMinutes(task.id, actualMinutes: nil)
+                        }
+                    }
                 } label: {
                     inspectorPropertyPillLabel(
                         title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
@@ -502,6 +509,27 @@ public struct WorkspaceInspectorPanelView: View {
                     ) { customMins in
                         store.setTaskStandaloneDuration(task.id, durationMinutes: customMins)
                     }
+                }
+
+                if let actualBadge = store.formattedActualTimeBadge(for: task) {
+                    Menu {
+                        Button(store.tr("v32_reset_actual_time"), role: .destructive) {
+                            draftSaveTask?.cancel()
+                            commitDraftEditsIfNeeded()
+                            store.setTaskActualMinutes(task.id, actualMinutes: nil)
+                        }
+                    } label: {
+                        inspectorPropertyPillLabel(
+                            title: actualBadge,
+                            systemImage: "clock.arrow.circlepath",
+                            isActive: true,
+                            tint: ThingsMacPalette.logbookGreen
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .thingsTooltip(actualBadge)
                 }
 
                 // Effort Menu

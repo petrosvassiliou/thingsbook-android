@@ -7182,5 +7182,309 @@ button.v2-stalled-pill:hover {
   flex-shrink: 0;
 }
 
+/* ==================== v3.2 Command Palette, Smart Syntax & Zen Focus ==================== */
+
+.inline-qf-row.selected {
+  background: var(--things-blue-soft);
+  border-color: rgba(36, 139, 253, 0.28);
+}
+
+.v32-cmd-create-row {
+  border: 1px dashed rgba(36, 139, 253, 0.36);
+  background: rgba(36, 139, 253, 0.05);
+  margin-bottom: 4px;
+}
+
+.v32-cmd-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5px 6.5px;
+  border-radius: 5px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 10.6px;
+  font-weight: 640;
+  font-family: var(--font-sans);
+  flex-shrink: 0;
+}
+
+.v32-smart-syntax-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: var(--things-blue-soft);
+  border: 1px solid rgba(36, 139, 253, 0.24);
+}
+
+.v32-smart-syntax-strip.task-modal-smart-strip {
+  margin: 0 18px 8px;
+}
+
+.v32-smart-syntax-strip.compact {
+  padding: 5px 8px;
+  margin-top: 4px;
+  border-radius: 8px;
+}
+
+.v32-smart-syntax-label {
+  font-size: 11.4px;
+  font-weight: 660;
+  color: var(--things-blue);
+  flex-shrink: 0;
+}
+
+.v32-smart-syntax-pills {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.v32-smart-apply-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.inspector-actual-minutes-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+/* Zen Focus Mode Full-Window Soft Bento Overlay */
+.v32-zen-focus-backdrop {
+  z-index: 260;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 20px;
+}
+
+.v32-zen-focus-card {
+  width: min(640px, 100%);
+  max-height: min(860px, calc(100dvh - 40px));
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  box-shadow: var(--shadow-lg);
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow: hidden;
+}
+
+.v32-zen-focus-card.break-mode {
+  border-color: rgba(16, 185, 129, 0.34);
+}
+
+.v32-zen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.v32-zen-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6.5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--things-blue-soft);
+  border: 1px solid rgba(36, 139, 253, 0.25);
+  color: var(--things-blue);
+  font-size: 12.2px;
+  font-weight: 680;
+}
+
+.v32-zen-mode-pill.break {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.30);
+  color: var(--logbook-green);
+}
+
+.v32-zen-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.v32-zen-ring-wrap {
+  position: relative;
+  width: 192px;
+  height: 192px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.v32-zen-ring-svg {
+  width: 192px;
+  height: 192px;
+}
+
+.v32-zen-ring-track {
+  stroke: var(--bg-subtle);
+}
+
+.v32-zen-ring-progress {
+  stroke: var(--things-blue);
+  transition: stroke-dashoffset 0.35s ease;
+}
+
+.v32-zen-ring-progress.break {
+  stroke: var(--logbook-green);
+}
+
+.v32-zen-clock-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.v32-zen-clock {
+  font-size: 40px;
+  font-weight: 760;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.08;
+}
+
+.v32-zen-clock-sub {
+  font-size: 11.4px;
+  font-weight: 600;
+  color: var(--text-muted);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v32-zen-progress-bar {
+  width: min(320px, 85%);
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.v32-zen-progress-fill {
+  height: 100%;
+  background: var(--things-blue);
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.v32-zen-progress-fill.break {
+  background: var(--logbook-green);
+}
+
+.v32-zen-task-title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 720;
+  line-height: 1.32;
+  color: var(--text-primary);
+  word-break: break-word;
+  max-width: 540px;
+}
+
+.v32-zen-scroll-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.v32-zen-bento-box {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.v32-zen-section-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 680;
+  color: var(--text-secondary);
+}
+
+.v32-zen-notes-text {
+  font-size: 13.4px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.v32-zen-checklist-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.v32-zen-checklist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.v32-zen-checklist-row:hover {
+  background: var(--bg-card-hover);
+}
+
+.v32-zen-checklist-label {
+  font-size: 13.5px;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.v32-zen-checklist-row.done .v32-zen-checklist-label {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.v32-zen-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+
 
 

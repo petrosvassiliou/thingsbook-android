@@ -219,11 +219,20 @@ public struct MainWorkspaceView: View {
                 .zIndex(40)
             }
 
+            // Zen Focus Mode Full-Window Calm Overlay
+            if store.isZenFocusPresented, let focus = store.focusTimer {
+                ZenFocusOverlayView(store: store, focus: focus)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .zIndex(45)
+            }
+
             // Touch ID Biometric App Lock Overlay
             if store.isLocked {
                 biometricLockOverlay
+                    .zIndex(60)
             }
         }
+        .preferredColorScheme(store.resolvedColorScheme)
         .onAppear {
             installTaskKeyboardMonitorIfNeeded()
         }
@@ -359,6 +368,35 @@ public struct MainWorkspaceView: View {
                 }
             }
 
+            // Keep ⌘F working alongside ⌘K to open Command Palette / Quick Find
+            let exactMods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if exactMods == [.command],
+               event.charactersIgnoringModifiers?.lowercased() == "f",
+               !store.isTimelineFullScreen,
+               store.activeSheet == nil {
+                store.isQuickFindPresented = true
+                return nil
+            }
+
+            // When Zen Focus Mode is presented: Escape minimizes back to focusTimerBanner without stopping timer
+            if store.isZenFocusPresented, store.activeSheet == nil {
+                let cleanMods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+                if event.keyCode == 53 && cleanMods.isEmpty {
+                    withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                        store.isZenFocusPresented = false
+                    }
+                    return nil
+                }
+                if let responder = NSApp.keyWindow?.firstResponder, responder is NSText {
+                    return event
+                }
+                let blockingMods = event.modifierFlags.intersection([.command, .option, .control])
+                if blockingMods.isEmpty && (event.keyCode == 36 || event.keyCode == 76 || event.keyCode == 49) {
+                    return nil
+                }
+                return event
+            }
+
             // When Soft Bento Task Modal is open and unobstructed by sheets/attachment previews:
             if store.expandedTaskId != nil,
                store.activeSheet == nil,
@@ -426,16 +464,18 @@ public struct MainWorkspaceView: View {
     // MARK: - Focus Session (25m Pomodoro) Card
 
     private func focusTimerBanner(_ focus: FocusTimerState) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let bannerTint = focus.isBreakMode ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Image(systemName: "timer")
+                Image(systemName: focus.isBreakMode ? "cup.and.saucer.fill" : "timer")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .foregroundStyle(bannerTint)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(store.tr("focus_timer_active_label").uppercased())
+                    Text(store.tr(focus.isBreakMode ? "v32_zen_break_active" : "focus_timer_active_label").uppercased())
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                        .foregroundStyle(bannerTint)
                     Text(focus.taskTitle)
                         .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(1)
@@ -445,7 +485,7 @@ public struct MainWorkspaceView: View {
 
                 Text(focus.formattedCountdown)
                     .font(.system(size: 17, weight: .bold, design: .monospaced))
-                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .foregroundStyle(bannerTint)
 
                 let pauseLabel = focus.isPaused ? store.tr("focus_timer_resume") : store.tr("focus_timer_pause")
                 Button {
@@ -472,6 +512,17 @@ public struct MainWorkspaceView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .thingsTooltip(store.tr("focus_timer_plus_5m"))
 
+                if focus.isBreakMode {
+                    Button(store.tr("v32_zen_back_to_focus")) {
+                        store.resumeFocusFromBreak()
+                    }
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .thingsTooltip(store.tr("v32_zen_back_to_focus"))
+                }
+
                 Button {
                     if let task = store.allOpenTasks.first(where: { $0.id == focus.taskId }) {
                         store.toggleTaskCompletion(task)
@@ -489,6 +540,24 @@ public struct MainWorkspaceView: View {
                 .thingsTooltip(store.tr("action_complete"))
 
                 Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        store.isZenFocusPresented = true
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(bannerTint)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(bannerTint.opacity(0.12))
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr("v32_zen_expand_tooltip"))
+
+                Button {
                     store.stopFocusTimer()
                 } label: {
                     Image(systemName: "xmark")
@@ -502,9 +571,9 @@ public struct MainWorkspaceView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(ThingsMacPalette.accentBlue.opacity(0.14))
+                        .fill(bannerTint.opacity(0.14))
                     Capsule()
-                        .fill(ThingsMacPalette.accentBlue)
+                        .fill(bannerTint)
                         .frame(width: max(8, geo.size.width * focus.progress))
                 }
             }
@@ -514,10 +583,10 @@ public struct MainWorkspaceView: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(ThingsMacPalette.accentBlue.opacity(0.08))
+                .fill(bannerTint.opacity(0.08))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.24), lineWidth: 1)
+                        .strokeBorder(bannerTint.opacity(0.24), lineWidth: 1)
                 )
         )
         .frame(maxWidth: (canShowInspector && store.isInspectorVisible) ? .infinity : 1360, alignment: .leading)
@@ -783,7 +852,7 @@ public struct MainWorkspaceView: View {
             .foregroundStyle(ThingsMacPalette.logbookGreen)
             .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
-            .thingsTooltip("\(store.tr("action_complete")) (⌘K)")
+            .thingsTooltip("\(store.tr("action_complete")) (⌘.)")
 
             Button {
                 store.scheduleSelectedTasks(.today)
@@ -1086,7 +1155,7 @@ public struct MainWorkspaceView: View {
                 Spacer(minLength: 4)
 
                 if metrics.showSearchShortcutBadge {
-                    Text("⌘F")
+                    Text("⌘K")
                         .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 5.5)
@@ -1682,5 +1751,390 @@ private struct MagicPlusPopoverRow: View {
         }
     }
 }
+
+public struct ZenFocusOverlayView: View {
+    @ObservedObject var store: ThingsbookStore
+    public let focus: FocusTimerState
+
+    @State private var newChecklistTitle: String = ""
+
+    public init(store: ThingsbookStore, focus: FocusTimerState) {
+        self.store = store
+        self.focus = focus
+    }
+
+    private var liveTask: TaskItem? {
+        store.taskIncludingTrash(byId: focus.taskId)
+    }
+
+    private var accentTint: Color {
+        focus.isBreakMode ? ThingsMacPalette.anytimeTeal : ThingsMacPalette.accentBlue
+    }
+
+    private var displayTitle: String {
+        if let raw = liveTask?.title.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            return raw
+        }
+        let fallback = focus.taskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? store.tr("macos_untitled_todo") : fallback
+    }
+
+    public var body: some View {
+        ZStack {
+            ThingsMacPalette.canvasBackground
+                .ignoresSafeArea()
+
+            RadialGradient(
+                colors: [accentTint.opacity(0.14), Color.clear],
+                center: .top,
+                startRadius: 30,
+                endRadius: 520
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            VStack(spacing: 0) {
+                // Top Header Bar
+                HStack(spacing: 12) {
+                    HStack(spacing: 6) {
+                        Image(systemName: focus.isBreakMode ? "cup.and.saucer.fill" : "timer")
+                            .font(.system(size: 12, weight: .bold))
+                        Text(store.tr(focus.isBreakMode ? "v32_zen_break_active" : "v32_zen_focus_title").uppercased())
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(0.8)
+                    }
+                    .foregroundStyle(accentTint)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(accentTint.opacity(0.13))
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(accentTint.opacity(0.28), lineWidth: 0.85)
+                            )
+                    )
+
+                    Spacer()
+
+                    Button {
+                        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                            store.isZenFocusPresented = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(store.tr("v32_zen_minimize"))
+                                .font(.system(size: 12.5, weight: .semibold))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6.5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(ThingsMacPalette.subtleContainer)
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.85)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip("\(store.tr("v32_zen_minimize")) (Esc)")
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+                .padding(.bottom, 12)
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 22) {
+                        // Circular Countdown Ring
+                        ZStack {
+                            Circle()
+                                .stroke(accentTint.opacity(0.14), lineWidth: 7.5)
+                                .frame(width: 196, height: 196)
+
+                            Circle()
+                                .trim(from: 0, to: CGFloat(focus.progress))
+                                .stroke(
+                                    accentTint,
+                                    style: StrokeStyle(lineWidth: 7.5, lineCap: .round)
+                                )
+                                .frame(width: 196, height: 196)
+                                .rotationEffect(.degrees(-90))
+                                .animation(.easeInOut(duration: 0.35), value: focus.progress)
+
+                            VStack(spacing: 4) {
+                                Text(focus.formattedCountdown)
+                                    .font(.system(size: focus.remainingSeconds >= 3600 ? 34 : 46, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.primary)
+
+                                Text(store.tr(focus.isBreakMode ? "v32_zen_break_active" : "v32_zen_focus_title"))
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .foregroundStyle(accentTint)
+                            }
+                        }
+                        .padding(.top, 8)
+
+                        // Task Title + Focused vs Estimated Pill
+                        VStack(spacing: 8) {
+                            Text(displayTitle)
+                                .font(.system(size: 24, weight: .bold))
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: 620)
+
+                            if let task = liveTask,
+                               let actualBadge = store.formattedActualTimeBadge(
+                                   for: task,
+                                   extraLiveSeconds: focus.isBreakMode ? 0 : focus.sessionFocusedSeconds
+                               ) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text(actualBadge)
+                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                }
+                                .foregroundStyle(ThingsMacPalette.logbookGreen)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 4.5)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(ThingsMacPalette.logbookGreen.opacity(0.13))
+                                        .overlay(
+                                            Capsule(style: .continuous)
+                                                .strokeBorder(ThingsMacPalette.logbookGreen.opacity(0.28), lineWidth: 0.8)
+                                        )
+                                )
+                            } else if let dur = liveTask?.durationMinutes, dur > 0 {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "timer")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text(TaskItem.formatCompactDuration(dur))
+                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                }
+                                .foregroundStyle(ThingsMacPalette.anytimeTeal)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 4.5)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(ThingsMacPalette.anytimeTeal.opacity(0.12))
+                                )
+                            }
+                        }
+
+                        // Primary Controls Row
+                        HStack(spacing: 10) {
+                            let pauseLabel = focus.isPaused ? store.tr("focus_timer_resume") : store.tr("focus_timer_pause")
+                            Button {
+                                store.toggleFocusTimerPause()
+                            } label: {
+                                Label(pauseLabel, systemImage: focus.isPaused ? "play.fill" : "pause.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(accentTint)
+
+                            Button {
+                                store.addFiveMinutesToFocusTimer()
+                            } label: {
+                                Text(store.tr("focus_timer_plus_5m"))
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.bordered)
+
+                            if focus.isBreakMode {
+                                Button {
+                                    store.resumeFocusFromBreak()
+                                } label: {
+                                    Label(store.tr("v32_zen_back_to_focus"), systemImage: "bolt.fill")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                }
+                                .buttonStyle(.bordered)
+                            } else {
+                                Button {
+                                    store.startZenShortBreak()
+                                } label: {
+                                    Label(store.tr("v32_zen_short_break"), systemImage: "cup.and.saucer")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+
+                            Button {
+                                if let task = store.allOpenTasks.first(where: { $0.id == focus.taskId }) {
+                                    store.toggleTaskCompletion(task)
+                                }
+                                store.stopFocusTimer()
+                            } label: {
+                                Label(store.tr("action_complete"), systemImage: "checkmark")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(ThingsMacPalette.logbookGreen)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button(role: .destructive) {
+                                store.stopFocusTimer()
+                            } label: {
+                                Label(store.tr("focus_timer_stop"), systemImage: "stop.fill")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        // Notes & Live Interactive Checklist Cards
+                        VStack(alignment: .leading, spacing: 14) {
+                            if let notes = liveTask?.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                               !notes.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "doc.text")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                        Text(store.tr("placeholder_notes"))
+                                            .font(.system(size: 11.5, weight: .bold))
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Text(MarkdownNotesParser.renderAttributed(notes))
+                                        .font(.system(size: 13.5))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(ThingsMacPalette.cardSurface)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.85)
+                                        )
+                                )
+                            }
+
+                            let items = store.checklistItems(for: focus.taskId)
+                            let doneCount = items.filter(\.isCompleted).count
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checklist")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                    Text(store.tr("action_checklist"))
+                                        .font(.system(size: 11.5, weight: .bold))
+                                        .foregroundStyle(.secondary)
+
+                                    if !items.isEmpty {
+                                        Text("\(doneCount)/\(items.count)")
+                                            .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                            .foregroundStyle(doneCount == items.count ? ThingsMacPalette.logbookGreen : accentTint)
+                                            .padding(.horizontal, 6.5)
+                                            .padding(.vertical, 1.5)
+                                            .background(
+                                                Capsule(style: .continuous)
+                                                    .fill((doneCount == items.count ? ThingsMacPalette.logbookGreen : accentTint).opacity(0.13))
+                                            )
+                                    }
+                                    Spacer()
+                                }
+
+                                if !items.isEmpty {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        ForEach(items) { item in
+                                            Button {
+                                                store.toggleChecklistItem(item)
+                                            } label: {
+                                                HStack(spacing: 9) {
+                                                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                                        .font(.system(size: 15))
+                                                        .foregroundStyle(item.isCompleted ? accentTint : .secondary)
+
+                                                    Text(item.title)
+                                                        .font(.system(size: 13.5))
+                                                        .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                                                        .strikethrough(item.isCompleted, color: .secondary)
+                                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                                }
+                                                .padding(.vertical, 3)
+                                                .contentShape(Rectangle())
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+
+                                HStack(spacing: 8) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 11.5, weight: .bold))
+                                        .foregroundStyle(accentTint)
+                                        .frame(width: 16)
+
+                                    TextField(store.tr("placeholder_add_checklist_item"), text: $newChecklistTitle)
+                                        .textFieldStyle(.plain)
+                                        .font(.system(size: 13))
+                                        .onSubmit {
+                                            submitChecklistItem()
+                                        }
+
+                                    if !newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Button(store.tr("macos_action_add")) {
+                                            submitChecklistItem()
+                                        }
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                        .foregroundStyle(accentTint)
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 7.5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(ThingsMacPalette.subtleContainer)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
+                                        )
+                                )
+                            }
+                            .padding(14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(ThingsMacPalette.cardSurface)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.85)
+                                    )
+                            )
+                        }
+                        .frame(maxWidth: 560)
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 36)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private func submitChecklistItem() {
+        let clean = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        _ = store.addChecklistItem(taskId: focus.taskId, title: clean)
+        newChecklistTitle = ""
+    }
+}
+
 
 

@@ -409,11 +409,11 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.1.2")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.1.2")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 115)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.2.0")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.2.0")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 116)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.1.2", current: "3.1.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.2.0", current: "3.1.2"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -6367,6 +6367,261 @@ final class ThingsbookCoreTests: XCTestCase {
             for key in v31Keys {
                 let text = ThingsStrings.shared.text(key, lang: lang)
                 XCTAssertNotEqual(text, key, "Missing v31 key \(key) in \(lang.rawValue)")
+                XCTAssertFalse(text.isEmpty)
+            }
+        }
+    }
+
+    // MARK: - 48. v3.2 SmartSyntaxParser (5 Languages + URL Guard) & actualMinutes Persistence / Sync / Backup
+
+    func testV32SmartSyntaxParserMultilingualAndUrlPreservation() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let refDate = cal.date(from: DateComponents(year: 2026, month: 11, day: 23, hour: 9))! // Monday
+        let todayMs = DateEpochConverter.startOfDayMillis(for: refDate, calendar: cal)
+        let dayMs: Int64 = 86_400_000
+
+        let tags = [
+            Tag(id: "tag-work", title: "Work", createdAt: 1, updatedAt: 1),
+            Tag(id: "tag-deep", title: "Deep Work", createdAt: 1, updatedAt: 1),
+            Tag(id: "tag-deleted", title: "Obsolete", createdAt: 1, updatedAt: 1, isDeleted: true)
+        ]
+        let areas = [
+            Area(id: "area-eng", title: "Engineering", sortOrder: 10, createdAt: 1, updatedAt: 1),
+            Area(id: "area-life", title: "Personal Life", sortOrder: 20, createdAt: 1, updatedAt: 1)
+        ]
+        let projects = [
+            Project(id: "proj-launch", areaId: "area-eng", title: "Product Launch", status: .active, createdAt: 1, updatedAt: 1),
+            Project(id: "proj-done", areaId: "area-eng", title: "Done Project", status: .completed, createdAt: 1, updatedAt: 1)
+        ]
+
+        // 1. EN: URL + fraction + @this-evening + !fri + ~1.5h + #deep-work + /Product + !milestone
+        let en = SmartSyntaxParser.parse(
+            "Review PR https://github.com/org/repo/pull/34 and 3/4 spec @this-evening !fri ~1.5h #deep-work /Product !milestone",
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: Locale(identifier: "en_US"),
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertTrue(en.hasAnyMatch)
+        XCTAssertEqual(en.cleanTitle, "Review PR https://github.com/org/repo/pull/34 and 3/4 spec")
+        XCTAssertEqual(en.scheduleState, .thisEvening)
+        XCTAssertEqual(en.whenDate, todayMs)
+        XCTAssertEqual(en.deadline, todayMs + 4 * dayMs) // Friday
+        XCTAssertEqual(en.durationMinutes, 90)
+        XCTAssertEqual(en.matchedTagIds, ["tag-deep"])
+        XCTAssertEqual(en.matchedProject?.id, "proj-launch")
+        XCTAssertNil(en.matchedArea)
+        XCTAssertTrue(en.isMilestone)
+
+        // 2. DE: @heute-abend + !morgen + ~45min + #"Deep Work" + /Personal-Life + ◆
+        let de = SmartSyntaxParser.parse(
+            "Quartalsbericht prüfen @heute-abend !morgen ~45min #\"Deep Work\" /Personal-Life ◆",
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: Locale(identifier: "de_DE"),
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertTrue(de.hasAnyMatch)
+        XCTAssertEqual(de.cleanTitle, "Quartalsbericht prüfen")
+        XCTAssertEqual(de.scheduleState, .thisEvening)
+        XCTAssertEqual(de.whenDate, todayMs)
+        XCTAssertEqual(de.deadline, todayMs + dayMs)
+        XCTAssertEqual(de.durationMinutes, 45)
+        XCTAssertEqual(de.matchedTagIds, ["tag-deep"])
+        XCTAssertNil(de.matchedProject)
+        XCTAssertEqual(de.matchedArea?.id, "area-life")
+        XCTAssertTrue(de.isMilestone)
+
+        // 3. FR, IT, ES natural dates + hh:mm duration + quoted phrase
+        let fr = SmartSyntaxParser.parse(
+            "Préparer démo @demain ~1:30 #work",
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: Locale(identifier: "fr_FR"),
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertEqual(fr.cleanTitle, "Préparer démo")
+        XCTAssertEqual(fr.scheduleState, .upcoming)
+        XCTAssertEqual(fr.whenDate, todayMs + dayMs)
+        XCTAssertEqual(fr.durationMinutes, 90)
+        XCTAssertEqual(fr.matchedTagIds, ["tag-work"])
+
+        let it = SmartSyntaxParser.parse(
+            "Chiamare cliente @stasera !domani ~15m",
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: Locale(identifier: "it_IT"),
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertEqual(it.cleanTitle, "Chiamare cliente")
+        XCTAssertEqual(it.scheduleState, .thisEvening)
+        XCTAssertEqual(it.deadline, todayMs + dayMs)
+        XCTAssertEqual(it.durationMinutes, 15)
+
+        let es = SmartSyntaxParser.parse(
+            "Enviar propuesta @manana !\"en 3 dias\" ~2h",
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: Locale(identifier: "es_ES"),
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertEqual(es.cleanTitle, "Enviar propuesta")
+        XCTAssertEqual(es.scheduleState, .upcoming)
+        XCTAssertEqual(es.whenDate, todayMs + dayMs)
+        XCTAssertEqual(es.deadline, todayMs + 3 * dayMs)
+        XCTAssertEqual(es.durationMinutes, 120)
+
+        // 4. Unmatched tokens, emails, URLs, approximate ~50, and completed/deleted containers are NEVER stripped
+        let untouched = SmartSyntaxParser.parse(
+            "Email dev@thingsbook.app about ~50 items at https://a.com/b #obsolete /Done-Project /unknown",
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: Locale(identifier: "en_US"),
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertFalse(untouched.hasAnyMatch)
+        XCTAssertEqual(
+            untouched.cleanTitle,
+            "Email dev@thingsbook.app about ~50 items at https://a.com/b #obsolete /Done-Project /unknown"
+        )
+
+        // 5. Token-only input preserves trimmed rawTitle so cleanTitle is never empty
+        let tokenOnly = SmartSyntaxParser.parse(
+            "@tomorrow",
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: Locale(identifier: "en_US"),
+            referenceDate: refDate,
+            calendar: cal
+        )
+        XCTAssertTrue(tokenOnly.hasAnyMatch)
+        XCTAssertEqual(tokenOnly.cleanTitle, "@tomorrow")
+        XCTAssertEqual(tokenOnly.scheduleState, .upcoming)
+    }
+
+    func testV32ActualMinutesDatabaseQuickFindBackupAndSyncRoundTrip() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let refDate = cal.date(from: DateComponents(year: 2026, month: 11, day: 23, hour: 12))!
+
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let task = try db.createTask(
+            title: "Deep Architecture Focus Session",
+            notes: "Verify column index 26 in all SELECT queries",
+            scheduleState: .today,
+            whenDate: DateEpochConverter.startOfDayMillis(for: refDate, calendar: cal),
+            durationMinutes: 60
+        )
+        XCTAssertNil(task.actualMinutes)
+
+        // 1. addTaskActualMinutes accumulation & clamping
+        try db.addTaskActualMinutes(taskId: task.id, deltaMinutes: 25)
+        try db.addTaskActualMinutes(taskId: task.id, deltaMinutes: 15)
+
+        var snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let loaded = try XCTUnwrap(snap.allOpenTasks.first { $0.id == task.id })
+        XCTAssertEqual(loaded.actualMinutes, 40)
+        XCTAssertEqual(loaded.durationMinutes, 60)
+
+        // 2. Verify BOTH QuickFind FTS query AND non-FTS filter query read column 26 (`actual_minutes`)
+        let ftsResult = try db.searchQuickFind(rawQuery: "Architecture", referenceDate: refDate, calendar: cal)
+        let ftsTask = try XCTUnwrap(ftsResult.tasks.first { $0.id == task.id })
+        XCTAssertEqual(ftsTask.actualMinutes, 40)
+
+        var filterOnly = QuickFindFilter()
+        filterOnly.dateFilter = .today
+        let nonFtsResult = try db.searchQuickFind(rawQuery: "", filter: filterOnly, referenceDate: refDate, calendar: cal)
+        let nonFtsTask = try XCTUnwrap(nonFtsResult.tasks.first { $0.id == task.id })
+        XCTAssertEqual(nonFtsTask.actualMinutes, 40)
+
+        // 3. Clamp upper bound 48_000 and reset to nil
+        try db.setTaskActualMinutes(taskId: task.id, actualMinutes: 99_999)
+        snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertEqual(snap.allOpenTasks.first(where: { $0.id == task.id })?.actualMinutes, 48_000)
+
+        try db.setTaskActualMinutes(taskId: task.id, actualMinutes: nil)
+        snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertNil(snap.allOpenTasks.first(where: { $0.id == task.id })?.actualMinutes)
+
+        try db.setTaskActualMinutes(taskId: task.id, actualMinutes: 55)
+
+        // 4. .tbbackup encrypted round-trip preserves actualMinutes
+        let payload = try db.buildBackupPayload(preferences: AppPreferences())
+        XCTAssertEqual(payload.tasks.first(where: { $0.id == task.id })?.actualMinutes, 55)
+        let encoded = try ThingsBackupCodec.encodeBackup(payload: payload, password: "ZenFocusPassword32!")
+        let decoded = try ThingsBackupCodec.decodeBackup(rawBytes: encoded, password: "ZenFocusPassword32!")
+
+        let dbRestored = try ThingsSQLiteDatabase(path: ":memory:")
+        try dbRestored.restoreBackupPayload(decoded)
+        var restoredSnap = try dbRestored.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let restoredTask = try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == task.id })
+        XCTAssertEqual(restoredTask.actualMinutes, 55)
+
+        // 5. Cloud Sync: older peer omitting actualMinutes preserves local actualMinutes; explicit actualMinutes updates it
+        let legacyPeerMap: [String: Any] = [
+            "id": task.id,
+            "title": "Deep Architecture Focus Session (Edited on v3.1)",
+            "status": "OPEN",
+            "scheduleState": "TODAY",
+            "durationMinutes": 60,
+            "sortOrder": restoredTask.sortOrder,
+            "createdAt": restoredTask.createdAt,
+            "updatedAt": restoredTask.updatedAt + 10_000,
+            "isDeleted": false
+        ]
+        let legacyParsed = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(legacyPeerMap))
+        XCTAssertTrue(legacyParsed.omittedActualMinutes)
+        _ = try dbRestored.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tasks: [legacyParsed.task],
+                taskOmittedActualMinutesIds: legacyParsed.omittedActualMinutes ? [legacyParsed.task.id] : []
+            )
+        )
+        restoredSnap = try dbRestored.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let afterLegacyPeer = try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == task.id })
+        XCTAssertEqual(afterLegacyPeer.title, "Deep Architecture Focus Session (Edited on v3.1)")
+        XCTAssertEqual(afterLegacyPeer.actualMinutes, 55)
+
+        var v32PeerMap = legacyPeerMap
+        v32PeerMap["actualMinutes"] = 85
+        v32PeerMap["updatedAt"] = afterLegacyPeer.updatedAt + 10_000
+        let v32Parsed = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(v32PeerMap))
+        XCTAssertFalse(v32Parsed.omittedActualMinutes)
+        XCTAssertEqual(v32Parsed.task.actualMinutes, 85)
+        _ = try dbRestored.applyRemoteDeltas(RemoteDeltaBatch(tasks: [v32Parsed.task]))
+        restoredSnap = try dbRestored.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertEqual(restoredSnap.allOpenTasks.first(where: { $0.id == task.id })?.actualMinutes, 85)
+
+        // 6. All 26 v32_* localization keys exist across all 5 languages
+        let v32Keys = [
+            "v32_cmd_palette_placeholder", "v32_cmd_section_actions", "v32_cmd_plan_my_day",
+            "v32_cmd_ai_architect", "v32_cmd_weekly_review", "v32_cmd_open_templates",
+            "v32_cmd_toggle_theme", "v32_cmd_open_settings", "v32_cmd_zen_focus",
+            "v32_cmd_switch_list", "v32_cmd_switch_board", "v32_cmd_switch_roadmap",
+            "v32_smart_syntax_detected", "v32_smart_syntax_apply", "v32_smart_syntax_hint",
+            "v32_zen_focus_title", "v32_zen_expand_tooltip", "v32_zen_minimize",
+            "v32_zen_short_break", "v32_zen_break_active", "v32_zen_back_to_focus",
+            "v32_reset_actual_time", "v32_cmd_create_task", "v32_actual_focused_short",
+            "v32_actual_vs_estimated", "v32_logbook_focused_7d"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in v32Keys {
+                let text = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertNotEqual(text, key, "Missing v32 key \(key) in \(lang.rawValue)")
                 XCTAssertFalse(text.isEmpty)
             }
         }

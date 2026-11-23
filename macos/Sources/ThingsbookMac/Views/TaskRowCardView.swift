@@ -276,6 +276,50 @@ public struct TaskRowCardView: View {
                             store.setTaskTimeblock(latestTask.id, startMinutes: startMins, durationMinutes: durMins)
                         }
                     }
+
+                    if let actualBadge = store.formattedActualTimeBadge(for: task) {
+                        Menu {
+                            Button(store.tr("v32_reset_actual_time"), role: .destructive) {
+                                store.setTaskActualMinutes(latestTask.id, actualMinutes: nil)
+                            }
+                        } label: {
+                            HStack(spacing: 3.5) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text(actualBadge)
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(ThingsMacPalette.logbookGreen)
+                            .padding(.horizontal, 7.5)
+                            .padding(.vertical, 2.5)
+                            .background(Capsule().fill(ThingsMacPalette.logbookGreen.opacity(0.13)))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .thingsTooltip(actualBadge)
+                    }
+                } else if let actualBadge = store.formattedActualTimeBadge(for: task) {
+                    Menu {
+                        durationMenuItems(for: latestTask)
+                    } label: {
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(actualBadge)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(ThingsMacPalette.logbookGreen)
+                        .padding(.horizontal, 7.5)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(ThingsMacPalette.logbookGreen.opacity(0.13)))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .thingsTooltip(actualBadge)
                 } else if let durPill = task.formattedStandaloneDurationPill {
                     Menu {
                         durationMenuItems(for: latestTask)
@@ -552,7 +596,43 @@ public struct TaskRowCardView: View {
         isInlineQuickEditing = false
         isInlineTitleFocused = false
         var copy = latestTask
-        if copy.title != trimmed {
+        let parsed = store.parseSmartSyntax(trimmed)
+        if parsed.hasAnyMatch {
+            copy.title = parsed.cleanTitle
+            if let sched = parsed.scheduleState {
+                copy.scheduleState = sched
+                copy.whenDate = parsed.whenDate
+            }
+            if let dl = parsed.deadline {
+                copy.deadline = dl
+            }
+            if let dur = parsed.durationMinutes {
+                copy.durationMinutes = dur
+            }
+            if parsed.isMilestone {
+                copy.isMilestone = true
+            }
+            if let proj = parsed.matchedProject {
+                copy.projectId = proj.id
+                copy.headingId = nil
+                copy.areaId = proj.areaId
+                if copy.scheduleState == .inbox && parsed.scheduleState == nil {
+                    copy.scheduleState = .anytime
+                }
+            } else if let area = parsed.matchedArea {
+                copy.projectId = nil
+                copy.headingId = nil
+                copy.areaId = area.id
+                if copy.scheduleState == .inbox && parsed.scheduleState == nil {
+                    copy.scheduleState = .anytime
+                }
+            }
+            var mergedTagIds = copy.tagIds
+            for tid in parsed.matchedTagIds where !mergedTagIds.contains(tid) {
+                mergedTagIds.append(tid)
+            }
+            store.updateTask(copy, tagIds: mergedTagIds)
+        } else if copy.title != trimmed {
             copy.title = trimmed
             store.updateTask(copy)
         }
@@ -771,6 +851,11 @@ public struct TaskRowCardView: View {
         if (targetTask.durationMinutes ?? 0) > 0 {
             Button(store.tr("v30_duration_clear"), role: .destructive) {
                 store.setTaskStandaloneDuration(targetTask.id, durationMinutes: nil)
+            }
+        }
+        if (targetTask.actualMinutes ?? 0) > 0 {
+            Button(store.tr("v32_reset_actual_time"), role: .destructive) {
+                store.setTaskActualMinutes(targetTask.id, actualMinutes: nil)
             }
         }
     }

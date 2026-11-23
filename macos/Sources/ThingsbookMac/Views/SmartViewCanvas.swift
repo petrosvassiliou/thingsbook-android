@@ -206,8 +206,37 @@ public struct SmartViewCanvas: View {
                     todayCapacityBadge(cap.pillText)
                 }
                 planMyDayShortcutPill
+            } else if view == .logbook {
+                let focused7d = store.logbookFocusedMinutesLast7Days
+                if focused7d > 0 {
+                    logbookFocused7dBadge(
+                        store.trf("v32_logbook_focused_7d", TaskItem.formatCompactDuration(focused7d))
+                    )
+                }
             }
         }
+    }
+
+    private func logbookFocused7dBadge(_ pillText: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "clock.badge.checkmark")
+                .font(.system(size: 11, weight: .semibold))
+            Text(pillText)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .foregroundStyle(ThingsMacPalette.logbookGreen)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(ThingsMacPalette.logbookGreen.opacity(0.12))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(ThingsMacPalette.logbookGreen.opacity(0.28), lineWidth: 0.75)
+                )
+        )
     }
 
     private var planMyDayShortcutPill: some View {

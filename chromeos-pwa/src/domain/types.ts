@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.1.2';
-export const APP_BUILD_CODE = 115;
+export const APP_VERSION = '3.2.0';
+export const APP_BUILD_CODE = 116;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -130,6 +130,7 @@ export interface TaskRecord {
   reminderTime: number | null;
   scheduledStartMinutes?: number | null;
   durationMinutes?: number | null;
+  actualMinutes?: number | null;
   isPinned?: boolean;
   isMilestone?: boolean;
   effortLevel?: EffortLevel | null;
@@ -298,6 +299,8 @@ export interface FocusTimerUiState {
   totalSeconds: number;
   remainingSeconds: number;
   isRunning: boolean;
+  sessionFocusedSeconds?: number;
+  isBreakMode?: boolean;
 }
 
 export interface DeviceCalendarInfo {

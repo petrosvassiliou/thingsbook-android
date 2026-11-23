@@ -56,6 +56,8 @@ import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.sortTagsForMode
+import com.pv.thingsbook.domain.parser.ParsedSmartSyntax
+import com.pv.thingsbook.domain.parser.SmartSyntaxParser
 import com.pv.thingsbook.domain.util.runCatchingCancellable
 import com.pv.thingsbook.ui.components.FocusTimerUiState
 import com.pv.thingsbook.ui.components.QuickShareDraft
@@ -311,6 +313,25 @@ class ThingsbookViewModel @Inject constructor(
         runCatching {
             coreSettingsPrefs.edit().putString(PREF_VIEW_SORT_MODE, normalized).apply()
         }
+    }
+
+    private val _themeMode = MutableStateFlow(
+        coreSettingsPrefs.getString("app_theme_mode", "system")?.trim()?.lowercase(Locale.ROOT)
+            ?.takeIf { it in setOf("system", "light", "dark") } ?: "system"
+    )
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+
+    fun cycleThemeMode(): String {
+        val next = when (_themeMode.value) {
+            "system" -> "light"
+            "light" -> "dark"
+            else -> "system"
+        }
+        _themeMode.value = next
+        runCatching {
+            coreSettingsPrefs.edit().putString("app_theme_mode", next).apply()
+        }
+        return next
     }
 
     private fun decodeSavedPerspectives(raw: String?): List<SavedPerspective> {
@@ -910,6 +931,10 @@ class ThingsbookViewModel @Inject constructor(
 
     fun updateTaskStatus(taskId: String, status: TaskStatus) {
         safeVmScope.launch {
+            if (status != TaskStatus.OPEN && _focusTimerState.value?.taskId == taskId) {
+                flushActiveFocusMinutes(roundUpPartialMinute = status == TaskStatus.COMPLETED)
+                stopFocusTimer()
+            }
             val prevEntity = repository.getTaskEntityById(taskId)
             repository.updateTaskStatus(taskId, status)
             if (status != TaskStatus.OPEN) {
@@ -933,6 +958,114 @@ class ThingsbookViewModel @Inject constructor(
                     }
                 }
             }
+        }
+    }
+
+    fun applySmartSyntaxToTask(
+        taskId: String,
+        parsed: ParsedSmartSyntax,
+        latestNotes: String? = null
+    ) {
+        safeVmScope.launch {
+            repository.applySmartSyntaxToTask(
+                taskId = taskId,
+                parsed = parsed,
+                latestNotes = latestNotes
+            )
+        }
+    }
+
+    fun setTaskActualMinutes(taskId: String, actualMinutes: Int?) {
+        safeVmScope.launch {
+            repository.setTaskActualMinutes(taskId, actualMinutes)
+        }
+    }
+
+    fun resetTaskActualMinutes(taskId: String) {
+        setTaskActualMinutes(taskId, null)
+    }
+
+    fun createTaskFromSmartSyntax(rawInput: String) {
+        val trimmedInput = rawInput.trim()
+        if (trimmedInput.isEmpty() || isLockedByBiometric()) return
+        setQuickFindOpen(false)
+        safeVmScope.launch {
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now(zone)
+            val todayEpoch = today.atStartOfDay(zone).toInstant().toEpochMilli()
+            val tomorrowEpoch = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val effectiveLocale = com.pv.thingsbook.ui.theme.resolveEffectiveAppLocale(_appLanguageTag.value)
+
+            val parsed = SmartSyntaxParser.parse(
+                rawTitle = trimmedInput,
+                tags = allTags.value,
+                projects = activeProjects.value,
+                areas = areas.value,
+                locale = effectiveLocale,
+                referenceDate = today
+            )
+
+            val target = _navigationTarget.value
+            val activePerspective = (target as? ActiveNavigationTarget.PerspectiveDetail)?.let { pd ->
+                _savedPerspectives.value.firstOrNull { it.id == pd.perspectiveId }
+            }
+
+            val resolvedProjectId = parsed.matchedProject?.id ?: when (target) {
+                is ActiveNavigationTarget.ProjectDetail -> target.projectId
+                else -> null
+            }
+            val resolvedAreaId = parsed.matchedArea?.id
+                ?: parsed.matchedProject?.areaId
+                ?: when (target) {
+                    is ActiveNavigationTarget.AreaDetail -> target.areaId
+                    is ActiveNavigationTarget.ProjectDetail -> activeProjects.value.find { it.id == target.projectId }?.areaId
+                    is ActiveNavigationTarget.PerspectiveDetail -> activePerspective?.areaId
+                    else -> null
+                }
+
+            val (resolvedSchedule, resolvedWhenDate) = if (parsed.scheduleState != null) {
+                parsed.scheduleState to parsed.whenDate
+            } else if (resolvedProjectId != null || resolvedAreaId != null) {
+                ScheduleState.ANYTIME to null
+            } else {
+                when (target) {
+                    is ActiveNavigationTarget.SmartView -> when (target.type) {
+                        SmartViewType.TODAY -> ScheduleState.TODAY to todayEpoch
+                        SmartViewType.UPCOMING -> ScheduleState.UPCOMING to tomorrowEpoch
+                        SmartViewType.ANYTIME -> ScheduleState.ANYTIME to null
+                        SmartViewType.SOMEDAY -> ScheduleState.SOMEDAY to null
+                        else -> ScheduleState.INBOX to null
+                    }
+                    is ActiveNavigationTarget.PerspectiveDetail -> when (activePerspective?.dueWindow?.uppercase(Locale.ROOT)) {
+                        "TODAY" -> ScheduleState.TODAY to todayEpoch
+                        "NEXT_7_DAYS" -> ScheduleState.UPCOMING to tomorrowEpoch
+                        else -> ScheduleState.ANYTIME to null
+                    }
+                    else -> ScheduleState.ANYTIME to null
+                }
+            }
+
+            val mergedTagIds = if (parsed.matchedTagIds.isNotEmpty()) {
+                parsed.matchedTagIds
+            } else {
+                activePerspective?.categoryIds.orEmpty()
+            }
+
+            repository.createOrUpdateTask(
+                title = parsed.cleanTitle.ifBlank { trimmedInput },
+                notes = "",
+                status = TaskStatus.OPEN,
+                scheduleState = resolvedSchedule,
+                whenDate = resolvedWhenDate,
+                deadline = parsed.deadline,
+                durationMinutes = parsed.durationMinutes ?: activePerspective?.maxDurationMinutes,
+                projectId = resolvedProjectId,
+                areaId = resolvedAreaId,
+                sortOrder = 500.0,
+                isMilestone = if (parsed.isMilestone) true else null,
+                effortLevel = activePerspective?.effortLevel,
+                tagIds = mergedTagIds
+            )
         }
     }
 
@@ -3473,6 +3606,10 @@ class ThingsbookViewModel @Inject constructor(
     fun dismissTopmostOverlay(): Boolean {
         if (isLockedByBiometric()) return true
         return when {
+            _isZenFocusModeOpen.value -> {
+                _isZenFocusModeOpen.value = false
+                true
+            }
             _uiErrorMessage.value != null -> {
                 _uiErrorMessage.value = null
                 true
@@ -3566,7 +3703,8 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun hasOpenModalOrOverlay(): Boolean {
-        return _uiErrorMessage.value != null ||
+        return _isZenFocusModeOpen.value ||
+            _uiErrorMessage.value != null ||
             _pendingProjectDeletePrompt.value != null ||
             _pendingProjectCompletePrompt.value != null ||
             _quickShareDraft.value != null ||
@@ -4065,10 +4203,36 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
-    // Focus / Pomodoro Timer (25m)
+    // Focus / Pomodoro Timer (25m) + v3.2 Zen Focus Mode & actualMinutes tracking
     private val _focusTimerState = MutableStateFlow<FocusTimerUiState?>(null)
     val focusTimerState: StateFlow<FocusTimerUiState?> = _focusTimerState.asStateFlow()
     private var focusTimerJob: Job? = null
+
+    private val _isZenFocusModeOpen = MutableStateFlow(false)
+    val isZenFocusModeOpen: StateFlow<Boolean> = _isZenFocusModeOpen.asStateFlow()
+
+    fun setZenFocusModeOpen(open: Boolean) {
+        _isZenFocusModeOpen.value = if (open) _focusTimerState.value != null else false
+    }
+
+    private fun flushActiveFocusMinutes(roundUpPartialMinute: Boolean) {
+        val current = _focusTimerState.value ?: return
+        if (current.isBreakMode) return
+        val secs = current.sessionFocusedSeconds
+        if (secs <= 0) return
+        _focusTimerState.value = current.copy(sessionFocusedSeconds = 0)
+        val earned = if (roundUpPartialMinute && secs >= 30) {
+            maxOf(1, (secs + 30) / 60)
+        } else {
+            (secs + 30) / 60
+        }
+        if (earned > 0) {
+            val targetTaskId = current.taskId
+            safeVmScope.launch {
+                repository.addTaskActualMinutes(targetTaskId, earned)
+            }
+        }
+    }
 
     private fun findLoadedTaskDurationMinutes(taskId: String): Int? {
         return (allOpenTasks.value.firstOrNull { it.id == taskId }
@@ -4084,6 +4248,7 @@ class ThingsbookViewModel @Inject constructor(
     }
 
     fun startFocusTimer(taskId: String, taskTitle: String, durationMinutes: Int? = null) {
+        flushActiveFocusMinutes(roundUpPartialMinute = false)
         focusTimerJob?.cancel()
         val resolvedMins = (durationMinutes
             ?: findLoadedTaskDurationMinutes(taskId)
@@ -4094,11 +4259,42 @@ class ThingsbookViewModel @Inject constructor(
             taskTitle = taskTitle,
             totalSeconds = totalSecs,
             remainingSeconds = totalSecs,
-            isPaused = false
+            isPaused = false,
+            sessionFocusedSeconds = 0,
+            isBreakMode = false
         )
         _focusTimerState.value = initial
         reminderScheduler.showOrUpdateFocusTimerNotification(taskId, taskTitle, totalSecs, false)
         startFocusTimerTicker()
+    }
+
+    fun startZenShortBreak() {
+        val current = _focusTimerState.value ?: return
+        flushActiveFocusMinutes(roundUpPartialMinute = false)
+        focusTimerJob?.cancel()
+        val breakSeconds = 5 * 60
+        val breakState = FocusTimerUiState(
+            taskId = current.taskId,
+            taskTitle = current.taskTitle,
+            totalSeconds = breakSeconds,
+            remainingSeconds = breakSeconds,
+            isPaused = false,
+            sessionFocusedSeconds = 0,
+            isBreakMode = true
+        )
+        _focusTimerState.value = breakState
+        reminderScheduler.showOrUpdateFocusTimerNotification(
+            breakState.taskId,
+            breakState.taskTitle,
+            breakSeconds,
+            false
+        )
+        startFocusTimerTicker()
+    }
+
+    fun resumeFocusFromBreak(durationMinutes: Int? = null) {
+        val current = _focusTimerState.value ?: return
+        startFocusTimer(current.taskId, current.taskTitle, durationMinutes)
     }
 
     private fun startFocusTimerTicker() {
@@ -4109,12 +4305,26 @@ class ThingsbookViewModel @Inject constructor(
                 val current = _focusTimerState.value ?: break
                 if (current.isPaused) continue
                 val nextRemaining = current.remainingSeconds - 1
+                val nextFocusedSeconds = if (!current.isBreakMode) {
+                    current.sessionFocusedSeconds + 1
+                } else {
+                    current.sessionFocusedSeconds
+                }
                 if (nextRemaining <= 0) {
+                    _focusTimerState.value = current.copy(
+                        remainingSeconds = 0,
+                        sessionFocusedSeconds = nextFocusedSeconds
+                    )
+                    flushActiveFocusMinutes(roundUpPartialMinute = true)
                     _focusTimerState.value = null
+                    _isZenFocusModeOpen.value = false
                     reminderScheduler.showFocusTimerFinishedNotification(current.taskId, current.taskTitle)
                     break
                 } else {
-                    val updated = current.copy(remainingSeconds = nextRemaining)
+                    val updated = current.copy(
+                        remainingSeconds = nextRemaining,
+                        sessionFocusedSeconds = nextFocusedSeconds
+                    )
                     _focusTimerState.value = updated
                     if (nextRemaining % 5 == 0 || nextRemaining <= 10) {
                         reminderScheduler.showOrUpdateFocusTimerNotification(
@@ -4158,14 +4368,17 @@ class ThingsbookViewModel @Inject constructor(
 
     fun completeFocusTimerTask() {
         val current = _focusTimerState.value ?: return
+        flushActiveFocusMinutes(roundUpPartialMinute = true)
         stopFocusTimer()
         updateTaskStatus(current.taskId, TaskStatus.COMPLETED)
     }
 
     fun stopFocusTimer() {
+        flushActiveFocusMinutes(roundUpPartialMinute = false)
         focusTimerJob?.cancel()
         focusTimerJob = null
         _focusTimerState.value = null
+        _isZenFocusModeOpen.value = false
         reminderScheduler.cancelFocusTimerNotification()
     }
 
@@ -4224,28 +4437,52 @@ class ThingsbookViewModel @Inject constructor(
         _quickShareDraft.value = null
         safeVmScope.launch {
             val zone = ZoneId.systemDefault()
-            val todayEpoch = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
-            val whenDate = if (scheduleState == ScheduleState.TODAY || scheduleState == ScheduleState.THIS_EVENING) {
+            val today = LocalDate.now(zone)
+            val todayEpoch = today.atStartOfDay(zone).toInstant().toEpochMilli()
+            val effectiveLocale = com.pv.thingsbook.ui.theme.resolveEffectiveAppLocale(_appLanguageTag.value)
+            val parsed = SmartSyntaxParser.parse(
+                rawTitle = cleanTitle,
+                tags = allTags.value,
+                projects = activeProjects.value,
+                areas = areas.value,
+                locale = effectiveLocale,
+                referenceDate = today
+            )
+            val finalTitle = parsed.cleanTitle.ifBlank { cleanTitle }
+            val effectiveProjectId = parsed.matchedProject?.id ?: projectId
+            val effectiveAreaId = parsed.matchedArea?.id ?: parsed.matchedProject?.areaId ?: areaId
+            val effectiveSchedule = parsed.scheduleState ?: scheduleState
+            val whenDate = if (parsed.scheduleState != null) {
+                parsed.whenDate
+            } else if (effectiveSchedule == ScheduleState.TODAY || effectiveSchedule == ScheduleState.THIS_EVENING) {
                 todayEpoch
-            } else null
+            } else {
+                null
+            }
             val createdId = repository.createOrUpdateTask(
-                title = cleanTitle,
+                title = finalTitle,
                 notes = notes,
                 status = TaskStatus.OPEN,
-                scheduleState = scheduleState,
+                scheduleState = effectiveSchedule,
                 whenDate = whenDate,
-                projectId = projectId,
-                areaId = areaId,
-                sortOrder = 500.0
+                deadline = parsed.deadline,
+                durationMinutes = parsed.durationMinutes,
+                projectId = effectiveProjectId,
+                areaId = effectiveAreaId,
+                sortOrder = 500.0,
+                isMilestone = if (parsed.isMilestone) true else null,
+                tagIds = parsed.matchedTagIds
             )
             when {
-                projectId != null -> _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(projectId)
-                areaId != null -> _navigationTarget.value = ActiveNavigationTarget.AreaDetail(areaId)
-                scheduleState == ScheduleState.INBOX -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
-                scheduleState == ScheduleState.TODAY || scheduleState == ScheduleState.THIS_EVENING ->
+                effectiveProjectId != null -> _navigationTarget.value = ActiveNavigationTarget.ProjectDetail(effectiveProjectId)
+                effectiveAreaId != null -> _navigationTarget.value = ActiveNavigationTarget.AreaDetail(effectiveAreaId)
+                effectiveSchedule == ScheduleState.INBOX -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.INBOX)
+                effectiveSchedule == ScheduleState.TODAY || effectiveSchedule == ScheduleState.THIS_EVENING ->
                     _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.TODAY)
-                scheduleState == ScheduleState.ANYTIME -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME)
-                scheduleState == ScheduleState.SOMEDAY -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY)
+                effectiveSchedule == ScheduleState.UPCOMING ->
+                    _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)
+                effectiveSchedule == ScheduleState.ANYTIME -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME)
+                effectiveSchedule == ScheduleState.SOMEDAY -> _navigationTarget.value = ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY)
                 else -> Unit
             }
             _expandedTaskId.value = createdId

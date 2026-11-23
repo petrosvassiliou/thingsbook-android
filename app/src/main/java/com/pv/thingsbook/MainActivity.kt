@@ -112,8 +112,14 @@ class MainActivity : AppCompatActivity() {
     private fun mountComposeContent() {
         try {
             setContent {
-                Things3Theme {
-                    val viewModel: ThingsbookViewModel = hiltViewModel()
+                val viewModel: ThingsbookViewModel = hiltViewModel()
+                val themeMode by viewModel.themeMode.collectAsState()
+                val resolvedDarkTheme = when (themeMode) {
+                    "light" -> false
+                    "dark" -> true
+                    else -> androidx.compose.foundation.isSystemInDarkTheme()
+                }
+                Things3Theme(darkTheme = resolvedDarkTheme) {
                     val appLanguageTag by viewModel.appLanguageTag.collectAsState()
                     LaunchedEffect(viewModel) {
                         externalLocaleSyncCallback = { viewModel.syncAppLanguageFromSystemIfIdle() }

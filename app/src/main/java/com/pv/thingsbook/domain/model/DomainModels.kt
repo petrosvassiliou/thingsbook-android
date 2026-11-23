@@ -148,6 +148,7 @@ data class TaskItem(
     val reminderTime: Long?,
     val scheduledStartMinutes: Int? = null,
     val durationMinutes: Int? = null,
+    val actualMinutes: Int? = null,
     val completedAt: Long?,
     val projectId: String?,
     val headingId: String?,

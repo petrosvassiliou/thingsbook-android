@@ -51,6 +51,9 @@ public final class ThingsbookStore: ObservableObject {
             if oldValue.viewSortMode != preferences.viewSortMode {
                 applyViewSortToLoadedTasks()
             }
+            if oldValue.themeMode != preferences.themeMode {
+                applyThemeModeToApp()
+            }
         }
     }
     @Published public var selectedDestination: NavigationDestination = .smartView(.today) {
@@ -178,6 +181,7 @@ public final class ThingsbookStore: ObservableObject {
     // MARK: - Undo, Focus Timer, Sync, Calendar, Lock & Updates
     @Published public var undoBanner: UndoBannerState? = nil
     @Published public var focusTimer: FocusTimerState? = nil
+    @Published public var isZenFocusPresented: Bool = false
     @Published public var syncSnapshot = CloudSyncSnapshot()
     @Published public var calendarEvents: [CalendarEventItem] = []
     @Published public private(set) var calendarNowMillis: Int64 = Int64(Date().timeIntervalSince1970 * 1000.0)
@@ -241,6 +245,7 @@ public final class ThingsbookStore: ObservableObject {
         try? db.seedIfEmpty(languageCode: prefs.language.resolvedCode)
         _ = try? db.performMidnightRollover()
         reloadSnapshot()
+        applyThemeModeToApp()
 
         if prefs.biometricLockEnabled {
             self.isLocked = true
@@ -870,6 +875,71 @@ public final class ThingsbookStore: ObservableObject {
     public var completedTasksLast7DaysCount: Int {
         let cutoff = Int64(Date().addingTimeInterval(-7 * 86_400).timeIntervalSince1970 * 1000.0)
         return logbookTasks.filter { ($0.completedAt ?? 0) >= cutoff && $0.status == .completed }.count
+    }
+
+    public var logbookFocusedMinutesLast7Days: Int {
+        let cutoff = Int64(Date().addingTimeInterval(-7 * 86_400).timeIntervalSince1970 * 1000.0)
+        return logbookTasks
+            .filter { ($0.completedAt ?? $0.updatedAt) >= cutoff && $0.status == .completed }
+            .compactMap(\.actualMinutes)
+            .filter { $0 > 0 }
+            .reduce(0, +)
+    }
+
+    public func formattedActualTimeBadge(for task: TaskItem, extraLiveSeconds: Int = 0) -> String? {
+        let baseActual = max(0, task.actualMinutes ?? 0)
+        let liveExtra = max(0, extraLiveSeconds) / 60
+        let totalActual = baseActual + liveExtra
+        guard totalActual > 0 else { return nil }
+        let actualFmt = TaskItem.formatCompactDuration(totalActual)
+        if let est = task.durationMinutes, est > 0 {
+            let estFmt = TaskItem.formatCompactDuration(est)
+            return trf("v32_actual_vs_estimated", actualFmt, estFmt)
+        }
+        return trf("v32_actual_focused_short", actualFmt)
+    }
+
+    public func setTaskActualMinutes(_ taskId: String, actualMinutes: Int?) {
+        flushModalDraftsIfNeeded()
+        try? database.setTaskActualMinutes(taskId: taskId, actualMinutes: actualMinutes)
+    }
+
+    public var resolvedColorScheme: ColorScheme? {
+        switch preferences.themeMode.lowercased() {
+        case "light":
+            return .light
+        case "dark":
+            return .dark
+        default:
+            return nil
+        }
+    }
+
+    public func applyThemeModeToApp() {
+        guard let app = NSApp else { return }
+        switch preferences.themeMode.lowercased() {
+        case "light":
+            app.appearance = NSAppearance(named: .aqua)
+        case "dark":
+            app.appearance = NSAppearance(named: .darkAqua)
+        default:
+            app.appearance = nil
+        }
+    }
+
+    public func cycleThemeMode() {
+        let nextMode: String
+        switch preferences.themeMode.lowercased() {
+        case "system":
+            nextMode = "light"
+        case "light":
+            nextMode = "dark"
+        default:
+            nextMode = "system"
+        }
+        var nextPrefs = preferences
+        nextPrefs.themeMode = nextMode
+        preferences = nextPrefs
     }
 
     public func markProjectReviewed(_ projectId: String) {
@@ -1618,13 +1688,125 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
+    public func parseSmartSyntax(_ rawTitle: String, referenceDate: Date = Date()) -> ParsedSmartSyntax {
+        SmartSyntaxParser.parse(
+            rawTitle,
+            tags: tags,
+            projects: projects,
+            areas: areas,
+            locale: preferences.language.locale,
+            referenceDate: referenceDate
+        )
+    }
+
+    @discardableResult
+    public func createTaskFromSmartSyntax(_ rawInput: String) -> TaskItem? {
+        let parsed = parseSmartSyntax(rawInput)
+        let cleanTitle = parsed.cleanTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return nil }
+
+        let todayEpoch = DateEpochConverter.startOfDayMillis(for: Date())
+        var sched: ScheduleState = .inbox
+        var whenMillis: Int64? = nil
+        var projId: String? = nil
+        var areaId: String? = nil
+        var tagIds: [String] = []
+
+        switch selectedDestination {
+        case .smartView(.today):
+            sched = .today
+            whenMillis = todayEpoch
+        case .smartView(.anytime):
+            sched = .anytime
+        case .smartView(.someday):
+            sched = .someday
+        case .project(let pid):
+            if let proj = project(byId: pid), proj.status == .active, !proj.isDeleted {
+                sched = .anytime
+                projId = proj.id
+                areaId = proj.areaId
+            }
+        case .area(let aid):
+            if let area = area(byId: aid), !area.isDeleted {
+                sched = .anytime
+                areaId = area.id
+            }
+        case .perspective(let pid):
+            if let p = perspective(byId: pid) {
+                let dw = p.dueWindow.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if dw == "TODAY" {
+                    sched = .today
+                    whenMillis = todayEpoch
+                } else if dw == "SOMEDAY" {
+                    sched = .someday
+                } else if dw == "INBOX" {
+                    sched = .inbox
+                } else {
+                    sched = .anytime
+                }
+                areaId = p.areaId
+                tagIds = p.categoryIds
+            }
+        default:
+            sched = .inbox
+        }
+
+        if let matchedProj = parsed.matchedProject {
+            projId = matchedProj.id
+            areaId = matchedProj.areaId
+            if parsed.scheduleState == nil && sched == .inbox {
+                sched = .anytime
+            }
+        } else if let matchedArea = parsed.matchedArea {
+            projId = nil
+            areaId = matchedArea.id
+            if parsed.scheduleState == nil && sched == .inbox {
+                sched = .anytime
+            }
+        }
+
+        if let explicitSched = parsed.scheduleState {
+            sched = explicitSched
+            whenMillis = parsed.whenDate
+        }
+
+        if let activeFilterTag = selectedFilterTagId, !tagIds.contains(activeFilterTag) {
+            tagIds.append(activeFilterTag)
+        }
+        for tid in parsed.matchedTagIds where !tagIds.contains(tid) {
+            tagIds.append(tid)
+        }
+
+        guard let created = try? database.createTask(
+            title: cleanTitle,
+            notes: "",
+            scheduleState: sched,
+            whenDate: whenMillis,
+            deadline: parsed.deadline,
+            durationMinutes: parsed.durationMinutes,
+            projectId: projId,
+            areaId: areaId,
+            tagIds: tagIds,
+            isMilestone: parsed.isMilestone
+        ) else {
+            return nil
+        }
+
+        NotificationReminderService.shared.syncTaskReminder(created, lang: preferences.language)
+        showToast(tr("macos_quick_share_saved"))
+        return created
+    }
+
     public func quickCaptureTask(
         title: String,
         notes: String,
         destination: QuickShareDestination,
+        scheduleStateOverride: ScheduleState? = nil,
         whenDate: Int64? = nil,
         deadline: Int64? = nil,
-        tagIds: [String] = []
+        durationMinutes: Int? = nil,
+        tagIds: [String] = [],
+        isMilestone: Bool = false
     ) {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return }
@@ -1657,15 +1839,22 @@ public final class ThingsbookStore: ObservableObject {
             areaId = project(byId: pid)?.areaId
         }
 
+        if let scheduleStateOverride {
+            sched = scheduleStateOverride
+            resolvedWhen = whenDate ?? ((scheduleStateOverride == .today || scheduleStateOverride == .thisEvening) ? todayEpoch : nil)
+        }
+
         if let task = try? database.createTask(
             title: cleanTitle,
             notes: notes,
             scheduleState: sched,
             whenDate: resolvedWhen,
             deadline: deadline,
+            durationMinutes: durationMinutes,
             projectId: projId,
             areaId: areaId,
-            tagIds: tagIds
+            tagIds: tagIds,
+            isMilestone: isMilestone
         ) {
             NotificationReminderService.shared.syncTaskReminder(task, lang: preferences.language)
             showToast(tr("macos_quick_share_saved"))
@@ -1678,6 +1867,9 @@ public final class ThingsbookStore: ObservableObject {
         flushModalDraftsIfNeeded()
         let fresh = self.taskIncludingTrash(byId: task.id) ?? task
         let nextStatus: TaskStatus = (fresh.status == .completed) ? .open : .completed
+        if nextStatus == .completed && focusTimer?.taskId == fresh.id {
+            flushActiveFocusMinutes(roundUpPartial: true)
+        }
         let spawnedId = (try? database.setTaskStatus(taskId: fresh.id, status: nextStatus)) ?? nil
         reloadSnapshot()
         if nextStatus == .completed {
@@ -2339,10 +2531,49 @@ public final class ThingsbookStore: ObservableObject {
         }
     }
 
-    // MARK: - 25m Focus Pomodoro Timer
+    // MARK: - 25m Focus Pomodoro Timer & Zen Focus Mode
+
+    private func flushActiveFocusMinutes(roundUpPartial: Bool) {
+        guard var ft = focusTimer else { return }
+        let secs = max(0, ft.sessionFocusedSeconds)
+        ft.sessionFocusedSeconds = 0
+        focusTimer = ft
+        guard !ft.isBreakMode, secs > 0 else { return }
+        let earned = (roundUpPartial && secs >= 30) ? max(1, (secs + 30) / 60) : ((secs + 30) / 60)
+        if earned > 0 {
+            try? database.addTaskActualMinutes(taskId: ft.taskId, deltaMinutes: earned)
+            reloadSnapshot()
+        }
+    }
+
+    private func scheduleFocusTickTimer() {
+        focusTimerCancellable?.invalidate()
+        focusTimerCancellable = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, var ft = self.focusTimer, !ft.isPaused else { return }
+                if !ft.isBreakMode {
+                    ft.sessionFocusedSeconds += 1
+                }
+                if ft.remainingSeconds > 1 {
+                    ft.remainingSeconds -= 1
+                    self.focusTimer = ft
+                } else {
+                    ft.remainingSeconds = 0
+                    self.focusTimer = ft
+                    self.focusTimerCancellable?.invalidate()
+                    self.focusTimerCancellable = nil
+                    if !ft.isBreakMode {
+                        self.flushActiveFocusMinutes(roundUpPartial: true)
+                        NotificationReminderService.shared.postFocusTimerCompleted(taskTitle: ft.taskTitle, lang: self.preferences.language)
+                    }
+                }
+            }
+        }
+    }
 
     public func startFocusTimer(for task: TaskItem) {
         flushModalDraftsIfNeeded()
+        flushActiveFocusMinutes(roundUpPartial: true)
         focusTimerCancellable?.invalidate()
         let fresh = self.taskIncludingTrash(byId: task.id) ?? task
         let title = fresh.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("macos_untitled_todo") : fresh.title
@@ -2352,21 +2583,48 @@ public final class ThingsbookStore: ObservableObject {
             taskId: fresh.id,
             taskTitle: title,
             remainingSeconds: durationSeconds,
-            totalSeconds: durationSeconds
+            totalSeconds: durationSeconds,
+            isPaused: false,
+            sessionFocusedSeconds: 0,
+            isBreakMode: false
         )
-        focusTimerCancellable = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, var ft = self.focusTimer, !ft.isPaused else { return }
-                if ft.remainingSeconds > 1 {
-                    ft.remainingSeconds -= 1
-                    self.focusTimer = ft
-                } else {
-                    ft.remainingSeconds = 0
-                    self.focusTimer = ft
-                    self.focusTimerCancellable?.invalidate()
-                    NotificationReminderService.shared.postFocusTimerCompleted(taskTitle: ft.taskTitle, lang: self.preferences.language)
-                }
-            }
+        scheduleFocusTickTimer()
+    }
+
+    public func startZenShortBreak() {
+        guard let currentFt = focusTimer else { return }
+        flushActiveFocusMinutes(roundUpPartial: true)
+        focusTimerCancellable?.invalidate()
+        let breakSeconds = 5 * 60
+        focusTimer = FocusTimerState(
+            taskId: currentFt.taskId,
+            taskTitle: currentFt.taskTitle,
+            remainingSeconds: breakSeconds,
+            totalSeconds: breakSeconds,
+            isPaused: false,
+            sessionFocusedSeconds: 0,
+            isBreakMode: true
+        )
+        scheduleFocusTickTimer()
+    }
+
+    public func resumeFocusFromBreak() {
+        guard let currentFt = focusTimer else { return }
+        if let task = taskIncludingTrash(byId: currentFt.taskId), !task.isDeleted {
+            startFocusTimer(for: task)
+        } else {
+            focusTimerCancellable?.invalidate()
+            let durationSeconds = 25 * 60
+            focusTimer = FocusTimerState(
+                taskId: currentFt.taskId,
+                taskTitle: currentFt.taskTitle,
+                remainingSeconds: durationSeconds,
+                totalSeconds: durationSeconds,
+                isPaused: false,
+                sessionFocusedSeconds: 0,
+                isBreakMode: false
+            )
+            scheduleFocusTickTimer()
         }
     }
 
@@ -2380,13 +2638,20 @@ public final class ThingsbookStore: ObservableObject {
         guard var ft = focusTimer else { return }
         ft.remainingSeconds += 5 * 60
         ft.totalSeconds += 5 * 60
+        if focusTimerCancellable == nil && ft.remainingSeconds > 0 {
+            scheduleFocusTickTimer()
+        }
         focusTimer = ft
     }
 
     public func stopFocusTimer() {
+        flushActiveFocusMinutes(roundUpPartial: true)
         focusTimerCancellable?.invalidate()
         focusTimerCancellable = nil
-        withAnimation { focusTimer = nil }
+        withAnimation {
+            isZenFocusPresented = false
+            focusTimer = nil
+        }
     }
 
     // MARK: - Cloud Sync & Calendar

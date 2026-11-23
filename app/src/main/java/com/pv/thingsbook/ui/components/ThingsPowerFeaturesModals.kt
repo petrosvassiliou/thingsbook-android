@@ -16,37 +16,53 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloseFullscreen
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Coffee
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RestoreFromTrash
@@ -56,6 +72,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -76,18 +93,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pv.thingsbook.R
 import com.pv.thingsbook.domain.model.Area
+import com.pv.thingsbook.domain.model.ChecklistItem
 import com.pv.thingsbook.domain.model.Project
 import com.pv.thingsbook.domain.model.ScheduleState
+import com.pv.thingsbook.domain.model.Tag
+import com.pv.thingsbook.domain.model.TaskItem
+import com.pv.thingsbook.domain.model.formatDurationCompact
+import com.pv.thingsbook.domain.parser.ParsedSmartSyntax
+import com.pv.thingsbook.domain.parser.SmartSyntaxParser
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import java.util.Locale
 
@@ -102,14 +135,143 @@ data class FocusTimerUiState(
     val taskTitle: String,
     val totalSeconds: Int = 25 * 60,
     val remainingSeconds: Int = 25 * 60,
-    val isPaused: Boolean = false
+    val isPaused: Boolean = false,
+    val sessionFocusedSeconds: Int = 0,
+    val isBreakMode: Boolean = false
 )
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SmartSyntaxPreviewChipsRow(
+    parsed: ParsedSmartSyntax,
+    showDetectedPrefix: Boolean = true,
+    onApply: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    if (!parsed.hasAnyMatch) return
+    val colors = ThingsTheme.colors
+
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        if (showDetectedPrefix) {
+            Text(
+                text = "${stringResource(R.string.v32_smart_syntax_detected)}:",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.secondaryText,
+                modifier = Modifier.padding(top = 4.dp, end = 2.dp)
+            )
+        }
+
+        if (parsed.scheduleState != null) {
+            val whenText = parsed.whenLabel ?: when (parsed.scheduleState) {
+                ScheduleState.TODAY -> stringResource(R.string.view_today)
+                ScheduleState.THIS_EVENING -> stringResource(R.string.view_this_evening)
+                ScheduleState.UPCOMING -> stringResource(R.string.view_upcoming)
+                ScheduleState.ANYTIME -> stringResource(R.string.view_anytime)
+                ScheduleState.SOMEDAY -> stringResource(R.string.view_someday)
+                ScheduleState.INBOX -> stringResource(R.string.view_inbox)
+            }
+            ThingsTagPill(
+                title = "📅 $whenText",
+                containerColor = colors.thingsBlueSoft,
+                contentColor = colors.thingsBlue,
+                borderColor = colors.thingsBlue.copy(alpha = 0.35f)
+            )
+        }
+
+        if (parsed.deadline != null) {
+            ThingsTagPill(
+                title = "🏁 ${parsed.deadlineLabel.orEmpty()}",
+                containerColor = colors.deadlineSoftBg,
+                contentColor = colors.deadlineUrgentRed,
+                borderColor = colors.deadlineUrgentRed.copy(alpha = 0.35f)
+            )
+        }
+
+        if (parsed.durationMinutes != null) {
+            val durFmt = formatDurationCompact(parsed.durationMinutes) ?: "${parsed.durationMinutes}m"
+            ThingsTagPill(
+                title = "⏱ $durFmt",
+                containerColor = colors.thingsBlueSoft,
+                contentColor = colors.thingsBlue,
+                borderColor = colors.thingsBlue.copy(alpha = 0.35f)
+            )
+        }
+
+        if (parsed.isMilestone) {
+            ThingsTagPill(
+                title = "◆ ${stringResource(R.string.v30_milestone_label)}",
+                containerColor = colors.milestoneVioletSoft,
+                contentColor = colors.milestoneViolet,
+                borderColor = colors.milestoneViolet.copy(alpha = 0.45f)
+            )
+        }
+
+        parsed.matchedProject?.let { proj ->
+            ThingsTagPill(
+                title = "📁 ${proj.title}",
+                containerColor = colors.thingsBlueSoft,
+                contentColor = colors.thingsBlue,
+                borderColor = colors.thingsBlue.copy(alpha = 0.35f)
+            )
+        }
+
+        parsed.matchedArea?.let { area ->
+            ThingsTagPill(
+                title = "📦 ${area.title}",
+                containerColor = colors.thingsBlueSoft,
+                contentColor = colors.thingsBlue,
+                borderColor = colors.thingsBlue.copy(alpha = 0.35f)
+            )
+        }
+
+        parsed.matchedTags.forEach { tag ->
+            ThingsTagPill(
+                title = "#${tag.title}"
+            )
+        }
+
+        if (onApply != null) {
+            Surface(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onApply),
+                shape = RoundedCornerShape(8.dp),
+                color = colors.thingsBlue,
+                border = BorderStroke(0.75.dp, colors.thingsBlue)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(12.5.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.v32_smart_syntax_apply),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun ThingsQuickShareModal(
     draft: QuickShareDraft,
     projects: List<Project>,
     areas: List<Area>,
+    tags: List<Tag> = emptyList(),
+    locale: Locale = Locale.getDefault(),
     isSmartParsingGemini: Boolean = false,
     onDismiss: () -> Unit,
     onSmartParseWithGemini: ((spokenDump: String, scheduleState: ScheduleState, projectId: String?, areaId: String?) -> Unit)? = null,
@@ -236,6 +398,28 @@ fun ThingsQuickShareModal(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                val parsedQuickShareSyntax = remember(title, tags, projects, areas, locale) {
+                    SmartSyntaxParser.parse(
+                        rawTitle = title,
+                        tags = tags,
+                        projects = projects,
+                        areas = areas,
+                        locale = locale
+                    )
+                }
+                if (parsedQuickShareSyntax.hasAnyMatch) {
+                    SmartSyntaxPreviewChipsRow(
+                        parsed = parsedQuickShareSyntax,
+                        showDetectedPrefix = true
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.v32_smart_syntax_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.secondaryText
+                    )
+                }
 
                 OutlinedTextField(
                     value = notes,
@@ -463,6 +647,7 @@ fun ThingsFocusTimerBanner(
     onCompleteTask: () -> Unit,
     onStopTimer: () -> Unit,
     onClickTask: () -> Unit,
+    onOpenZenMode: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = ThingsTheme.colors
@@ -474,14 +659,18 @@ fun ThingsFocusTimerBanner(
     val progress = if (timerState.totalSeconds > 0) {
         1f - (timerState.remainingSeconds.toFloat() / timerState.totalSeconds.toFloat()).coerceIn(0f, 1f)
     } else 0f
+    val bannerAccent = if (timerState.isBreakMode) colors.logbookGreen else colors.thingsBlue
+    val activeModeLabel = stringResource(
+        if (timerState.isBreakMode) R.string.v32_zen_break_active else R.string.focus_timer_active_label
+    )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(14.dp))
-            .background(colors.thingsBlue.copy(alpha = 0.12f))
-            .border(1.dp, colors.thingsBlue.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
+            .background(bannerAccent.copy(alpha = 0.12f))
+            .border(1.dp, bannerAccent.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
             .clickable(onClick = onClickTask)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -497,16 +686,16 @@ fun ThingsFocusTimerBanner(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Timer,
-                    contentDescription = stringResource(R.string.focus_timer_active_label),
-                    tint = colors.thingsBlue,
+                    imageVector = if (timerState.isBreakMode) Icons.Outlined.Coffee else Icons.Outlined.Timer,
+                    contentDescription = activeModeLabel,
+                    tint = bannerAccent,
                     modifier = Modifier.size(18.dp)
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(R.string.focus_timer_active_label),
+                        text = activeModeLabel,
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.thingsBlue
+                        color = bannerAccent
                     )
                     Text(
                         text = timerState.taskTitle.ifBlank { stringResource(R.string.entity_todo) },
@@ -528,9 +717,23 @@ fun ThingsFocusTimerBanner(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold
                     ),
-                    color = colors.thingsBlue,
+                    color = bannerAccent,
                     modifier = Modifier.padding(end = 4.dp)
                 )
+
+                if (onOpenZenMode != null) {
+                    val zenTooltip = stringResource(R.string.v32_zen_expand_tooltip)
+                    ThingsHoverTooltip(text = zenTooltip) {
+                        IconButton(onClick = onOpenZenMode, modifier = Modifier.size(30.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.OpenInFull,
+                                contentDescription = zenTooltip,
+                                tint = bannerAccent,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                }
 
                 val pauseResumeTooltip = if (timerState.isPaused) {
                     stringResource(R.string.focus_timer_resume)
@@ -594,9 +797,529 @@ fun ThingsFocusTimerBanner(
                 .fillMaxWidth()
                 .height(3.dp)
                 .clip(RoundedCornerShape(2.dp)),
-            color = colors.thingsBlue,
-            trackColor = colors.thingsBlue.copy(alpha = 0.18f)
+            color = bannerAccent,
+            trackColor = bannerAccent.copy(alpha = 0.18f)
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ThingsZenFocusOverlay(
+    timerState: FocusTimerUiState,
+    activeTask: TaskItem?,
+    onMinimize: () -> Unit,
+    onTogglePause: () -> Unit,
+    onAddFiveMinutes: () -> Unit,
+    onStartShortBreak: () -> Unit,
+    onResumeFocusFromBreak: () -> Unit,
+    onCompleteTask: () -> Unit,
+    onStopTimer: () -> Unit,
+    onToggleChecklistItem: (itemId: String, completed: Boolean) -> Unit,
+    onAddChecklistItem: (title: String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = ThingsTheme.colors
+    val mins = (timerState.remainingSeconds.coerceAtLeast(0)) / 60
+    val secs = (timerState.remainingSeconds.coerceAtLeast(0)) % 60
+    val formattedTime = remember(mins, secs) {
+        String.format(Locale.US, "%02d:%02d", mins, secs)
+    }
+    val progress = if (timerState.totalSeconds > 0) {
+        1f - (timerState.remainingSeconds.toFloat() / timerState.totalSeconds.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+
+    val accentColor = if (timerState.isBreakMode) colors.logbookGreen else colors.thingsBlue
+    val accentSoftBg = if (timerState.isBreakMode) {
+        colors.logbookGreen.copy(alpha = 0.14f)
+    } else {
+        colors.thingsBlueSoft
+    }
+
+    val liveFocusedMinutes = (activeTask?.actualMinutes ?: 0) +
+        (if (!timerState.isBreakMode) timerState.sessionFocusedSeconds / 60 else 0)
+    val estimatedMinutes = activeTask?.durationMinutes?.takeIf { it > 0 }
+    val focusedPillText = when {
+        estimatedMinutes != null -> stringResource(
+            R.string.v32_actual_vs_estimated,
+            formatDurationCompact(liveFocusedMinutes.coerceAtLeast(0)) ?: "${liveFocusedMinutes}m",
+            formatDurationCompact(estimatedMinutes) ?: "${estimatedMinutes}m"
+        )
+        liveFocusedMinutes > 0 -> stringResource(
+            R.string.v32_actual_focused_short,
+            formatDurationCompact(liveFocusedMinutes) ?: "${liveFocusedMinutes}m"
+        )
+        else -> null
+    }
+
+    var newSubtaskDraft by remember(timerState.taskId) { mutableStateOf("") }
+    val activeChecklistItems = remember(activeTask?.checklistItems) {
+        activeTask?.checklistItems
+            ?.filter { !it.isDeleted }
+            ?.sortedWith(compareBy<ChecklistItem> { it.sortOrder }.thenBy { it.createdAt })
+            .orEmpty()
+    }
+    val submitNewSubtask = {
+        val clean = newSubtaskDraft.trim()
+        if (clean.isNotEmpty()) {
+            onAddChecklistItem(clean)
+            newSubtaskDraft = ""
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colors.canvasBackground.copy(alpha = 0.98f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding(),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = 680.dp)
+                .padding(horizontal = 24.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Top Header Row: Mode Badge + Minimize / Stop
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = accentSoftBg,
+                    border = BorderStroke(0.75.dp, accentColor.copy(alpha = 0.40f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (timerState.isBreakMode) Icons.Outlined.Coffee else Icons.Outlined.Timer,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = stringResource(
+                                if (timerState.isBreakMode) R.string.v32_zen_break_active else R.string.v32_zen_focus_title
+                            ),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = accentColor
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val minimizeLabel = stringResource(R.string.v32_zen_minimize)
+                    ThingsHoverTooltip(text = "$minimizeLabel (Esc)") {
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(onClick = onMinimize),
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.tagPillBg,
+                            border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CloseFullscreen,
+                                    contentDescription = minimizeLabel,
+                                    tint = colors.primaryText,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = minimizeLabel,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText
+                                )
+                            }
+                        }
+                    }
+
+                    val stopLabel = stringResource(R.string.focus_timer_stop)
+                    ThingsHoverTooltip(text = stopLabel) {
+                        IconButton(onClick = onStopTimer, modifier = Modifier.size(34.dp)) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stopLabel,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Scrollable Zen Centerpiece + Task Context
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Circular Progress Ring + Big MM:SS Countdown
+                Box(
+                    modifier = Modifier.size(188.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        progress = { 1f },
+                        modifier = Modifier.fillMaxSize(),
+                        color = accentColor.copy(alpha = 0.14f),
+                        strokeWidth = 8.dp,
+                        strokeCap = StrokeCap.Round
+                    )
+                    CircularProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxSize(),
+                        color = accentColor,
+                        strokeWidth = 8.dp,
+                        strokeCap = StrokeCap.Round
+                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = formattedTime,
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 40.sp,
+                                lineHeight = 44.sp
+                            ),
+                            color = colors.primaryText
+                        )
+                        if (timerState.isPaused) {
+                            Text(
+                                text = stringResource(R.string.focus_timer_pause),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.secondaryText
+                            )
+                        }
+                    }
+                }
+
+                // Active Task Title + Live Focused Pill
+                Text(
+                    text = (activeTask?.title ?: timerState.taskTitle)
+                        .ifBlank { stringResource(R.string.entity_todo) },
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                    color = colors.primaryText,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+
+                if (focusedPillText != null) {
+                    ThingsTagPill(
+                        title = "⏱ $focusedPillText",
+                        containerColor = accentSoftBg,
+                        contentColor = accentColor,
+                        borderColor = accentColor.copy(alpha = 0.35f)
+                    )
+                }
+
+                // Controls Bar: Pause/Resume, +5m, 5m Break / Back to Focus, ✓ Complete
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val pauseResumeLabel = stringResource(
+                        if (timerState.isPaused) R.string.focus_timer_resume else R.string.focus_timer_pause
+                    )
+                    Button(
+                        onClick = onTogglePause,
+                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (timerState.isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = pauseResumeLabel,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onAddFiveMinutes,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.focus_timer_plus_5m),
+                            color = colors.primaryText,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    if (timerState.isBreakMode) {
+                        OutlinedButton(
+                            onClick = onResumeFocusFromBreak,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.45f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Timer,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = stringResource(R.string.v32_zen_back_to_focus),
+                                color = colors.thingsBlue,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onStartShortBreak,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Coffee,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = stringResource(R.string.v32_zen_short_break),
+                                color = colors.primaryText,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = onCompleteTask,
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.logbookGreen),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = stringResource(R.string.action_complete),
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                // Optional Scrollable Notes Card
+                if (!activeTask?.notes.isNullOrBlank()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = colors.cardSurface,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.placeholder_notes),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.secondaryText
+                            )
+                            Text(
+                                text = activeTask?.notes.orEmpty(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.primaryText
+                            )
+                            DetectedNotesLinksRow(notes = activeTask?.notes.orEmpty())
+                        }
+                    }
+                }
+
+                // Live Interactive Checklist Soft Bento Card
+                if (activeTask != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = colors.cardSurface,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Checklist,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.action_checklist),
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.primaryText
+                                    )
+                                }
+                                if (activeChecklistItems.isNotEmpty()) {
+                                    val doneCount = activeChecklistItems.count { it.isCompleted }
+                                    Text(
+                                        text = "$doneCount/${activeChecklistItems.size}",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (doneCount == activeChecklistItems.size) colors.logbookGreen else colors.secondaryText
+                                    )
+                                }
+                            }
+
+                            activeChecklistItems.forEach { item ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onToggleChecklistItem(item.id, !item.isCompleted) }
+                                        .padding(horizontal = 4.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clip(CircleShape)
+                                            .background(if (item.isCompleted) colors.thingsBlue else Color.Transparent)
+                                            .border(
+                                                width = 1.5.dp,
+                                                color = if (item.isCompleted) colors.thingsBlue else colors.checkboxBorder,
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (item.isCompleted) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Check,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = item.title,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            textDecoration = if (item.isCompleted) TextDecoration.LineThrough else TextDecoration.None
+                                        ),
+                                        color = if (item.isCompleted) colors.secondaryText else colors.primaryText,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+
+                            if (activeChecklistItems.isNotEmpty()) {
+                                HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
+                            }
+
+                            // Quick + Add Checklist Item Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = newSubtaskDraft,
+                                    onValueChange = { newSubtaskDraft = it.replace("\r", "").replace("\n", "") },
+                                    placeholder = {
+                                        Text(
+                                            text = stringResource(R.string.placeholder_checklist),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { submitNewSubtask() }),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
+                                        .onPreviewKeyEvent { ev ->
+                                            if (ev.type == KeyEventType.KeyDown &&
+                                                (ev.key == Key.Enter || ev.key == Key.NumPadEnter)
+                                            ) {
+                                                submitNewSubtask()
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        }
+                                )
+                                IconButton(
+                                    onClick = { submitNewSubtask() },
+                                    enabled = newSubtaskDraft.isNotBlank(),
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (newSubtaskDraft.isNotBlank()) colors.thingsBlue
+                                            else colors.tagPillBg
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = stringResource(R.string.action_checklist),
+                                        tint = if (newSubtaskDraft.isNotBlank()) Color.White else colors.secondaryText,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

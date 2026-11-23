@@ -215,6 +215,7 @@ import com.pv.thingsbook.domain.model.CalendarEventItem
 import com.pv.thingsbook.domain.model.EffortLevel
 import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
+import com.pv.thingsbook.domain.model.ProjectStatus
 import com.pv.thingsbook.domain.model.QuickFindDateFilter
 import com.pv.thingsbook.domain.model.QuickFindEntityScope
 import com.pv.thingsbook.domain.model.QuickFindFilter
@@ -231,6 +232,7 @@ import com.pv.thingsbook.domain.model.computeTodayCapacitySummary
 import com.pv.thingsbook.domain.model.filterTasksForPerspective
 import com.pv.thingsbook.domain.model.formatDurationCompact
 import com.pv.thingsbook.domain.model.sortTasksForView
+import com.pv.thingsbook.domain.parser.SmartSyntaxParser
 import com.pv.thingsbook.ui.components.AttachmentImportOutcome
 import com.pv.thingsbook.ui.components.CreateOrEditProjectDialog
 import com.pv.thingsbook.ui.components.DeadlineDatePickerDialog
@@ -248,6 +250,7 @@ import com.pv.thingsbook.ui.components.PerspectiveEditorDialog
 import com.pv.thingsbook.ui.components.ProjectProgressRing
 import com.pv.thingsbook.ui.components.QuickCreateAreaDialog
 import com.pv.thingsbook.ui.components.SampleTasksAccountMergeDialog
+import com.pv.thingsbook.ui.components.SmartSyntaxPreviewChipsRow
 import com.pv.thingsbook.ui.components.SmartViewIcon
 import com.pv.thingsbook.ui.components.SmartViewType
 import com.pv.thingsbook.ui.components.TaskTagPickerDialog
@@ -277,6 +280,7 @@ import com.pv.thingsbook.ui.components.ThingsTrashItemCard
 import com.pv.thingsbook.ui.components.ThingsUndoSnackbarBanner
 import com.pv.thingsbook.ui.components.ThingsWeeklyReviewModal
 import com.pv.thingsbook.ui.components.ThingsWhenBadge
+import com.pv.thingsbook.ui.components.ThingsZenFocusOverlay
 import com.pv.thingsbook.ui.components.ThingsbookBrandSymbol
 import com.pv.thingsbook.ui.components.ThisEveningHeaderBadge
 import com.pv.thingsbook.ui.components.WorkspaceInspectorPanel
@@ -767,7 +771,9 @@ fun ThingsSmartViewScreen(
                 triggerCreateTaskShortcut()
                 true
             }
-            ctrlOrMeta && !nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_F -> {
+            ctrlOrMeta && !nativeEvent.isShiftPressed &&
+                (nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_F ||
+                    nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_K) -> {
                 viewModel.setQuickFindOpen(!isQuickFindOpen)
                 true
             }
@@ -938,7 +944,7 @@ fun ThingsSmartViewScreen(
                             triggerCreateTaskShortcut()
                             true
                         }
-                        ctrlOrMeta && !event.isShiftPressed && event.key == Key.F -> {
+                        ctrlOrMeta && !event.isShiftPressed && (event.key == Key.F || event.key == Key.K) -> {
                             viewModel.setQuickFindOpen(!isQuickFindOpen)
                             true
                         }
@@ -1323,7 +1329,8 @@ fun ThingsSmartViewScreen(
                                 onAddFiveMinutes = { viewModel.addFiveMinutesToFocusTimer() },
                                 onCompleteTask = { viewModel.completeFocusTimerTask() },
                                 onStopTimer = { viewModel.stopFocusTimer() },
-                                onClickTask = { viewModel.toggleTaskExpansion(timerState.taskId) }
+                                onClickTask = { viewModel.toggleTaskExpansion(timerState.taskId) },
+                                onOpenZenMode = { viewModel.setZenFocusModeOpen(true) }
                             )
                         }
                     }
@@ -1654,6 +1661,9 @@ fun ThingsSmartViewScreen(
                                     },
                                     onStartFocusTimer = { task ->
                                         viewModel.startFocusTimer(task.id, task.title, task.durationMinutes)
+                                    },
+                                    onResetActualMinutes = { taskId ->
+                                        viewModel.resetTaskActualMinutes(taskId)
                                     },
                                     onAddChecklistItem = { taskId, title ->
                                         viewModel.addChecklistItem(taskId, title)
@@ -2128,6 +2138,63 @@ fun ThingsSmartViewScreen(
             )
         }
 
+        val isZenFocusModeOpen by viewModel.isZenFocusModeOpen.collectAsState()
+        if (!(biometricAppLockEnabled && !isAppUnlocked) && isZenFocusModeOpen && focusTimerState != null) {
+            val activeTimer = focusTimerState!!
+            BackHandler(enabled = true) {
+                viewModel.setZenFocusModeOpen(false)
+            }
+            val activeZenTask = remember(
+                activeTimer.taskId,
+                primaryTasks,
+                allOpenTasks,
+                logbookTasks,
+                somedayTasks,
+                inboxTasks,
+                todayTasks,
+                eveningTasks,
+                upcomingTasks,
+                anytimeTasks,
+                projectTasks,
+                areaTasks,
+                deletedTaskIdsSet
+            ) {
+                resolveUnifiedModalTask(
+                    expandedTaskId = activeTimer.taskId,
+                    primaryTasks = primaryTasks,
+                    allOpenTasks = allOpenTasks,
+                    logbookTasks = logbookTasks,
+                    somedayTasks = somedayTasks,
+                    inboxTasks = inboxTasks,
+                    todayTasks = todayTasks,
+                    eveningTasks = eveningTasks,
+                    upcomingTasks = upcomingTasks,
+                    anytimeTasks = anytimeTasks,
+                    projectTasks = projectTasks,
+                    areaTasks = areaTasks,
+                    deletedTaskIds = deletedTaskIdsSet
+                )
+            }
+            ThingsZenFocusOverlay(
+                timerState = activeTimer,
+                activeTask = activeZenTask,
+                onMinimize = { viewModel.setZenFocusModeOpen(false) },
+                onTogglePause = { viewModel.toggleFocusTimerPause() },
+                onAddFiveMinutes = { viewModel.addFiveMinutesToFocusTimer() },
+                onStartShortBreak = { viewModel.startZenShortBreak() },
+                onResumeFocusFromBreak = { viewModel.resumeFocusFromBreak() },
+                onCompleteTask = { viewModel.completeFocusTimerTask() },
+                onStopTimer = { viewModel.stopFocusTimer() },
+                onToggleChecklistItem = { itemId, completed ->
+                    viewModel.toggleChecklistItem(itemId, completed)
+                },
+                onAddChecklistItem = { itemTitle ->
+                    viewModel.addChecklistItem(activeTimer.taskId, itemTitle)
+                },
+                modifier = Modifier.zIndex(45f)
+            )
+        }
+
         if (biometricAppLockEnabled && !isAppUnlocked) {
             ThingsBiometricLockOverlay(
                 onUnlocked = { viewModel.markAppUnlocked() }
@@ -2586,6 +2653,8 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val quickFindTasks by viewModel.quickFindTaskResults.collectAsState()
     val quickFindProjects by viewModel.quickFindProjectResults.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
+    val navTarget by viewModel.navigationTarget.collectAsState()
+    val focusTimerState by viewModel.focusTimerState.collectAsState()
     val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
     val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
     val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
@@ -2643,7 +2712,13 @@ private fun ThingsTopHeaderAndQuickFindSection(
         )
     }
 
-    // Inline Quick Find Panel (expands directly below Top Bar with rich task details!)
+    // Inline Quick Find & Command Palette Panel (Ctrl+K / Cmd+K)
+    val paletteActiveProject = (navTarget as? ActiveNavigationTarget.ProjectDetail)?.let { pd ->
+        activeProjects.firstOrNull { it.id == pd.projectId && it.status == ProjectStatus.ACTIVE }
+    }
+    val paletteActiveArea = (navTarget as? ActiveNavigationTarget.AreaDetail)?.let { ad ->
+        areas.firstOrNull { it.id == ad.areaId }
+    }
     AnimatedVisibility(
         visible = isQuickFindOpen,
         enter = expandVertically() + fadeIn(),
@@ -2658,8 +2733,58 @@ private fun ThingsTopHeaderAndQuickFindSection(
             allProjects = activeProjects,
             allTags = allTags,
             locale = activeLocale,
+            activeProject = paletteActiveProject,
+            activeArea = paletteActiveArea,
+            isFocusTimerActive = focusTimerState != null,
             onQueryChange = { viewModel.updateQuickFindQuery(it) },
             onFilterChange = { viewModel.updateQuickFindFilter(it) },
+            onCreateTaskFromSmartSyntax = { rawInput ->
+                viewModel.createTaskFromSmartSyntax(rawInput)
+            },
+            onOpenPlanMyDay = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.openGeminiDayPlanner()
+            },
+            onOpenAiArchitect = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.setGeminiModalOpen(true)
+            },
+            onOpenWeeklyReview = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.openWeeklyReviewModal()
+            },
+            onCompleteActiveProject = {
+                paletteActiveProject?.let { proj ->
+                    viewModel.setQuickFindOpen(false)
+                    viewModel.completeProject(proj.id)
+                }
+            },
+            onSwitchWorkspaceViewMode = { mode ->
+                viewModel.setQuickFindOpen(false)
+                when {
+                    paletteActiveProject != null -> viewModel.updateProjectViewMode(paletteActiveProject.id, mode)
+                    paletteActiveArea != null -> viewModel.updateAreaViewMode(paletteActiveArea.id, mode)
+                }
+            },
+            onOpenZenFocus = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.setZenFocusModeOpen(true)
+            },
+            onOpenTemplates = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.openTemplatesModal(
+                    initialTab = 0,
+                    defaultAreaId = paletteActiveArea?.id ?: paletteActiveProject?.areaId
+                )
+            },
+            onCycleTheme = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.cycleThemeMode()
+            },
+            onOpenSettings = {
+                viewModel.setQuickFindOpen(false)
+                viewModel.setSettingsModalOpen(true)
+            },
             onSelectSmartView = {
                 viewModel.setQuickFindOpen(false)
                 viewModel.selectSmartView(it)
@@ -2789,6 +2914,10 @@ private fun ThingsTaskRowItem(
             },
             onDuplicateTask = { viewModel.duplicateTask(task.id) },
             onStartFocusTimer = { viewModel.startFocusTimer(task.id, task.title, task.durationMinutes) },
+            onApplySmartSyntax = { parsed, latestNotes ->
+                viewModel.applySmartSyntaxToTask(task.id, parsed, latestNotes)
+            },
+            onResetActualMinutes = { viewModel.resetTaskActualMinutes(task.id) },
             onAddTaskAttachment = { fName, mime, bytes ->
                 viewModel.addTaskAttachment(task.id, fName, mime, bytes)
             },
@@ -3274,8 +3403,41 @@ private fun ThingsMainTaskLazyList(
             }
         }
 
-        // If viewing Logbook, show the Gemini Logbook Reflection Card at the top
+        // If viewing Logbook, show the 7-day Focused Time pill (when > 0) and Gemini Logbook Reflection Card at the top
         if (navTarget == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)) {
+            val zoneLogbook = ZoneId.systemDefault()
+            val sevenDaysCutoffMillis = LocalDate.now(zoneLogbook)
+                .minusDays(6)
+                .atStartOfDay(zoneLogbook)
+                .toInstant()
+                .toEpochMilli()
+            val focused7dMinutes = primaryTasks
+                .filter { (it.completedAt ?: it.updatedAt) >= sevenDaysCutoffMillis }
+                .sumOf { (it.actualMinutes ?: 0).coerceAtLeast(0) }
+            if (focused7dMinutes > 0) {
+                item(key = "logbook_focused_7d_pill") {
+                    val hrs7d = focused7dMinutes / 60
+                    val remMins7d = focused7dMinutes % 60
+                    val formatted7d = when {
+                        hrs7d == 0 -> "${remMins7d}m"
+                        remMins7d == 0 -> "${hrs7d}h"
+                        else -> "${hrs7d}h ${remMins7d}m"
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ThingsTagPill(
+                            title = "⏱ ${stringResource(R.string.v32_logbook_focused_7d, formatted7d)}",
+                            containerColor = colors.logbookGreen.copy(alpha = 0.14f),
+                            contentColor = colors.logbookGreen,
+                            borderColor = colors.logbookGreen.copy(alpha = 0.35f)
+                        )
+                    }
+                }
+            }
             item(key = "gemini_logbook_card") {
                 GeminiLogbookReflectionCard(
                     review = logbookAiReview,
@@ -4392,6 +4554,8 @@ private fun ThingsModalsOverlay(
             draft = draft,
             projects = activeProjects,
             areas = areas,
+            tags = allTags,
+            locale = activeLocale,
             isSmartParsingGemini = isSmartParsingGemini,
             onDismiss = { viewModel.dismissQuickShareDraft() },
             onSave = { title, notes, schedule, projId, areaId ->
@@ -5192,7 +5356,7 @@ private fun TopThingsbookBar(
                     }
 
                     ThingsHoverTooltip(
-                        text = stringResource(R.string.topbar_tooltip_quick_find),
+                        text = "${stringResource(R.string.topbar_tooltip_quick_find)} (Ctrl+K)",
                         enabled = !showSearchText
                     ) {
                         Row(
@@ -5222,6 +5386,14 @@ private fun TopThingsbookBar(
                                     color = if (isQuickFindOpen) colors.thingsBlue else colors.secondaryText,
                                     maxLines = 1
                                 )
+                                if (barWidth >= 620.dp) {
+                                    Text(
+                                        text = "Ctrl+K",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.tertiaryText,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
@@ -7880,6 +8052,13 @@ private fun PhaseMilestoneCard(
  * - Tasks with Status/Schedule State badge, Area › Project breadcrumb, When Date, Reminder time,
  *   Recurrence rule, Deadline, Subtasks count (`☑ X/Y`), Tags, and Notes preview!
  */
+private data class PaletteQuickActionItem(
+    val id: String,
+    val label: String,
+    val icon: ImageVector,
+    val onTrigger: () -> Unit
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun InlineQuickFindSection(
@@ -7891,8 +8070,21 @@ private fun InlineQuickFindSection(
     allProjects: List<Project>,
     allTags: List<Tag> = emptyList(),
     locale: Locale,
+    activeProject: Project? = null,
+    activeArea: Area? = null,
+    isFocusTimerActive: Boolean = false,
     onQueryChange: (String) -> Unit,
     onFilterChange: (QuickFindFilter) -> Unit = {},
+    onCreateTaskFromSmartSyntax: (String) -> Unit = {},
+    onOpenPlanMyDay: () -> Unit = {},
+    onOpenAiArchitect: () -> Unit = {},
+    onOpenWeeklyReview: () -> Unit = {},
+    onCompleteActiveProject: () -> Unit = {},
+    onSwitchWorkspaceViewMode: (ProjectWorkspaceMode) -> Unit = {},
+    onOpenZenFocus: () -> Unit = {},
+    onOpenTemplates: () -> Unit = {},
+    onCycleTheme: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     onSelectSmartView: (SmartViewType) -> Unit,
     onSelectArea: (String) -> Unit,
     onSelectProject: (String) -> Unit,
@@ -7916,6 +8108,171 @@ private fun InlineQuickFindSection(
     LaunchedEffect(Unit) {
         delay(40)
         runCatching { searchFocusRequester.requestFocus() }
+    }
+
+    val isCommandMode = query.trimStart().startsWith(">")
+    val commandFilterTerm = if (isCommandMode) {
+        query.trimStart().removePrefix(">").trim()
+    } else {
+        query.trim()
+    }
+
+    val planMyDayLabel = stringResource(R.string.v32_cmd_plan_my_day)
+    val aiArchitectLabel = stringResource(R.string.v32_cmd_ai_architect)
+    val weeklyReviewLabel = stringResource(R.string.v32_cmd_weekly_review)
+    val completeProjectLabel = stringResource(R.string.project_complete_tooltip)
+    val switchListLabel = stringResource(R.string.v32_cmd_switch_list)
+    val switchBoardLabel = stringResource(R.string.v32_cmd_switch_board)
+    val switchRoadmapLabel = stringResource(R.string.v32_cmd_switch_roadmap)
+    val zenFocusLabel = stringResource(R.string.v32_cmd_zen_focus)
+    val openTemplatesLabel = stringResource(R.string.v32_cmd_open_templates)
+    val cycleThemeLabel = stringResource(R.string.v32_cmd_toggle_theme)
+    val openSettingsLabel = stringResource(R.string.v32_cmd_open_settings)
+
+    val allPaletteActions = remember(
+        activeProject?.id,
+        activeArea?.id,
+        isFocusTimerActive,
+        planMyDayLabel,
+        aiArchitectLabel,
+        weeklyReviewLabel,
+        completeProjectLabel,
+        switchListLabel,
+        switchBoardLabel,
+        switchRoadmapLabel,
+        zenFocusLabel,
+        openTemplatesLabel,
+        cycleThemeLabel,
+        openSettingsLabel
+    ) {
+        buildList {
+            add(
+                PaletteQuickActionItem(
+                    id = "plan_my_day",
+                    label = planMyDayLabel,
+                    icon = Icons.Outlined.Schedule,
+                    onTrigger = onOpenPlanMyDay
+                )
+            )
+            add(
+                PaletteQuickActionItem(
+                    id = "ai_architect",
+                    label = aiArchitectLabel,
+                    icon = Icons.Outlined.AutoAwesome,
+                    onTrigger = onOpenAiArchitect
+                )
+            )
+            add(
+                PaletteQuickActionItem(
+                    id = "weekly_review",
+                    label = weeklyReviewLabel,
+                    icon = Icons.Outlined.Checklist,
+                    onTrigger = onOpenWeeklyReview
+                )
+            )
+            if (activeProject != null) {
+                add(
+                    PaletteQuickActionItem(
+                        id = "complete_project",
+                        label = "$completeProjectLabel: ${activeProject.title}",
+                        icon = Icons.Outlined.CheckCircleOutline,
+                        onTrigger = onCompleteActiveProject
+                    )
+                )
+            }
+            if (activeProject != null || activeArea != null) {
+                add(
+                    PaletteQuickActionItem(
+                        id = "switch_list",
+                        label = switchListLabel,
+                        icon = Icons.Outlined.Checklist,
+                        onTrigger = { onSwitchWorkspaceViewMode(ProjectWorkspaceMode.LIST) }
+                    )
+                )
+                if (activeProject != null) {
+                    add(
+                        PaletteQuickActionItem(
+                            id = "switch_board",
+                            label = switchBoardLabel,
+                            icon = Icons.Outlined.GridView,
+                            onTrigger = { onSwitchWorkspaceViewMode(ProjectWorkspaceMode.BOARD) }
+                        )
+                    )
+                }
+                add(
+                    PaletteQuickActionItem(
+                        id = "switch_roadmap",
+                        label = switchRoadmapLabel,
+                        icon = Icons.Outlined.CalendarToday,
+                        onTrigger = { onSwitchWorkspaceViewMode(ProjectWorkspaceMode.ROADMAP) }
+                    )
+                )
+            }
+            if (isFocusTimerActive) {
+                add(
+                    PaletteQuickActionItem(
+                        id = "zen_focus",
+                        label = zenFocusLabel,
+                        icon = Icons.Outlined.OpenInFull,
+                        onTrigger = onOpenZenFocus
+                    )
+                )
+            }
+            add(
+                PaletteQuickActionItem(
+                    id = "open_templates",
+                    label = openTemplatesLabel,
+                    icon = Icons.Outlined.Folder,
+                    onTrigger = onOpenTemplates
+                )
+            )
+            add(
+                PaletteQuickActionItem(
+                    id = "toggle_theme",
+                    label = cycleThemeLabel,
+                    icon = Icons.Outlined.Bedtime,
+                    onTrigger = onCycleTheme
+                )
+            )
+            add(
+                PaletteQuickActionItem(
+                    id = "open_settings",
+                    label = openSettingsLabel,
+                    icon = Icons.Outlined.Settings,
+                    onTrigger = onOpenSettings
+                )
+            )
+        }
+    }
+
+    val matchingQuickActions = remember(allPaletteActions, query, isCommandMode, commandFilterTerm) {
+        when {
+            query.isBlank() -> allPaletteActions
+            isCommandMode && commandFilterTerm.isEmpty() -> allPaletteActions
+            else -> allPaletteActions.filter { it.label.contains(commandFilterTerm, ignoreCase = true) }
+        }
+    }
+
+    val parsedPaletteSmartSyntax = remember(query, isCommandMode, allTags, allProjects, areas, locale) {
+        if (query.isBlank() || isCommandMode) {
+            null
+        } else {
+            SmartSyntaxParser.parse(
+                rawTitle = query,
+                tags = allTags,
+                projects = allProjects,
+                areas = areas,
+                locale = locale
+            )
+        }
+    }
+
+    val handleSubmitPaletteEnter = {
+        if (isCommandMode) {
+            matchingQuickActions.firstOrNull()?.onTrigger?.invoke()
+        } else if (query.isNotBlank()) {
+            onCreateTaskFromSmartSyntax(query)
+        }
     }
 
     val dateFilterLabelRes = when (filter.dateFilter) {
@@ -7963,7 +8320,7 @@ private fun InlineQuickFindSection(
                     },
                     placeholder = {
                         Text(
-                            text = stringResource(R.string.quick_find_placeholder),
+                            text = stringResource(R.string.v32_cmd_palette_placeholder),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -7995,9 +8352,21 @@ private fun InlineQuickFindSection(
                         }
                     },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = { handleSubmitPaletteEnter() }),
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(searchFocusRequester)
+                        .onPreviewKeyEvent { keyEv ->
+                            if (keyEv.type == KeyEventType.KeyDown &&
+                                (keyEv.key == Key.Enter || keyEv.key == Key.NumPadEnter)
+                            ) {
+                                handleSubmitPaletteEnter()
+                                true
+                            } else {
+                                false
+                            }
+                        }
                         .onFocusChanged { focusState ->
                             if (focusState.isFocused) {
                                 val txt = searchField.text
@@ -8167,7 +8536,7 @@ private fun InlineQuickFindSection(
             }
 
             // Matching Smart Views & Areas
-            val showViewsAndAreas = filter.shouldShowSmartViewsAndAreas(query)
+            val showViewsAndAreas = !isCommandMode && filter.shouldShowSmartViewsAndAreas(query)
             val matchingViews = if (!showViewsAndAreas) {
                 emptyList()
             } else {
@@ -8181,26 +8550,119 @@ private fun InlineQuickFindSection(
                 else areas.filter { it.title.contains(query, ignoreCase = true) }
             }
 
+            // Prominent "+ Create To-Do: ..." Action Card with Live Smart-Syntax Preview
+            if (parsedPaletteSmartSyntax != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                val previewCleanTitle = parsedPaletteSmartSyntax.cleanTitle.ifBlank { query.trim() }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.thingsBlueSoft,
+                    border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.45f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onCreateTaskFromSmartSyntax(query) }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.v32_cmd_create_task, previewCleanTitle),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.thingsBlue,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (parsedPaletteSmartSyntax.hasAnyMatch) {
+                            SmartSyntaxPreviewChipsRow(
+                                parsed = parsedPaletteSmartSyntax,
+                                showDetectedPrefix = false
+                            )
+                        }
+                    }
+                }
+            }
+
+            val effectiveProjectHits = if (isCommandMode) emptyList() else projectResults
+            val effectiveTaskHits = if (isCommandMode) emptyList() else taskResults
+            val totalEntityHits = matchingViews.size + matchingAreas.size + effectiveProjectHits.size + effectiveTaskHits.size
+
             if (query.isBlank() && !filter.hasActiveFilters) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = stringResource(R.string.quick_find_empty_hint),
-                    style = MaterialTheme.typography.labelSmall,
+                    text = stringResource(R.string.v32_cmd_section_actions),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                     color = colors.secondaryText
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    items(matchingQuickActions, key = { "qf_cmd_idle_${it.id}" }) { action ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.tagPillBg.copy(alpha = 0.55f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(onClick = action.onTrigger)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = action.icon,
+                                    contentDescription = null,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = action.label,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
             } else {
                 Spacer(modifier = Modifier.height(10.dp))
-                val totalHits = matchingViews.size + matchingAreas.size + projectResults.size + taskResults.size
-                Text(
-                    text = if (query.isNotBlank()) {
-                        stringResource(R.string.quick_find_results_for, totalHits, query)
-                    } else {
-                        stringResource(R.string.settings_stat_records_count, totalHits)
-                    },
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.thingsBlue
-                )
-                Spacer(modifier = Modifier.height(6.dp))
+                val totalHits = matchingQuickActions.size + totalEntityHits
+                if (!isCommandMode) {
+                    Text(
+                        text = if (query.isNotBlank()) {
+                            stringResource(R.string.quick_find_results_for, totalEntityHits, query)
+                        } else {
+                            stringResource(R.string.settings_stat_records_count, totalEntityHits)
+                        },
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.thingsBlue
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
 
                 if (totalHits == 0) {
                     Text(
@@ -8216,6 +8678,49 @@ private fun InlineQuickFindSection(
                         .height(290.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    // 0. Quick Actions (Command Palette)
+                    if (matchingQuickActions.isNotEmpty()) {
+                        item(key = "qf_actions_header") {
+                            Text(
+                                text = stringResource(R.string.v32_cmd_section_actions),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.secondaryText,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                        items(matchingQuickActions, key = { "qf_cmd_${it.id}" }) { action ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = colors.tagPillBg.copy(alpha = 0.55f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable(onClick = action.onTrigger)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = action.icon,
+                                        contentDescription = null,
+                                        tint = colors.thingsBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = action.label,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.primaryText,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // 1. Smart Views
                     items(matchingViews, key = { "qf_view_${it.name}" }) { viewType ->
                         Surface(
@@ -8274,7 +8779,7 @@ private fun InlineQuickFindSection(
                     }
 
                     // 3. Projects (with Area, Progress & Target Date)
-                    items(projectResults, key = { "qf_proj_${it.id}" }) { proj ->
+                    items(effectiveProjectHits, key = { "qf_proj_${it.id}" }) { proj ->
                         val projArea = areas.find { it.id == proj.areaId }
                         Surface(
                             shape = RoundedCornerShape(10.dp),
@@ -8323,7 +8828,7 @@ private fun InlineQuickFindSection(
                     }
 
                     // 4. Tasks with FULL Details (Status/Schedule, Area › Project, WhenDate, Reminder, Repeat, Deadline, Subtasks, Tags, Notes)
-                    items(taskResults, key = { "qf_task_${it.id}" }) { task ->
+                    items(effectiveTaskHits, key = { "qf_task_${it.id}" }) { task ->
                         val taskProject = allProjects.find { it.id == task.projectId }
                         val taskArea = areas.find { it.id == (taskProject?.areaId ?: task.areaId) }
                         val scheduleLabel = when {

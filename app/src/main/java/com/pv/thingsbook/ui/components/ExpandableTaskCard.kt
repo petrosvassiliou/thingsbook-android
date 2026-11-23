@@ -173,6 +173,8 @@ import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.formatDurationCompact
 import com.pv.thingsbook.domain.model.isTaskActivelyBlocked
 import com.pv.thingsbook.domain.model.parseCustomDurationMinutes
+import com.pv.thingsbook.domain.parser.ParsedSmartSyntax
+import com.pv.thingsbook.domain.parser.SmartSyntaxParser
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -259,6 +261,8 @@ fun ExpandableTaskCard(
     onDeleteTask: () -> Unit,
     onDuplicateTask: (() -> Unit)? = null,
     onStartFocusTimer: (() -> Unit)? = null,
+    onApplySmartSyntax: ((ParsedSmartSyntax, String) -> Unit)? = null,
+    onResetActualMinutes: (() -> Unit)? = null,
     externalDialogTriggerToken: Int = 0,
     externalDialogTriggerType: String? = null,
     modifier: Modifier = Modifier,
@@ -550,6 +554,38 @@ fun ExpandableTaskCard(
         label = "cardSurfaceColor"
     )
 
+    val applySmartSyntaxNow: (ParsedSmartSyntax) -> Unit = { parsed ->
+        val nextTitle = parsed.cleanTitle.ifBlank { editedTitleField.text.trim() }
+        editedTitleField = TextFieldValue(text = nextTitle, selection = TextRange(nextTitle.length))
+        if (onApplySmartSyntax != null) {
+            onApplySmartSyntax(parsed, editedNotesField.text)
+        } else {
+            onTitleNotesChange(nextTitle, editedNotesField.text)
+            if (parsed.scheduleState != null) {
+                onScheduleChange(parsed.scheduleState, parsed.whenDate)
+            }
+            if (parsed.deadline != null) {
+                onDeadlineChange(parsed.deadline)
+            }
+            if (parsed.durationMinutes != null) {
+                onUpdateStandaloneDuration?.invoke(parsed.durationMinutes)
+            }
+            if (parsed.isMilestone && !task.isMilestone) {
+                onToggleMilestone?.invoke()
+            }
+            if (parsed.matchedProject != null || parsed.matchedArea != null) {
+                val pId = parsed.matchedProject?.id ?: task.projectId
+                val hId = if (pId == task.projectId) task.headingId else null
+                val aId = parsed.matchedArea?.id ?: parsed.matchedProject?.areaId ?: task.areaId
+                onMoveTaskToContainer?.invoke(pId, hId, aId)
+            }
+            if (parsed.matchedTagIds.isNotEmpty() && onUpdateTaskTags != null) {
+                val merged = (task.tags.map { it.id } + parsed.matchedTagIds).distinct()
+                onUpdateTaskTags(merged)
+            }
+        }
+    }
+
     val startInlineQuickEdit = {
         editedTitleField = TextFieldValue(
             text = task.title,
@@ -560,7 +596,16 @@ fun ExpandableTaskCard(
 
     val commitInlineQuickEdit = {
         val sanitized = editedTitleField.text.replace("\r", "").replace("\n", " ").trim()
-        if (sanitized != task.title) {
+        val parsedInline = SmartSyntaxParser.parse(
+            rawTitle = sanitized,
+            tags = allTags,
+            projects = allProjects,
+            areas = allAreas,
+            locale = locale
+        )
+        if (parsedInline.hasAnyMatch) {
+            applySmartSyntaxNow(parsedInline)
+        } else if (sanitized != task.title) {
             editedTitleField = TextFieldValue(text = sanitized, selection = TextRange(sanitized.length))
             onTitleNotesChange(sanitized, editedNotesField.text)
         }
@@ -754,6 +799,9 @@ fun ExpandableTaskCard(
             if (isExpanded) {
                 ExpandedTaskCardBody(
                     task = task,
+                    allTags = allTags,
+                    allProjects = allProjects,
+                    allAreas = allAreas,
                     effectiveVisualStatus = effectiveVisualStatus,
                     openTaskIds = openTaskIds,
                     assignedProject = assignedProject,
@@ -855,6 +903,8 @@ fun ExpandableTaskCard(
                     onToggleMilestone = onToggleMilestone,
                     onDuplicateTask = onDuplicateTask,
                     onStartFocusTimer = onStartFocusTimer,
+                    onApplySmartSyntax = { parsed -> applySmartSyntaxNow(parsed) },
+                    onResetActualMinutes = onResetActualMinutes,
                     onDeleteTask = onDeleteTask,
                     onDoneCollapse = onExpandToggle
                 )
@@ -1088,6 +1138,22 @@ fun ExpandableTaskCard(
                     }
 
                     if (isInlineQuickEditing) {
+                        val inlineSmartPreview = remember(editedTitleField.text, allTags, allProjects, allAreas, locale) {
+                            SmartSyntaxParser.parse(
+                                rawTitle = editedTitleField.text,
+                                tags = allTags,
+                                projects = allProjects,
+                                areas = allAreas,
+                                locale = locale
+                            )
+                        }
+                        if (inlineSmartPreview.hasAnyMatch) {
+                            SmartSyntaxPreviewChipsRow(
+                                parsed = inlineSmartPreview,
+                                showDetectedPrefix = true,
+                                modifier = Modifier.padding(start = 40.dp, top = 6.dp)
+                            )
+                        }
                         FlowRow(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1400,6 +1466,7 @@ private fun hasCollapsedTaskBadges(task: TaskItem, isActivelyBlocked: Boolean = 
         task.scheduleState == ScheduleState.SOMEDAY ||
         task.scheduledStartMinutes != null ||
         task.durationMinutes != null ||
+        (task.actualMinutes ?: 0) > 0 ||
         EffortLevel.normalize(task.effortLevel) != null ||
         isActivelyBlocked ||
         task.recurrenceRule != null ||
@@ -1646,6 +1713,31 @@ private fun CollapsedTaskInlineBadges(
                         )
                     }
                 }
+            }
+        }
+        val actualMinsCollapsed = task.actualMinutes ?: 0
+        if (actualMinsCollapsed > 0) {
+            val actualFmt = formatDurationCompact(actualMinsCollapsed) ?: "${actualMinsCollapsed}m"
+            val estMins = task.durationMinutes?.takeIf { it > 0 }
+            val focusedBadgeText = if (estMins != null) {
+                stringResource(
+                    R.string.v32_actual_vs_estimated,
+                    actualFmt,
+                    formatDurationCompact(estMins) ?: "${estMins}m"
+                )
+            } else {
+                stringResource(R.string.v32_actual_focused_short, actualFmt)
+            }
+            ThingsHoverTooltip(
+                text = focusedBadgeText,
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(
+                    title = "⏱ $focusedBadgeText",
+                    containerColor = colors.logbookGreen.copy(alpha = 0.14f),
+                    contentColor = colors.logbookGreen,
+                    borderColor = colors.logbookGreen.copy(alpha = 0.35f)
+                )
             }
         }
         task.recurrenceRule?.let { rr ->
@@ -2085,6 +2177,9 @@ private fun SoftBentoPropertyGroup(
 @Composable
 private fun ExpandedTaskCardBody(
     task: TaskItem,
+    allTags: List<Tag> = emptyList(),
+    allProjects: List<Project> = emptyList(),
+    allAreas: List<Area> = emptyList(),
     effectiveVisualStatus: TaskStatus,
     openTaskIds: Set<String> = emptySet(),
     assignedProject: Project?,
@@ -2132,6 +2227,8 @@ private fun ExpandedTaskCardBody(
     onToggleMilestone: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onStartFocusTimer: (() -> Unit)? = null,
+    onApplySmartSyntax: ((ParsedSmartSyntax) -> Unit)? = null,
+    onResetActualMinutes: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDoneCollapse: () -> Unit
 ) {
@@ -2221,12 +2318,23 @@ private fun ExpandedTaskCardBody(
     }
     val bentoZoneBorder = BorderStroke(width = 0.75.dp, color = colors.hairlineDivider)
 
+    val parsedModalSmartSyntax = remember(editedTitleField.text, allTags, allProjects, allAreas, locale) {
+        SmartSyntaxParser.parse(
+            rawTitle = editedTitleField.text,
+            tags = allTags,
+            projects = allProjects,
+            areas = allAreas,
+            locale = locale
+        )
+    }
+
     val renderPinnedHeaderRow: @Composable () -> Unit = {
+        Column(modifier = Modifier.fillMaxWidth()) {
         // Pinned Top Header Row: Checkbox + Large Title BasicTextField + Milestone + Pin + Close ✕
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 10.dp),
+                .padding(bottom = if (parsedModalSmartSyntax.hasAnyMatch) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val checkboxTooltip = if (effectiveVisualStatus == TaskStatus.OPEN) {
@@ -2390,6 +2498,20 @@ private fun ExpandedTaskCardBody(
                     )
                 }
             }
+        }
+        if (parsedModalSmartSyntax.hasAnyMatch) {
+            SmartSyntaxPreviewChipsRow(
+                parsed = parsedModalSmartSyntax,
+                showDetectedPrefix = true,
+                onApply = if (onApplySmartSyntax != null) {
+                    {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onApplySmartSyntax(parsedModalSmartSyntax)
+                    }
+                } else null,
+                modifier = Modifier.padding(start = 34.dp, bottom = 10.dp)
+            )
+        }
         }
     }
 
@@ -3052,6 +3174,39 @@ private fun ExpandedTaskCardBody(
                                             onUpdateStandaloneDuration(customMins)
                                         },
                                         onDismiss = { showCustomDurationDialog = false }
+                                    )
+                                }
+                            }
+
+                            val actualMinsModal = task.actualMinutes ?: 0
+                            if (actualMinsModal > 0) {
+                                val actualFmt = formatDurationCompact(actualMinsModal) ?: "${actualMinsModal}m"
+                                val estMins = task.durationMinutes?.takeIf { it > 0 }
+                                val focusedModalLabel = if (estMins != null) {
+                                    stringResource(
+                                        R.string.v32_actual_vs_estimated,
+                                        actualFmt,
+                                        formatDurationCompact(estMins) ?: "${estMins}m"
+                                    )
+                                } else {
+                                    stringResource(R.string.v32_actual_focused_short, actualFmt)
+                                }
+                                ThingsTagPill(
+                                    title = "⏱ $focusedModalLabel",
+                                    containerColor = colors.logbookGreen.copy(alpha = 0.14f),
+                                    contentColor = colors.logbookGreen,
+                                    borderColor = colors.logbookGreen.copy(alpha = 0.35f)
+                                )
+                            }
+                            if (task.actualMinutes != null && onResetActualMinutes != null) {
+                                val resetActualLabel = stringResource(R.string.v32_reset_actual_time)
+                                ThingsHoverTooltip(text = resetActualLabel) {
+                                    ThingsTagPill(
+                                        title = "↺ $resetActualLabel",
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onResetActualMinutes()
+                                        }
                                     )
                                 }
                             }

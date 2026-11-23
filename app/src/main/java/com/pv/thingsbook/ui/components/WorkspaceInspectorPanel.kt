@@ -187,6 +187,7 @@ fun WorkspaceInspectorPanel(
     onUpdateDuration: (String, Int?) -> Unit,
     onUpdateEffort: (String, String?) -> Unit,
     onStartFocusTimer: (TaskItem) -> Unit,
+    onResetActualMinutes: ((String) -> Unit)? = null,
     onAddChecklistItem: (String, String) -> Unit,
     onToggleChecklistItem: (String, Boolean) -> Unit,
     onDeleteChecklistItem: (String) -> Unit,
@@ -227,6 +228,7 @@ fun WorkspaceInspectorPanel(
                 onUpdateDuration = onUpdateDuration,
                 onUpdateEffort = onUpdateEffort,
                 onStartFocusTimer = onStartFocusTimer,
+                onResetActualMinutes = onResetActualMinutes,
                 onAddChecklistItem = onAddChecklistItem,
                 onToggleChecklistItem = onToggleChecklistItem,
                 onDeleteChecklistItem = onDeleteChecklistItem,
@@ -297,6 +299,7 @@ private fun SelectedTaskInspectorContent(
     onUpdateDuration: (String, Int?) -> Unit,
     onUpdateEffort: (String, String?) -> Unit,
     onStartFocusTimer: (TaskItem) -> Unit,
+    onResetActualMinutes: ((String) -> Unit)? = null,
     onAddChecklistItem: (String, String) -> Unit,
     onToggleChecklistItem: (String, Boolean) -> Unit,
     onDeleteChecklistItem: (String) -> Unit,
@@ -756,6 +759,39 @@ private fun SelectedTaskInspectorContent(
                                 }
                             )
                         }
+                    }
+                }
+
+                val inspectorActualMins = selectedTask.actualMinutes ?: 0
+                if (inspectorActualMins > 0) {
+                    val actualFmt = formatDurationCompact(inspectorActualMins) ?: "${inspectorActualMins}m"
+                    val estMins = selectedTask.durationMinutes?.takeIf { it > 0 }
+                    val focusedLabel = if (estMins != null) {
+                        stringResource(
+                            R.string.v32_actual_vs_estimated,
+                            actualFmt,
+                            formatDurationCompact(estMins) ?: "${estMins}m"
+                        )
+                    } else {
+                        stringResource(R.string.v32_actual_focused_short, actualFmt)
+                    }
+                    ThingsTagPill(
+                        title = "⏱ $focusedLabel",
+                        containerColor = colors.logbookGreen.copy(alpha = 0.14f),
+                        contentColor = colors.logbookGreen,
+                        borderColor = colors.logbookGreen.copy(alpha = 0.35f)
+                    )
+                }
+                if (selectedTask.actualMinutes != null && onResetActualMinutes != null) {
+                    val resetActualText = stringResource(R.string.v32_reset_actual_time)
+                    ThingsHoverTooltip(text = resetActualText) {
+                        ThingsTagPill(
+                            title = "↺ $resetActualText",
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onResetActualMinutes(selectedTask.id)
+                            }
+                        )
                     }
                 }
 

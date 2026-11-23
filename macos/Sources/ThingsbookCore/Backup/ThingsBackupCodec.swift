@@ -248,6 +248,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
     public var reminderTime: Int64?
     public var scheduledStartMinutes: Int?
     public var durationMinutes: Int?
+    public var actualMinutes: Int?
     public var completedAt: Int64?
     public var projectId: String?
     public var headingId: String?
@@ -275,6 +276,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         reminderTime: Int64? = nil,
         scheduledStartMinutes: Int? = nil,
         durationMinutes: Int? = nil,
+        actualMinutes: Int? = nil,
         completedAt: Int64? = nil,
         projectId: String? = nil,
         headingId: String? = nil,
@@ -301,6 +303,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.reminderTime = reminderTime
         self.scheduledStartMinutes = scheduledStartMinutes
         self.durationMinutes = durationMinutes
+        self.actualMinutes = actualMinutes
         self.completedAt = completedAt
         self.projectId = projectId
         self.headingId = headingId
@@ -320,7 +323,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, notes, status, scheduleState, whenDate, deadline, reminderTime
-        case scheduledStartMinutes, durationMinutes, completedAt, projectId, headingId, areaId
+        case scheduledStartMinutes, durationMinutes, actualMinutes, completedAt, projectId, headingId, areaId
         case recurrenceRuleJson, sortOrder, isPinned, isMilestone, effortLevel, blockedByJson, blockedByTaskIds
         case workspaceId, assigneeId, tagIdsJson, createdAt, updatedAt
     }
@@ -337,6 +340,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         self.reminderTime = try? c.decodeIfPresent(Int64.self, forKey: .reminderTime)
         self.scheduledStartMinutes = try? c.decodeIfPresent(Int.self, forKey: .scheduledStartMinutes)
         self.durationMinutes = try? c.decodeIfPresent(Int.self, forKey: .durationMinutes)
+        self.actualMinutes = try? c.decodeIfPresent(Int.self, forKey: .actualMinutes)
         self.completedAt = try? c.decodeIfPresent(Int64.self, forKey: .completedAt)
         self.projectId = try? c.decodeIfPresent(String.self, forKey: .projectId)
         self.headingId = try? c.decodeIfPresent(String.self, forKey: .headingId)
@@ -374,6 +378,7 @@ public struct BackupTaskDto: Codable, Equatable, Sendable {
         try c.encodeIfPresent(reminderTime, forKey: .reminderTime)
         try c.encodeIfPresent(scheduledStartMinutes, forKey: .scheduledStartMinutes)
         try c.encodeIfPresent(durationMinutes, forKey: .durationMinutes)
+        try c.encodeIfPresent(actualMinutes, forKey: .actualMinutes)
         try c.encodeIfPresent(completedAt, forKey: .completedAt)
         try c.encodeIfPresent(projectId, forKey: .projectId)
         try c.encodeIfPresent(headingId, forKey: .headingId)

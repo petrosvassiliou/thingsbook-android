@@ -60,6 +60,7 @@ import com.pv.thingsbook.domain.model.TemplateHeadingBlueprint
 import com.pv.thingsbook.domain.model.TemplateTaskBlueprint
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.wouldCreateDependencyCycle
+import com.pv.thingsbook.domain.parser.ParsedSmartSyntax
 import com.pv.thingsbook.domain.util.runCatchingCancellable
 import com.pv.thingsbook.ui.components.SmartViewType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -430,6 +431,7 @@ class ThingsRepository @Inject constructor(
         reminderTime: Long? = null,
         scheduledStartMinutes: Int? = null,
         durationMinutes: Int? = null,
+        actualMinutes: Int? = null,
         preserveExistingTimeblock: Boolean = true,
         projectId: String? = null,
         headingId: String? = null,
@@ -464,6 +466,7 @@ class ThingsRepository @Inject constructor(
 
         val resolvedStartMins = scheduledStartMinutes ?: if (preserveExistingTimeblock) existing?.scheduledStartMinutes else null
         val resolvedDurationMins = durationMinutes ?: if (preserveExistingTimeblock) existing?.durationMinutes else null
+        val resolvedActualMins = actualMinutes ?: existing?.actualMinutes
         val resolvedIsPinned = isPinned ?: existing?.isPinned ?: false
         val resolvedIsMilestone = isMilestone ?: existing?.isMilestone ?: false
         val resolvedEffortLevel = if (effortLevel != null) {
@@ -491,6 +494,7 @@ class ThingsRepository @Inject constructor(
             reminderTime = reminderTime,
             scheduledStartMinutes = resolvedStartMins?.takeIf { it in 0..1439 },
             durationMinutes = resolvedDurationMins?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
+            actualMinutes = resolvedActualMins?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
             completedAt = completedAt,
             projectId = projectId,
             headingId = headingId,
@@ -606,6 +610,43 @@ class ThingsRepository @Inject constructor(
         syncRepository.triggerBackgroundSync()
     }
 
+    suspend fun addTaskActualMinutes(taskId: String, deltaMinutes: Int) {
+        if (deltaMinutes <= 0) return
+        val cleanId = taskId.trim()
+        if (cleanId.isEmpty()) return
+        val existing = database.taskDao().getById(cleanId) ?: return
+        if (existing.isDeleted) return
+        val next = ((existing.actualMinutes ?: 0) + deltaMinutes).coerceIn(1, MAX_TASK_DURATION_MINUTES)
+        if (next == existing.actualMinutes) return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                actualMinutes = next,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun setTaskActualMinutes(taskId: String, actualMinutes: Int?) {
+        val cleanId = taskId.trim()
+        if (cleanId.isEmpty()) return
+        val existing = database.taskDao().getById(cleanId) ?: return
+        if (existing.isDeleted) return
+        val next = actualMinutes?.takeIf { it > 0 }?.coerceIn(1, MAX_TASK_DURATION_MINUTES)
+        if (next == existing.actualMinutes) return
+        val now = System.currentTimeMillis()
+        database.taskDao().upsert(
+            existing.copy(
+                actualMinutes = next,
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
+                isDirty = true
+            )
+        )
+        syncRepository.triggerBackgroundSync()
+    }
+
     suspend fun updateTaskBlockedBy(taskId: String, blockerIds: List<String>): Boolean {
         val cleanTaskId = taskId.trim()
         if (cleanTaskId.isEmpty()) return false
@@ -678,6 +719,7 @@ class ThingsRepository @Inject constructor(
                         tagIdsJson = "[]",
                         scheduledStartMinutes = null,
                         durationMinutes = null,
+                        actualMinutes = null,
                         isPinned = false,
                         isMilestone = false,
                         effortLevel = null,
@@ -834,6 +876,7 @@ class ThingsRepository @Inject constructor(
             whenDate = nextWhenEpoch,
             deadline = nextDeadlineEpoch,
             reminderTime = nextReminderTime,
+            actualMinutes = null,
             completedAt = null,
             isPinned = false,
             blockedByJson = "[]",
@@ -956,6 +999,90 @@ class ThingsRepository @Inject constructor(
             existing.reminderTime != null && existing.reminderTime > now
         ) {
             reminderScheduler.scheduleExactReminder(taskId, newTitle, existing.reminderTime)
+        }
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun applySmartSyntaxToTask(
+        taskId: String,
+        parsed: ParsedSmartSyntax,
+        latestNotes: String? = null
+    ) {
+        val cleanId = taskId.trim()
+        if (cleanId.isEmpty()) return
+        val now = System.currentTimeMillis()
+        var updatedForReminder: TaskEntity? = null
+        var titleChanged = false
+
+        database.withTransaction {
+            val existing = database.taskDao().getById(cleanId) ?: return@withTransaction
+            if (existing.isDeleted) return@withTransaction
+
+            val nextTitle = parsed.cleanTitle.trim().ifBlank { existing.title }
+            val nextNotes = latestNotes ?: existing.notes
+            titleChanged = nextTitle != existing.title
+
+            val (nextProjectId, nextHeadingId, nextAreaId) = when {
+                parsed.matchedProject != null -> {
+                    val pId = parsed.matchedProject.id
+                    val hId = if (existing.projectId == pId) existing.headingId else null
+                    val aId = parsed.matchedArea?.id ?: parsed.matchedProject.areaId
+                    Triple(pId, hId, aId)
+                }
+                parsed.matchedArea != null -> {
+                    Triple(null, null, parsed.matchedArea.id)
+                }
+                else -> {
+                    Triple(existing.projectId, existing.headingId, existing.areaId)
+                }
+            }
+
+            val nextWhenDate = if (parsed.scheduleState != null) parsed.whenDate else existing.whenDate
+            val rawSchedule = parsed.scheduleState ?: existing.scheduleState
+            val nextSchedule = if (
+                rawSchedule == ScheduleState.INBOX &&
+                nextWhenDate == null &&
+                existing.recurrenceRuleJson == null &&
+                (nextProjectId != null || nextAreaId != null)
+            ) {
+                ScheduleState.ANYTIME
+            } else {
+                rawSchedule
+            }
+
+            val nextDeadline = parsed.deadline ?: existing.deadline
+            val nextDuration = parsed.durationMinutes?.coerceIn(1, MAX_TASK_DURATION_MINUTES)
+                ?: existing.durationMinutes
+            val nextMilestone = if (parsed.isMilestone) true else existing.isMilestone
+            val mergedTagIds = (decodeStringList(existing.tagIdsJson) + parsed.matchedTagIds)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+
+            val updated = existing.copy(
+                title = nextTitle,
+                notes = nextNotes,
+                scheduleState = nextSchedule,
+                whenDate = nextWhenDate,
+                deadline = nextDeadline,
+                durationMinutes = nextDuration,
+                projectId = nextProjectId,
+                headingId = nextHeadingId,
+                areaId = nextAreaId,
+                isMilestone = nextMilestone,
+                tagIdsJson = json.encodeToString(mergedTagIds),
+                updatedAt = maxOf(now, existing.updatedAt + 1L),
+                isDirty = true
+            )
+            database.taskDao().upsertTaskWithTags(updated, mergedTagIds)
+            updatedForReminder = updated
+        }
+
+        val committed = updatedForReminder ?: return
+        if (titleChanged && !committed.isDeleted && committed.status == TaskStatus.OPEN &&
+            committed.reminderTime != null && committed.reminderTime > now
+        ) {
+            reminderScheduler.scheduleExactReminder(cleanId, committed.title, committed.reminderTime)
         }
         syncRepository.triggerBackgroundSync()
     }
@@ -2994,6 +3121,7 @@ class ThingsRepository @Inject constructor(
                     reminderTime = null,
                     scheduledStartMinutes = null,
                     durationMinutes = null,
+                    actualMinutes = null,
                     isPinned = false,
                     isMilestone = false,
                     effortLevel = null,
@@ -3119,6 +3247,7 @@ class ThingsRepository @Inject constructor(
             id = newTaskId,
             title = newTitle,
             status = TaskStatus.OPEN,
+            actualMinutes = null,
             completedAt = null,
             reminderTime = existing.reminderTime?.takeIf { it > now },
             isPinned = false,
@@ -3216,6 +3345,7 @@ class ThingsRepository @Inject constructor(
                     projectId = newProjectId,
                     headingId = mappedHeadingId,
                     status = TaskStatus.OPEN,
+                    actualMinutes = null,
                     completedAt = null,
                     reminderTime = null,
                     isPinned = false,
@@ -5148,6 +5278,7 @@ class ThingsRepository @Inject constructor(
                         reminderTime = t.reminderTime,
                         scheduledStartMinutes = t.scheduledStartMinutes,
                         durationMinutes = t.durationMinutes,
+                        actualMinutes = t.actualMinutes,
                         isPinned = t.isPinned,
                         isMilestone = t.isMilestone,
                         effortLevel = t.effortLevel,
@@ -5399,6 +5530,7 @@ class ThingsRepository @Inject constructor(
                     reminderTime = t.reminderTime,
                     scheduledStartMinutes = t.scheduledStartMinutes?.takeIf { it in 0..1439 },
                     durationMinutes = t.durationMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
+                    actualMinutes = t.actualMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
                     isPinned = t.isPinned,
                     isMilestone = t.isMilestone,
                     effortLevel = EffortLevel.normalize(t.effortLevel),
@@ -5563,6 +5695,7 @@ class ThingsRepository @Inject constructor(
         reminderTime = task.reminderTime,
         scheduledStartMinutes = task.scheduledStartMinutes,
         durationMinutes = task.durationMinutes,
+        actualMinutes = task.actualMinutes,
         isPinned = task.isPinned,
         isMilestone = task.isMilestone,
         effortLevel = task.effortLevel,

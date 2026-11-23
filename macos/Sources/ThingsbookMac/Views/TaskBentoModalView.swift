@@ -57,8 +57,12 @@ public struct TaskBentoModalView: View {
         max(340, min(650, (availableHeight ?? 680) - 36))
     }
 
+    private var parsedDraftSyntax: ParsedSmartSyntax {
+        store.parseSmartSyntax(draftTitle)
+    }
+
     private var resolvedMaxBodyHeight: CGFloat {
-        max(210, resolvedMaxModalHeight - 106)
+        max(210, resolvedMaxModalHeight - (parsedDraftSyntax.hasAnyMatch ? 142 : 106))
     }
 
     private var needsVerticalScroll: Bool {
@@ -91,6 +95,18 @@ public struct TaskBentoModalView: View {
         VStack(spacing: 0) {
             modalHeaderBar
                 .fixedSize(horizontal: false, vertical: true)
+
+            if parsedDraftSyntax.hasAnyMatch {
+                SmartSyntaxPreviewPillsView(
+                    store: store,
+                    parsed: parsedDraftSyntax,
+                    showDetectedLabel: true,
+                    onApply: applyDraftSmartSyntax
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 10)
+                .fixedSize(horizontal: false, vertical: true)
+            }
 
             Divider()
                 .opacity(0.65)
@@ -976,6 +992,12 @@ public struct TaskBentoModalView: View {
                             store.setTaskStandaloneDuration(current.id, durationMinutes: nil)
                         }
                     }
+                    if (current.actualMinutes ?? 0) > 0 {
+                        Button(store.tr("v32_reset_actual_time"), role: .destructive) {
+                            commitDraftEditsIfNeeded()
+                            store.setTaskActualMinutes(current.id, actualMinutes: nil)
+                        }
+                    }
                 }
                 .popover(isPresented: $isCustomDurationPopoverOpen) {
                     CustomDurationPopoverView(
@@ -984,6 +1006,21 @@ public struct TaskBentoModalView: View {
                     ) { customMins in
                         commitDraftEditsIfNeeded()
                         store.setTaskStandaloneDuration(current.id, durationMinutes: customMins)
+                    }
+                }
+
+                if let actualBadge = store.formattedActualTimeBadge(for: current) {
+                    BentoMenuPill(
+                        title: actualBadge,
+                        systemImage: "clock.arrow.circlepath",
+                        isActive: true,
+                        activeTint: ThingsMacPalette.logbookGreen,
+                        helpText: actualBadge
+                    ) {
+                        Button(store.tr("v32_reset_actual_time"), role: .destructive) {
+                            commitDraftEditsIfNeeded()
+                            store.setTaskActualMinutes(current.id, actualMinutes: nil)
+                        }
                     }
                 }
 
@@ -1358,6 +1395,53 @@ public struct TaskBentoModalView: View {
         if commitPendingChecklist {
             addPendingChecklistItem(commitDraftsFirst: false)
         }
+    }
+
+    private func applyDraftSmartSyntax() {
+        let parsed = parsedDraftSyntax
+        guard parsed.hasAnyMatch else { return }
+        draftSaveTask?.cancel()
+
+        var copy = latestTask
+        copy.title = parsed.cleanTitle
+        copy.notes = draftNotes
+
+        if let sched = parsed.scheduleState {
+            copy.scheduleState = sched
+            copy.whenDate = parsed.whenDate
+        }
+        if let dl = parsed.deadline {
+            copy.deadline = dl
+        }
+        if let dur = parsed.durationMinutes {
+            copy.durationMinutes = dur
+        }
+        if parsed.isMilestone {
+            copy.isMilestone = true
+        }
+        if let proj = parsed.matchedProject {
+            copy.projectId = proj.id
+            copy.headingId = nil
+            copy.areaId = proj.areaId
+            if copy.scheduleState == .inbox && parsed.scheduleState == nil {
+                copy.scheduleState = .anytime
+            }
+        } else if let area = parsed.matchedArea {
+            copy.projectId = nil
+            copy.headingId = nil
+            copy.areaId = area.id
+            if copy.scheduleState == .inbox && parsed.scheduleState == nil {
+                copy.scheduleState = .anytime
+            }
+        }
+
+        var mergedTagIds = copy.tagIds
+        for tid in parsed.matchedTagIds where !mergedTagIds.contains(tid) {
+            mergedTagIds.append(tid)
+        }
+
+        draftTitle = parsed.cleanTitle
+        store.updateTask(copy, tagIds: mergedTagIds)
     }
 
     private func addPendingChecklistItem(commitDraftsFirst: Bool = true) {

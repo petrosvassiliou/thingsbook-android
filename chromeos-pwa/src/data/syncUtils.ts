@@ -948,6 +948,11 @@ export function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
       task.scheduledStartMinutes != null ? Math.trunc(task.scheduledStartMinutes) : null,
     durationMinutes:
       task.durationMinutes != null ? Math.trunc(task.durationMinutes) : null,
+    actualMinutes: task.isDeleted
+      ? null
+      : task.actualMinutes != null
+        ? Math.trunc(task.actualMinutes)
+        : null,
     isPinned: !task.isDeleted && Boolean(task.isPinned),
     isMilestone: Boolean(task.isMilestone),
     effortLevel: task.isDeleted ? null : (task.effortLevel ?? null),
@@ -972,6 +977,7 @@ export function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
 
 export type RemoteTaskWithHints = TaskRecord & {
   omittedTimeblockFields?: boolean;
+  omittedActualMinutesField?: boolean;
   omittedPinnedField?: boolean;
   omittedMilestoneField?: boolean;
   omittedV30TaskFields?: boolean;
@@ -1011,6 +1017,12 @@ export function taskFromFirestoreMap(
     map,
     'scheduledStartMinutes'
   );
+  const omittedActualMinutesField = !Object.prototype.hasOwnProperty.call(map, 'actualMinutes');
+  const rawActualMinutes = syncNullableNumber(map.actualMinutes);
+  const actualMinutes =
+    rawActualMinutes != null && rawActualMinutes > 0
+      ? Math.max(1, Math.min(48_000, rawActualMinutes))
+      : null;
   const omittedPinnedField = !Object.prototype.hasOwnProperty.call(map, 'isPinned');
   const omittedMilestoneField = typeof map.isMilestone !== 'boolean';
   const omittedEffortField = !Object.prototype.hasOwnProperty.call(map, 'effortLevel');
@@ -1038,6 +1050,7 @@ export function taskFromFirestoreMap(
     reminderTime: syncNullableNumber(map.reminderTime),
     scheduledStartMinutes: syncNullableNumber(map.scheduledStartMinutes),
     durationMinutes: syncNullableNumber(map.durationMinutes),
+    actualMinutes: isDeleted ? null : actualMinutes,
     isPinned: Boolean(map.isPinned),
     isMilestone: resolvedIsMilestone,
     effortLevel: normalizeEffortLevel(map.effortLevel),
@@ -1057,6 +1070,7 @@ export function taskFromFirestoreMap(
     isDirty: false,
     purgedFromTrash: Boolean(map.purgedFromTrash || (isDeleted && !title && !notes)),
     ...(omittedTimeblockFields ? { omittedTimeblockFields: true } : {}),
+    ...(omittedActualMinutesField ? { omittedActualMinutesField: true } : {}),
     ...(omittedPinnedField ? { omittedPinnedField: true } : {}),
     ...(omittedMilestoneField ? { omittedMilestoneField: true } : {}),
     ...(omittedV30TaskFields ? { omittedV30TaskFields: true } : {}),

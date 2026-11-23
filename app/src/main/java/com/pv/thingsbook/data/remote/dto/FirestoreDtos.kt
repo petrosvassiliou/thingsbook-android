@@ -63,11 +63,13 @@ data class CloudDeltaBatchPayload(
             var omittedTimeblockIds = emptySet<String>()
             var omittedPinIds = emptySet<String>()
             var omittedV30TaskIds = emptySet<String>()
+            var omittedActualMinutesIds = emptySet<String>()
             runCatching {
                 val arr = rootObj["tasks"]?.jsonArray ?: return@runCatching
                 val tbSet = HashSet<String>()
                 val pinSet = HashSet<String>()
                 val v30Set = HashSet<String>()
+                val actSet = HashSet<String>()
                 for (el in arr) {
                     val obj = el.jsonObject
                     val tid = obj["id"]?.jsonPrimitive?.content?.trim().orEmpty()
@@ -85,10 +87,14 @@ data class CloudDeltaBatchPayload(
                     ) {
                         v30Set.add(tid)
                     }
+                    if (!obj.containsKey("actualMinutes")) {
+                        actSet.add(tid)
+                    }
                 }
                 omittedTimeblockIds = tbSet
                 omittedPinIds = pinSet
                 omittedV30TaskIds = v30Set
+                omittedActualMinutesIds = actSet
             }
 
             var omittedEndDateHeadingIds = emptySet<String>()
@@ -131,6 +137,7 @@ data class CloudDeltaBatchPayload(
                 omittedTimeblockIds.isEmpty() &&
                 omittedPinIds.isEmpty() &&
                 omittedV30TaskIds.isEmpty() &&
+                omittedActualMinutesIds.isEmpty() &&
                 omittedEndDateHeadingIds.isEmpty() &&
                 omittedStartDateHeadingIds.isEmpty() &&
                 omittedV30ProjectIds.isEmpty()
@@ -162,18 +169,25 @@ data class CloudDeltaBatchPayload(
                         }
                     }
                 },
-                tasks = if (omittedTimeblockIds.isEmpty() && omittedPinIds.isEmpty() && omittedV30TaskIds.isEmpty()) {
+                tasks = if (
+                    omittedTimeblockIds.isEmpty() &&
+                    omittedPinIds.isEmpty() &&
+                    omittedV30TaskIds.isEmpty() &&
+                    omittedActualMinutesIds.isEmpty()
+                ) {
                     base.tasks
                 } else {
                     base.tasks.map { dto ->
                         val omitTb = dto.id in omittedTimeblockIds
                         val omitPin = dto.id in omittedPinIds
                         val omitV30 = dto.id in omittedV30TaskIds
-                        if (omitTb || omitPin || omitV30) {
+                        val omitAct = dto.id in omittedActualMinutesIds
+                        if (omitTb || omitPin || omitV30 || omitAct) {
                             dto.copy(
                                 omittedTimeblockFields = dto.omittedTimeblockFields || omitTb,
                                 omittedPinField = dto.omittedPinField || omitPin,
-                                omittedV30TaskFields = dto.omittedV30TaskFields || omitV30
+                                omittedV30TaskFields = dto.omittedV30TaskFields || omitV30,
+                                omittedActualMinutesField = dto.omittedActualMinutesField || omitAct
                             )
                         } else {
                             dto
@@ -468,6 +482,7 @@ data class TaskFirestoreDto(
     val reminderTime: Long? = null,
     val scheduledStartMinutes: Int? = null,
     val durationMinutes: Int? = null,
+    val actualMinutes: Int? = null,
     val completedAt: Long? = null,
     val projectId: String? = null,
     val headingId: String? = null,
@@ -490,7 +505,9 @@ data class TaskFirestoreDto(
     @Transient
     val omittedPinField: Boolean = false,
     @Transient
-    val omittedV30TaskFields: Boolean = false
+    val omittedV30TaskFields: Boolean = false,
+    @Transient
+    val omittedActualMinutesField: Boolean = false
 ) {
     fun toEntity(existingLocal: TaskEntity? = null): TaskEntity {
         val isPurgedTombstone = isDeleted && (purgedFromTrash || (title.isEmpty() && notes.isEmpty()))
@@ -498,6 +515,11 @@ data class TaskFirestoreDto(
             emptyList()
         } else {
             blockedByTaskIds.map { it.trim() }.filter { it.isNotEmpty() && it != id }.distinct()
+        }
+        val resolvedActualMinutes = when {
+            isPurgedTombstone -> null
+            omittedActualMinutesField -> existingLocal?.actualMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES }
+            else -> actualMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES }
         }
         return TaskEntity(
             id = id,
@@ -510,6 +532,7 @@ data class TaskFirestoreDto(
             reminderTime = if (isPurgedTombstone) null else reminderTime,
             scheduledStartMinutes = if (isPurgedTombstone) null else scheduledStartMinutes?.takeIf { it in 0..1439 },
             durationMinutes = if (isPurgedTombstone) null else durationMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
+            actualMinutes = resolvedActualMinutes,
             completedAt = completedAt,
             projectId = if (isPurgedTombstone) null else projectId?.takeIf { it.isNotBlank() },
             headingId = if (isPurgedTombstone) null else headingId?.takeIf { it.isNotBlank() },
@@ -550,6 +573,7 @@ data class TaskFirestoreDto(
             "reminderTime" to reminderTime,
             "scheduledStartMinutes" to scheduledStartMinutes,
             "durationMinutes" to durationMinutes,
+            "actualMinutes" to (if (isPurgedTombstone) null else actualMinutes),
             "completedAt" to completedAt,
             "projectId" to projectId,
             "headingId" to headingId,
@@ -593,6 +617,7 @@ data class TaskFirestoreDto(
                 reminderTime = entity.reminderTime,
                 scheduledStartMinutes = entity.scheduledStartMinutes,
                 durationMinutes = entity.durationMinutes,
+                actualMinutes = if (isPurgedTombstone) null else entity.actualMinutes,
                 completedAt = entity.completedAt,
                 projectId = entity.projectId,
                 headingId = entity.headingId,
@@ -628,6 +653,7 @@ data class TaskFirestoreDto(
                 !map.containsKey("blockedByJson") &&
                 !map.containsKey("workspaceId") &&
                 !map.containsKey("assigneeId")
+            val omittedActualMinutes = !map.containsKey("actualMinutes")
             val rawIsPinned = map["isPinned"] as? Boolean ?: false
             val rawIsMilestone = map["isMilestone"] as? Boolean
             val rawBlockers = (map["blockedByTaskIds"] as? List<*>)?.filterIsInstance<String>()
@@ -646,6 +672,7 @@ data class TaskFirestoreDto(
                 reminderTime = (map["reminderTime"] as? Number)?.toLong(),
                 scheduledStartMinutes = (map["scheduledStartMinutes"] as? Number)?.toInt(),
                 durationMinutes = (map["durationMinutes"] as? Number)?.toInt(),
+                actualMinutes = if (purged) null else (map["actualMinutes"] as? Number)?.toInt(),
                 completedAt = (map["completedAt"] as? Number)?.toLong(),
                 projectId = (map["projectId"] as? String)?.takeIf { it.isNotBlank() },
                 headingId = (map["headingId"] as? String)?.takeIf { it.isNotBlank() },
@@ -665,7 +692,8 @@ data class TaskFirestoreDto(
                 purgedFromTrash = purged,
                 omittedTimeblockFields = omittedTimeblock,
                 omittedPinField = omittedPin,
-                omittedV30TaskFields = omittedV30
+                omittedV30TaskFields = omittedV30,
+                omittedActualMinutesField = omittedActualMinutes
             )
         }
     }

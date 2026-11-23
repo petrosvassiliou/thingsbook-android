@@ -118,6 +118,7 @@ export interface BackupTaskDto {
   reminderTime: number | null;
   scheduledStartMinutes?: number | null;
   durationMinutes?: number | null;
+  actualMinutes?: number | null;
   isPinned?: boolean | null;
   isMilestone?: boolean | null;
   effortLevel?: string | null;
@@ -438,6 +439,10 @@ export function buildBackupPayloadFromEntities(params: {
         reminderTime: t.reminderTime,
         scheduledStartMinutes: t.scheduledStartMinutes ?? null,
         durationMinutes: t.durationMinutes ?? null,
+        actualMinutes:
+          t.actualMinutes != null && Number.isFinite(t.actualMinutes) && t.actualMinutes > 0
+            ? Math.max(1, Math.min(48_000, Math.trunc(t.actualMinutes)))
+            : null,
         isPinned: Boolean(t.isPinned),
         isMilestone: Boolean(t.isMilestone),
         effortLevel: t.effortLevel ?? null,
@@ -1030,6 +1035,10 @@ export function normalizeBackupPayloadToEntities(
         t.durationMinutes != null && Number.isFinite(t.durationMinutes) && t.durationMinutes > 0
           ? Math.max(1, Math.min(48_000, Math.trunc(t.durationMinutes)))
           : null;
+      const actualMinutes =
+        t.actualMinutes != null && Number.isFinite(t.actualMinutes) && t.actualMinutes > 0
+          ? Math.max(1, Math.min(48_000, Math.trunc(t.actualMinutes)))
+          : null;
 
       const rawCandidates = safeParseBlockedByTaskIds(
         t.blockedByTaskIds ?? t.blockedByTaskIdsJson,
@@ -1064,6 +1073,7 @@ export function normalizeBackupPayloadToEntities(
         reminderTime: t.reminderTime ?? null,
         scheduledStartMinutes,
         durationMinutes,
+        actualMinutes,
         isPinned: Boolean(t.isPinned),
         isMilestone: Boolean(t.isMilestone),
         effortLevel: normalizeEffortLevel(t.effortLevel),

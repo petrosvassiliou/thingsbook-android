@@ -762,6 +762,7 @@ public actor FirebaseCloudSyncService {
         var omittedPinTaskIds = Set<String>()
         var omittedMilestoneTaskIds = Set<String>()
         var omittedV30TaskIds = Set<String>()
+        var omittedActualMinutesIds = Set<String>()
         let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(m) else { return nil }
             taskTags[parsed.task.id] = parsed.tagIds
@@ -776,6 +777,9 @@ public actor FirebaseCloudSyncService {
             }
             if parsed.omittedV30Fields {
                 omittedV30TaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedActualMinutes {
+                omittedActualMinutesIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -799,6 +803,7 @@ public actor FirebaseCloudSyncService {
                 taskOmittedPinTaskIds: omittedPinTaskIds,
                 taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                 taskOmittedV30TaskIds: omittedV30TaskIds,
+                taskOmittedActualMinutesIds: omittedActualMinutesIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -1231,6 +1236,7 @@ public actor FirebaseCloudSyncService {
                 "reminderTime": Self.fsNullableInt(task.reminderTime),
                 "scheduledStartMinutes": Self.fsNullableInt(task.scheduledStartMinutes.map(Int64.init)),
                 "durationMinutes": Self.fsNullableInt(task.durationMinutes.map(Int64.init)),
+                "actualMinutes": Self.fsNullableInt(task.isDeleted ? nil : task.actualMinutes.map(Int64.init)),
                 "completedAt": Self.fsNullableInt(task.completedAt),
                 "projectId": Self.fsNullableString(task.projectId),
                 "headingId": Self.fsNullableString(task.headingId),
@@ -1549,6 +1555,7 @@ public actor FirebaseCloudSyncService {
                 "reminderTime": task.reminderTime as Any,
                 "scheduledStartMinutes": task.scheduledStartMinutes as Any,
                 "durationMinutes": task.durationMinutes as Any,
+                "actualMinutes": (task.isDeleted ? nil : task.actualMinutes) as Any,
                 "completedAt": task.completedAt as Any,
                 "projectId": task.projectId as Any,
                 "headingId": task.headingId as Any,
@@ -1758,6 +1765,7 @@ public actor FirebaseCloudSyncService {
         var omittedPinTaskIds = Set<String>()
         var omittedMilestoneTaskIds = Set<String>()
         var omittedV30TaskIds = Set<String>()
+        var omittedActualMinutesIds = Set<String>()
         let tasks: [TaskItem] = taskMaps.compactMap { map -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(map) else { return nil }
             taskTagIds[parsed.task.id] = parsed.tagIds
@@ -1772,6 +1780,9 @@ public actor FirebaseCloudSyncService {
             }
             if parsed.omittedV30Fields {
                 omittedV30TaskIds.insert(parsed.task.id)
+            }
+            if parsed.omittedActualMinutes {
+                omittedActualMinutesIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -1812,6 +1823,7 @@ public actor FirebaseCloudSyncService {
                 taskOmittedPinTaskIds: omittedPinTaskIds,
                 taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                 taskOmittedV30TaskIds: omittedV30TaskIds,
+                taskOmittedActualMinutesIds: omittedActualMinutesIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -1994,6 +2006,7 @@ public actor FirebaseCloudSyncService {
             var omittedPinTaskIds = Set<String>()
             var omittedMilestoneTaskIds = Set<String>()
             var omittedV30TaskIds = Set<String>()
+            var omittedActualMinutesIds = Set<String>()
             let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
                 guard let parsed = Self.parseTaskWithHints(m) else { return nil }
                 taskTags[parsed.task.id] = parsed.tagIds
@@ -2008,6 +2021,9 @@ public actor FirebaseCloudSyncService {
                 }
                 if parsed.omittedV30Fields {
                     omittedV30TaskIds.insert(parsed.task.id)
+                }
+                if parsed.omittedActualMinutes {
+                    omittedActualMinutesIds.insert(parsed.task.id)
                 }
                 return parsed.task
             }
@@ -2030,6 +2046,7 @@ public actor FirebaseCloudSyncService {
                     taskOmittedPinTaskIds: omittedPinTaskIds,
                     taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                     taskOmittedV30TaskIds: omittedV30TaskIds,
+                    taskOmittedActualMinutesIds: omittedActualMinutesIds,
                     checklistItems: checklists,
                     attachments: attachments,
                     projectTemplates: projectTemplates
@@ -2553,7 +2570,7 @@ public actor FirebaseCloudSyncService {
 
     public static func parseTaskWithHints(
         _ map: [String: Any]
-    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool, omittedMilestone: Bool, omittedV30Fields: Bool)? {
+    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool, omittedMilestone: Bool, omittedV30Fields: Bool, omittedActualMinutes: Bool)? {
         guard let id = asString(map["id"]) else { return nil }
         var rule: RecurrenceRule? = nil
         if let recStr = asString(map["recurrenceRule"]), let data = recStr.data(using: .utf8) {
@@ -2570,6 +2587,7 @@ public actor FirebaseCloudSyncService {
             && !map.keys.contains("blockedByJson")
             && !map.keys.contains("workspaceId")
             && !map.keys.contains("assigneeId")
+        let omittedActualMinutes = !map.keys.contains("actualMinutes")
 
         var blockedIds = asStringList(map["blockedByTaskIds"])
         if blockedIds.isEmpty,
@@ -2578,6 +2596,11 @@ public actor FirebaseCloudSyncService {
            let decoded = try? JSONDecoder().decode([String].self, from: bData) {
             blockedIds = decoded
         }
+
+        let parsedActualMinutes: Int? = {
+            guard !isDeleted, let raw = asInt64(map["actualMinutes"]), raw > 0 else { return nil }
+            return min(48_000, Int(raw))
+        }()
 
         let task = TaskItem(
             id: id,
@@ -2590,6 +2613,7 @@ public actor FirebaseCloudSyncService {
             reminderTime: asInt64(map["reminderTime"]),
             scheduledStartMinutes: asInt64(map["scheduledStartMinutes"]).map(Int.init),
             durationMinutes: asInt64(map["durationMinutes"]).map(Int.init),
+            actualMinutes: parsedActualMinutes,
             completedAt: asInt64(map["completedAt"]),
             projectId: asString(map["projectId"]),
             headingId: asString(map["headingId"]),
@@ -2606,7 +2630,7 @@ public actor FirebaseCloudSyncService {
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
             isDeleted: isDeleted
         )
-        return (task, tids, omittedTimeblock, omittedPin, omittedMilestone, omittedV30Fields)
+        return (task, tids, omittedTimeblock, omittedPin, omittedMilestone, omittedV30Fields, omittedActualMinutes)
     }
 
     public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {

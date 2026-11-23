@@ -301,6 +301,32 @@ export interface TranslationStrings {
   v31ProjectCompleteAllTodos: string;
   v31ProjectCompleteAsIs: string;
   v31ProjectCompletedUndo: (title: string) => string;
+  v32CmdPalettePlaceholder: string;
+  v32CmdSectionActions: string;
+  v32CmdCreateTask: (title: string) => string;
+  v32CmdPlanMyDay: string;
+  v32CmdAiArchitect: string;
+  v32CmdWeeklyReview: string;
+  v32CmdOpenTemplates: string;
+  v32CmdToggleTheme: string;
+  v32CmdOpenSettings: string;
+  v32CmdZenFocus: string;
+  v32CmdSwitchList: string;
+  v32CmdSwitchBoard: string;
+  v32CmdSwitchRoadmap: string;
+  v32SmartSyntaxDetected: string;
+  v32SmartSyntaxApply: string;
+  v32SmartSyntaxHint: string;
+  v32ZenFocusTitle: string;
+  v32ZenExpandTooltip: string;
+  v32ZenMinimize: string;
+  v32ZenShortBreak: string;
+  v32ZenBreakActive: string;
+  v32ZenBackToFocus: string;
+  v32ActualFocusedShort: (actual: string) => string;
+  v32ActualVsEstimated: (actual: string, estimated?: string) => string;
+  v32LogbookFocused7d: (total: string) => string;
+  v32ResetActualTime: string;
   settingsBiometricLockTitle: string;
   settingsBiometricLockDesc: string;
   appLockTitle: string;
@@ -855,6 +881,32 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31ProjectCompleteAllTodos: 'Complete All & Finish',
     v31ProjectCompleteAsIs: 'Complete Project Only',
     v31ProjectCompletedUndo: (title) => `Project “${title}” completed`,
+    v32CmdPalettePlaceholder: 'Search or run a command… (@when !due ~30m #tag)',
+    v32CmdSectionActions: 'Quick Actions',
+    v32CmdCreateTask: (title) => `Create To-Do: “${title}”`,
+    v32CmdPlanMyDay: 'Plan My Day (Auto-Timeblock)',
+    v32CmdAiArchitect: 'Open Gemini AI Hub & Roadmap Architect',
+    v32CmdWeeklyReview: 'Start Weekly Review',
+    v32CmdOpenTemplates: 'Open Templates & Import/Export',
+    v32CmdToggleTheme: 'Cycle Theme (System / Light / Dark)',
+    v32CmdOpenSettings: 'Open Settings',
+    v32CmdZenFocus: 'Open Zen Focus Mode',
+    v32CmdSwitchList: 'Switch View to List',
+    v32CmdSwitchBoard: 'Switch View to Board',
+    v32CmdSwitchRoadmap: 'Switch View to Timeline',
+    v32SmartSyntaxDetected: 'Smart tokens',
+    v32SmartSyntaxApply: 'Apply',
+    v32SmartSyntaxHint: 'Tip: @tomorrow !fri ~45m #tag /Project',
+    v32ZenFocusTitle: 'Zen Focus',
+    v32ZenExpandTooltip: 'Enter Zen Focus Mode',
+    v32ZenMinimize: 'Minimize',
+    v32ZenShortBreak: '5m Break',
+    v32ZenBreakActive: 'Short Break',
+    v32ZenBackToFocus: 'Back to Focus',
+    v32ActualFocusedShort: (actual) => `Focused ${actual}`,
+    v32ActualVsEstimated: (actual, estimated = '') => `Focused ${actual} / ${estimated}`,
+    v32LogbookFocused7d: (total) => `Focused (7d): ${total}`,
+    v32ResetActualTime: 'Reset tracked time',
     settingsBiometricLockTitle: 'Biometric / PIN App Lock',
     settingsBiometricLockDesc:
       'Require fingerprint, face unlock, or device PIN when opening Thingsbook (off by default).',
@@ -1418,6 +1470,32 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31ProjectCompleteAllTodos: 'Alle erledigen & abschließen',
     v31ProjectCompleteAsIs: 'Nur Projekt abschließen',
     v31ProjectCompletedUndo: (title) => `Projekt „${title}“ abgeschlossen`,
+    v32CmdPalettePlaceholder: 'Suchen oder Befehl ausführen… (@wann !frist ~30m #tag)',
+    v32CmdSectionActions: 'Schnellaktionen',
+    v32CmdCreateTask: (title) => `Aufgabe erstellen: „${title}“`,
+    v32CmdPlanMyDay: 'Meinen Tag planen (Auto-Zeitblöcke)',
+    v32CmdAiArchitect: 'Gemini KI-Hub & Roadmap-Architekt öffnen',
+    v32CmdWeeklyReview: 'Wochenrückblick starten',
+    v32CmdOpenTemplates: 'Vorlagen & Import/Export öffnen',
+    v32CmdToggleTheme: 'Design wechseln (System / Hell / Dunkel)',
+    v32CmdOpenSettings: 'Einstellungen öffnen',
+    v32CmdZenFocus: 'Zen-Fokusmodus öffnen',
+    v32CmdSwitchList: 'Zur Listenansicht wechseln',
+    v32CmdSwitchBoard: 'Zur Board-Ansicht wechseln',
+    v32CmdSwitchRoadmap: 'Zur Zeitachsen-Ansicht wechseln',
+    v32SmartSyntaxDetected: 'Smart-Tokens',
+    v32SmartSyntaxApply: 'Übernehmen',
+    v32SmartSyntaxHint: 'Tipp: @morgen !fr ~45m #tag /Projekt',
+    v32ZenFocusTitle: 'Zen-Fokus',
+    v32ZenExpandTooltip: 'Zen-Fokusmodus öffnen',
+    v32ZenMinimize: 'Minimieren',
+    v32ZenShortBreak: '5m Pause',
+    v32ZenBreakActive: 'Kurze Pause',
+    v32ZenBackToFocus: 'Zurück zum Fokus',
+    v32ActualFocusedShort: (actual) => `Fokus ${actual}`,
+    v32ActualVsEstimated: (actual, estimated = '') => `Fokus ${actual} / ${estimated}`,
+    v32LogbookFocused7d: (total) => `Fokuszeit (7 Tg.): ${total}`,
+    v32ResetActualTime: 'Erfasste Zeit zurücksetzen',
     settingsBiometricLockTitle: 'Biometrische App-Sperre (Fingerabdruck / PIN)',
     settingsBiometricLockDesc:
       'Beim Öffnen von Thingsbook Fingerabdruck, Gesichtserkennung oder Geräte-PIN anfordern (standardmäßig deaktiviert).',
@@ -1980,6 +2058,32 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31ProjectCompleteAllTodos: 'Tout cocher & terminer',
     v31ProjectCompleteAsIs: 'Terminer uniquement le projet',
     v31ProjectCompletedUndo: (title) => `Projet « ${title} » terminé`,
+    v32CmdPalettePlaceholder: 'Rechercher ou lancer une commande… (@quand !échéance ~30m #tag)',
+    v32CmdSectionActions: 'Actions rapides',
+    v32CmdCreateTask: (title) => `Créer la tâche : « ${title} »`,
+    v32CmdPlanMyDay: 'Planifier ma journée (créneaux auto)',
+    v32CmdAiArchitect: 'Ouvrir le Hub IA Gemini & Architecte',
+    v32CmdWeeklyReview: 'Démarrer la revue hebdomadaire',
+    v32CmdOpenTemplates: 'Ouvrir Modèles & Import/Export',
+    v32CmdToggleTheme: 'Changer de thème (Système / Clair / Sombre)',
+    v32CmdOpenSettings: 'Ouvrir les réglages',
+    v32CmdZenFocus: 'Ouvrir le mode Zen Focus',
+    v32CmdSwitchList: 'Passer en vue Liste',
+    v32CmdSwitchBoard: 'Passer en vue Tableau',
+    v32CmdSwitchRoadmap: 'Passer en vue Chronologie',
+    v32SmartSyntaxDetected: 'Jetons intelligents',
+    v32SmartSyntaxApply: 'Appliquer',
+    v32SmartSyntaxHint: 'Astuce : @demain !ven ~45m #tag /Projet',
+    v32ZenFocusTitle: 'Zen Focus',
+    v32ZenExpandTooltip: 'Ouvrir le mode Zen Focus',
+    v32ZenMinimize: 'Réduire',
+    v32ZenShortBreak: 'Pause 5m',
+    v32ZenBreakActive: 'Courte pause',
+    v32ZenBackToFocus: 'Retour au focus',
+    v32ActualFocusedShort: (actual) => `Focus ${actual}`,
+    v32ActualVsEstimated: (actual, estimated = '') => `Focus ${actual} / ${estimated}`,
+    v32LogbookFocused7d: (total) => `Focus (7 j) : ${total}`,
+    v32ResetActualTime: 'Réinitialiser le temps suivi',
     settingsBiometricLockTitle: 'Verrouillage biométrique / PIN',
     settingsBiometricLockDesc:
       "Exiger l'empreinte digitale, la reconnaissance faciale ou le code PIN à l'ouverture (désactivé par défaut).",
@@ -2544,6 +2648,32 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31ProjectCompleteAllTodos: 'Completa tutto e chiudi',
     v31ProjectCompleteAsIs: 'Completa solo il progetto',
     v31ProjectCompletedUndo: (title) => `Progetto «${title}» completato`,
+    v32CmdPalettePlaceholder: 'Cerca o esegui un comando… (@quando !scadenza ~30m #tag)',
+    v32CmdSectionActions: 'Azioni rapide',
+    v32CmdCreateTask: (title) => `Crea attività: «${title}»`,
+    v32CmdPlanMyDay: 'Pianifica la mia giornata (blocchi auto)',
+    v32CmdAiArchitect: 'Apri Hub IA Gemini & Architetto Roadmap',
+    v32CmdWeeklyReview: 'Avvia revisione settimanale',
+    v32CmdOpenTemplates: 'Apri Modelli & Importa/Esporta',
+    v32CmdToggleTheme: 'Cambia tema (Sistema / Chiaro / Scuro)',
+    v32CmdOpenSettings: 'Apri impostazioni',
+    v32CmdZenFocus: 'Apri modalità Zen Focus',
+    v32CmdSwitchList: 'Passa alla vista Elenco',
+    v32CmdSwitchBoard: 'Passa alla vista Bacheca',
+    v32CmdSwitchRoadmap: 'Passa alla vista Cronologia',
+    v32SmartSyntaxDetected: 'Token smart',
+    v32SmartSyntaxApply: 'Applica',
+    v32SmartSyntaxHint: 'Suggerimento: @domani !ven ~45m #tag /Progetto',
+    v32ZenFocusTitle: 'Zen Focus',
+    v32ZenExpandTooltip: 'Apri modalità Zen Focus',
+    v32ZenMinimize: 'Riduci',
+    v32ZenShortBreak: 'Pausa 5m',
+    v32ZenBreakActive: 'Pausa breve',
+    v32ZenBackToFocus: 'Torna al focus',
+    v32ActualFocusedShort: (actual) => `Focus ${actual}`,
+    v32ActualVsEstimated: (actual, estimated = '') => `Focus ${actual} / ${estimated}`,
+    v32LogbookFocused7d: (total) => `Focus (7g): ${total}`,
+    v32ResetActualTime: 'Azzera tempo registrato',
     settingsBiometricLockTitle: 'Blocco app biometrico / PIN',
     settingsBiometricLockDesc:
       "Richiedi impronta digitale, sblocco facciale o PIN all'apertura (disattivato per impostazione predefinita).",
@@ -3107,6 +3237,32 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v31ProjectCompleteAllTodos: 'Completar todo y cerrar',
     v31ProjectCompleteAsIs: 'Completar solo el proyecto',
     v31ProjectCompletedUndo: (title) => `Proyecto «${title}» completado`,
+    v32CmdPalettePlaceholder: 'Buscar o ejecutar comando… (@cuándo !límite ~30m #tag)',
+    v32CmdSectionActions: 'Acciones rápidas',
+    v32CmdCreateTask: (title) => `Crear tarea: «${title}»`,
+    v32CmdPlanMyDay: 'Planificar mi día (bloques auto)',
+    v32CmdAiArchitect: 'Abrir Hub IA Gemini y Arquitecto Roadmap',
+    v32CmdWeeklyReview: 'Iniciar revisión semanal',
+    v32CmdOpenTemplates: 'Abrir Plantillas e Importar/Exportar',
+    v32CmdToggleTheme: 'Cambiar tema (Sistema / Claro / Oscuro)',
+    v32CmdOpenSettings: 'Abrir ajustes',
+    v32CmdZenFocus: 'Abrir modo Zen Focus',
+    v32CmdSwitchList: 'Cambiar a vista Lista',
+    v32CmdSwitchBoard: 'Cambiar a vista Tablero',
+    v32CmdSwitchRoadmap: 'Cambiar a vista Cronograma',
+    v32SmartSyntaxDetected: 'Tokens inteligentes',
+    v32SmartSyntaxApply: 'Aplicar',
+    v32SmartSyntaxHint: 'Consejo: @mañana !vie ~45m #tag /Proyecto',
+    v32ZenFocusTitle: 'Zen Focus',
+    v32ZenExpandTooltip: 'Abrir modo Zen Focus',
+    v32ZenMinimize: 'Minimizar',
+    v32ZenShortBreak: 'Pausa 5m',
+    v32ZenBreakActive: 'Pausa breve',
+    v32ZenBackToFocus: 'Volver al enfoque',
+    v32ActualFocusedShort: (actual) => `Enfoque ${actual}`,
+    v32ActualVsEstimated: (actual, estimated = '') => `Enfoque ${actual} / ${estimated}`,
+    v32LogbookFocused7d: (total) => `Enfoque (7d): ${total}`,
+    v32ResetActualTime: 'Restablecer tiempo registrado',
     settingsBiometricLockTitle: 'Bloqueo biométrico / PIN',
     settingsBiometricLockDesc:
       'Requerir huella digital, desbloqueo facial o PIN al abrir Thingsbook (desactivado por defecto).',

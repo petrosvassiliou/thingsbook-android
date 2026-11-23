@@ -29,6 +29,10 @@ public struct QuickEntrySheetView: View {
         store.projects.filter { $0.status == .active }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    private var parsedSmartSyntax: ParsedSmartSyntax {
+        store.parseSmartSyntax(title)
+    }
+
     private var resolvedDestination: QuickShareDestination {
         if selectedDestKey == "today" {
             return .today
@@ -109,6 +113,14 @@ public struct QuickEntrySheetView: View {
                 }
                 .buttonStyle(.plain)
                 .thingsTooltip(voiceController.isRecording ? store.tr("macos_voice_stop") : store.tr("voice_capture_prompt"))
+            }
+
+            if parsedSmartSyntax.hasAnyMatch {
+                SmartSyntaxPreviewPillsView(
+                    store: store,
+                    parsed: parsedSmartSyntax,
+                    showDetectedLabel: !isMenuBarPopover
+                )
             }
 
             if voiceController.isRecording {
@@ -489,11 +501,31 @@ public struct QuickEntrySheetView: View {
 
     private func saveQuickTask() {
         voiceController.stopRecording()
-        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = parsedSmartSyntax
+        let cleanTitle = parsed.cleanTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return }
 
-        let dl = hasDeadline ? DateEpochConverter.startOfDayMillis(for: deadlineDate) : nil
-        store.quickCaptureTask(title: cleanTitle, notes: notes, destination: resolvedDestination, deadline: dl)
+        var effectiveDest = resolvedDestination
+        if let proj = parsed.matchedProject {
+            effectiveDest = .project(proj.id)
+        } else if let area = parsed.matchedArea {
+            effectiveDest = .area(area.id)
+        }
+
+        let explicitDl = hasDeadline ? DateEpochConverter.startOfDayMillis(for: deadlineDate) : nil
+        let finalDl = parsed.deadline ?? explicitDl
+
+        store.quickCaptureTask(
+            title: cleanTitle,
+            notes: notes,
+            destination: effectiveDest,
+            scheduleStateOverride: parsed.scheduleState,
+            whenDate: parsed.whenDate,
+            deadline: finalDl,
+            durationMinutes: parsed.durationMinutes,
+            tagIds: parsed.matchedTagIds,
+            isMilestone: parsed.isMilestone
+        )
         title = ""
         notes = ""
         hasDeadline = false

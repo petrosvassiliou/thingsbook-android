@@ -801,9 +801,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(115, BuildConfig.VERSION_CODE)
-        assertEquals("3.1.2", BuildConfig.VERSION_NAME)
-        assertFalse("3.1.2 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(116, BuildConfig.VERSION_CODE)
+        assertEquals("3.2.0", BuildConfig.VERSION_NAME)
+        assertFalse("3.2.0 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2437,7 +2437,7 @@ class V2UpgradeAndFeaturesTest {
         val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
-        assertTrue("ThingsDatabase must be at Room version = 7", dbKt.contains("version = 7"))
+        assertTrue("ThingsDatabase must be at Room version = 8", dbKt.contains("version = 8"))
         assertTrue("AppModule must register MIGRATION_5_6", appModuleKt.contains("MIGRATION_5_6"))
         assertTrue("AppModule must register MIGRATION_6_7", appModuleKt.contains("MIGRATION_6_7"))
 

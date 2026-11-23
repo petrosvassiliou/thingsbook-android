@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowDown,
@@ -18,6 +18,7 @@ import {
   Edit3,
   FileText,
   Flag,
+  Folder,
   FolderInput,
   GripVertical,
   Hash,
@@ -82,6 +83,10 @@ import {
   extractDraggedTaskIds,
   hasDraggedTaskMime
 } from '../domain/v30Roadmap';
+import {
+  parseSmartTaskSyntax,
+  type ParsedSmartSyntax
+} from '../domain/smartSyntaxParser';
 
 interface ChecklistSubtaskRowProps {
   item: ChecklistItemRecord;
@@ -664,6 +669,75 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     }
   };
 
+  const allTagsList = useMemo(() => Array.from(tagsMap.values()), [tagsMap]);
+  const allProjectsList = useMemo(() => Array.from(projectsMap.values()), [projectsMap]);
+  const allAreasList = useMemo(() => Array.from(areasMap.values()), [areasMap]);
+  const smartSyntaxEntitiesRef = useRef({
+    tags: allTagsList,
+    projects: allProjectsList,
+    areas: allAreasList,
+    lang
+  });
+  smartSyntaxEntitiesRef.current = {
+    tags: allTagsList,
+    projects: allProjectsList,
+    areas: allAreasList,
+    lang
+  };
+
+  const buildSmartSyntaxPatch = (parsed: ParsedSmartSyntax, baseTask: TaskRecord) => ({
+    id: baseTask.id,
+    title: parsed.cleanTitle,
+    ...(parsed.scheduleState != null
+      ? { scheduleState: parsed.scheduleState, whenDate: parsed.whenDate }
+      : {}),
+    ...(parsed.reminderTime != null ? { reminderTime: parsed.reminderTime } : {}),
+    ...(parsed.deadline != null ? { deadline: parsed.deadline } : {}),
+    ...(parsed.durationMinutes != null ? { durationMinutes: parsed.durationMinutes } : {}),
+    ...(parsed.matchedTagIds.length > 0 ? { addTagIds: parsed.matchedTagIds } : {}),
+    ...(parsed.matchedProject
+      ? {
+          projectId: parsed.matchedProject.id,
+          headingId:
+            baseTask.projectId === parsed.matchedProject.id ? baseTask.headingId : null,
+          areaId: null
+        }
+      : parsed.matchedArea
+        ? {
+            projectId: null,
+            headingId: null,
+            areaId: parsed.matchedArea.id
+          }
+        : {}),
+    ...(parsed.isMilestone ? { isMilestone: true } : {})
+  });
+
+  const expandedParsedSmart = useMemo(
+    () =>
+      isExpanded
+        ? parseSmartTaskSyntax(titleDraft, {
+            tags: allTagsList,
+            projects: allProjectsList,
+            areas: allAreasList,
+            lang
+          })
+        : null,
+    [isExpanded, titleDraft, allTagsList, allProjectsList, allAreasList, lang]
+  );
+
+  const inlineParsedSmart = useMemo(
+    () =>
+      isInlineQuickEditing && !isExpanded
+        ? parseSmartTaskSyntax(inlineTitleDraft, {
+            tags: allTagsList,
+            projects: allProjectsList,
+            areas: allAreasList,
+            lang
+          })
+        : null,
+    [isInlineQuickEditing, isExpanded, inlineTitleDraft, allTagsList, allProjectsList, allAreasList, lang]
+  );
+
   const startInlineQuickEdit = () => {
     setInlineTitleDraft(task.title);
     setCollapsedBadgePopover(null);
@@ -672,7 +746,19 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
   const commitInlineQuickTitle = (exitAfterCommit: boolean) => {
     const clean = inlineTitleDraft.trim();
-    if (clean !== task.title) {
+    const parsed = parseSmartTaskSyntax(clean, {
+      tags: allTagsList,
+      projects: allProjectsList,
+      areas: allAreasList,
+      lang
+    });
+    if (parsed.hasAnyMatch) {
+      setInlineTitleDraft(parsed.cleanTitle);
+      void localDb.upsertTask({
+        ...buildSmartSyntaxPatch(parsed, task),
+        notes: task.notes
+      });
+    } else if (clean !== task.title) {
       persistTitleNotes(clean, task.notes);
     }
     if (exitAfterCommit) {
@@ -693,7 +779,13 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       if (collapsedRowRef.current?.contains(target)) return;
       if (target.closest('.modal-backdrop, .context-menu')) return;
       const clean = inlineTitleInputRef.current?.value.trim() ?? taskLatestRef.current.title;
-      if (clean !== taskLatestRef.current.title) {
+      const parsed = parseSmartTaskSyntax(clean, smartSyntaxEntitiesRef.current);
+      if (parsed.hasAnyMatch) {
+        void localDb.upsertTask({
+          ...buildSmartSyntaxPatch(parsed, taskLatestRef.current),
+          notes: taskLatestRef.current.notes
+        });
+      } else if (clean !== taskLatestRef.current.title) {
         if (onUpdateTitleNotes) {
           onUpdateTitleNotes(clean, taskLatestRef.current.notes);
         } else {
@@ -708,6 +800,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     };
     window.addEventListener('pointerdown', handleOutsidePointerDown);
     return () => window.removeEventListener('pointerdown', handleOutsidePointerDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isInlineQuickEditing, isExpanded, onUpdateTitleNotes]);
 
   const runMagicBreakdown = async () => {
@@ -767,6 +860,16 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   const anyDurationLabel =
     task.durationMinutes != null && Number.isFinite(task.durationMinutes) && task.durationMinutes > 0
       ? formatStandaloneDuration(task.durationMinutes)
+      : '';
+  const actualMinutesValue =
+    task.actualMinutes != null && Number.isFinite(task.actualMinutes) && task.actualMinutes > 0
+      ? Math.trunc(task.actualMinutes)
+      : 0;
+  const actualFocusedBadgeLabel =
+    actualMinutesValue > 0
+      ? anyDurationLabel
+        ? t.v32ActualVsEstimated(formatStandaloneDuration(actualMinutesValue), anyDurationLabel)
+        : t.v32ActualFocusedShort(formatStandaloneDuration(actualMinutesValue))
       : '';
   const effortDisplayLabel =
     task.effortLevel === 'QUICK_WIN'
@@ -1058,6 +1161,75 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             </button>
           </div>
         </div>
+
+        {/* v3.2 Live Smart-Syntax Preview Strip with 1-Click Apply */}
+        {expandedParsedSmart?.hasAnyMatch && (
+          <div
+            className="v32-smart-syntax-strip task-modal-smart-strip"
+            data-testid="task-smart-syntax-strip"
+          >
+            <span className="v32-smart-syntax-label">{t.v32SmartSyntaxDetected}</span>
+            <div className="v32-smart-syntax-pills">
+              {expandedParsedSmart.scheduleState != null && (
+                <span className="meta-badge today">
+                  <Calendar size={10.5} />
+                  <span>{expandedParsedSmart.whenLabel || expandedParsedSmart.scheduleState}</span>
+                </span>
+              )}
+              {expandedParsedSmart.deadline != null && (
+                <span className="meta-badge urgent">
+                  <Flag size={10.5} />
+                  <span>{expandedParsedSmart.deadlineLabel}</span>
+                </span>
+              )}
+              {expandedParsedSmart.durationMinutes != null && (
+                <span className="meta-badge duration-badge">
+                  <Hourglass size={10} />
+                  <span>{formatStandaloneDuration(expandedParsedSmart.durationMinutes)}</span>
+                </span>
+              )}
+              {expandedParsedSmart.isMilestone && (
+                <span className="meta-badge milestone-badge">
+                  <Diamond size={10} />
+                  <span>{t.milestoneLabel}</span>
+                </span>
+              )}
+              {expandedParsedSmart.matchedProject && (
+                <span className="meta-badge">
+                  <Folder size={10.5} />
+                  <span>{expandedParsedSmart.matchedProject.title}</span>
+                </span>
+              )}
+              {!expandedParsedSmart.matchedProject && expandedParsedSmart.matchedArea && (
+                <span className="meta-badge">
+                  <Folder size={10.5} />
+                  <span>{expandedParsedSmart.matchedArea.title}</span>
+                </span>
+              )}
+              {expandedParsedSmart.matchedTags.map((tg) => (
+                <span key={tg.id} className="meta-badge">
+                  <LayoutGrid size={9.5} />
+                  <span>#{tg.title}</span>
+                </span>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="chip-btn active v32-smart-apply-btn"
+              data-testid="task-smart-syntax-apply-btn"
+              onClick={() => {
+                setTitleDraft(expandedParsedSmart.cleanTitle);
+                void localDb.upsertTask({
+                  ...buildSmartSyntaxPatch(expandedParsedSmart, task),
+                  notes: notesDraft
+                });
+              }}
+            >
+              <Check size={12} />
+              <span>{t.v32SmartSyntaxApply}</span>
+            </button>
+          </div>
+        )}
 
         {/* Internal Scrollable 2-Column Soft Bento Body */}
         <div className="task-bento-modal-body">
@@ -1547,6 +1719,36 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                       </button>
                     </span>
                   )}
+
+                  {actualMinutesValue > 0 && (
+                    <span
+                      className="task-bento-inline-sub"
+                      data-testid="task-actual-minutes-group"
+                    >
+                      <span
+                        className="meta-badge duration-badge"
+                        data-testid="task-actual-minutes-badge"
+                      >
+                        <Timer size={11} />
+                        <span>{actualFocusedBadgeLabel}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        data-testid="task-reset-actual-minutes-btn"
+                        title={t.v32ResetActualTime}
+                        onClick={() =>
+                          void localDb.upsertTask({
+                            id: task.id,
+                            actualMinutes: null
+                          })
+                        }
+                      >
+                        <RotateCcw size={11} />
+                        <span>{t.v32ResetActualTime}</span>
+                      </button>
+                    </span>
+                  )}
                 </div>
 
                 {effortDurationOpen && (
@@ -1949,6 +2151,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     showCollapsedSchedulePill ||
     Boolean(timeblockRangeLabel) ||
     Boolean(standaloneDurationLabel) ||
+    actualMinutesValue > 0 ||
     Boolean(effortDisplayLabel) ||
     isActivelyBlocked ||
     task.recurrenceRule != null ||
@@ -2105,6 +2308,52 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   <Check size={13} strokeWidth={2.6} />
                 </button>
               </div>
+
+              {inlineParsedSmart?.hasAnyMatch && (
+                <div
+                  className="v32-smart-syntax-strip compact"
+                  data-testid="task-inline-smart-syntax-strip"
+                >
+                  <span className="v32-smart-syntax-label">{t.v32SmartSyntaxDetected}</span>
+                  <div className="v32-smart-syntax-pills">
+                    {inlineParsedSmart.scheduleState != null && (
+                      <span className="meta-badge today">
+                        <span>{inlineParsedSmart.whenLabel || inlineParsedSmart.scheduleState}</span>
+                      </span>
+                    )}
+                    {inlineParsedSmart.deadline != null && (
+                      <span className="meta-badge urgent">
+                        <span>{inlineParsedSmart.deadlineLabel}</span>
+                      </span>
+                    )}
+                    {inlineParsedSmart.durationMinutes != null && (
+                      <span className="meta-badge duration-badge">
+                        <span>{formatStandaloneDuration(inlineParsedSmart.durationMinutes)}</span>
+                      </span>
+                    )}
+                    {inlineParsedSmart.isMilestone && (
+                      <span className="meta-badge milestone-badge">
+                        <span>◆ {t.milestoneLabel}</span>
+                      </span>
+                    )}
+                    {inlineParsedSmart.matchedProject && (
+                      <span className="meta-badge">
+                        <span>{inlineParsedSmart.matchedProject.title}</span>
+                      </span>
+                    )}
+                    {!inlineParsedSmart.matchedProject && inlineParsedSmart.matchedArea && (
+                      <span className="meta-badge">
+                        <span>{inlineParsedSmart.matchedArea.title}</span>
+                      </span>
+                    )}
+                    {inlineParsedSmart.matchedTags.map((tg) => (
+                      <span key={tg.id} className="meta-badge">
+                        <span>#{tg.title}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div
                 className="task-row-quick-strip"
@@ -2465,7 +2714,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     type="button"
                     className="meta-badge interactive-badge duration-badge"
                     data-testid="task-row-duration-pill"
-                    title={`${t.durationLabel}: ${standaloneDurationLabel}`}
+                    title={`${t.durationLabel}: ${
+                      actualMinutesValue > 0 ? actualFocusedBadgeLabel : standaloneDurationLabel
+                    }`}
                     onClick={(e) => {
                       e.stopPropagation();
                       setCollapsedBadgePopover((cur) =>
@@ -2474,7 +2725,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     }}
                   >
                     <Hourglass size={10} />
-                    <span>{standaloneDurationLabel}</span>
+                    <span>
+                      {actualMinutesValue > 0 ? actualFocusedBadgeLabel : standaloneDurationLabel}
+                    </span>
                   </button>
                   {collapsedBadgePopover === 'duration' && (
                     <>
@@ -2561,6 +2814,18 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   )}
                 </div>
               ) : null}
+
+              {/* 1b-actual. Logged actualMinutes pill when no standalone duration pill is shown */}
+              {actualMinutesValue > 0 && !standaloneDurationLabel && (
+                <span
+                  className="meta-badge duration-badge"
+                  data-testid="task-row-actual-minutes-pill"
+                  title={actualFocusedBadgeLabel}
+                >
+                  <Timer size={10} />
+                  <span>{actualFocusedBadgeLabel}</span>
+                </span>
+              )}
 
               {/* 1c. v3.0 Effort Pill */}
               {effortDisplayLabel && (

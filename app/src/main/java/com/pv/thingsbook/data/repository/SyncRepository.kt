@@ -986,6 +986,7 @@ class SyncRepository @Inject constructor(
                         tagIdsJson = "[]",
                         scheduledStartMinutes = null,
                         durationMinutes = null,
+                        actualMinutes = null,
                         isPinned = false,
                         effortLevel = null,
                         blockedByJson = "[]",

@@ -222,7 +222,7 @@ public struct ThingsCommandMenus: Commands {
                 guard !isCommandBlocked else { return }
                 store.toggleSelectedTasksCompletion()
             }
-            .keyboardShortcut("k", modifiers: [.command])
+            .keyboardShortcut(".", modifiers: [.command])
             .disabled(isCommandBlocked)
 
             Button(store.tr(allPinTargetsPinned ? "v25_unpin_task" : "v25_pin_task")) {
@@ -336,7 +336,7 @@ public struct ThingsCommandMenus: Commands {
                 guard !isCommandBlocked else { return }
                 store.isQuickFindPresented = true
             }
-            .keyboardShortcut("f", modifiers: [.command])
+            .keyboardShortcut("k", modifiers: [.command])
             .disabled(isCommandBlocked)
 
             Button(store.tr("v2_weekly_review_title")) {

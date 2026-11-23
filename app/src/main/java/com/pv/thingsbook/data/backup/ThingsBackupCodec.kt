@@ -117,6 +117,7 @@ data class BackupTaskDto(
     val reminderTime: Long? = null,
     val scheduledStartMinutes: Int? = null,
     val durationMinutes: Int? = null,
+    val actualMinutes: Int? = null,
     val completedAt: Long? = null,
     val projectId: String? = null,
     val headingId: String? = null,

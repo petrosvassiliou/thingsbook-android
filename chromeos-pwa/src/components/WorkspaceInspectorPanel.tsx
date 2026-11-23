@@ -20,6 +20,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  RotateCcw,
   Sun,
   Timer,
   X,
@@ -511,6 +512,22 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
         ? formatStandaloneDuration(selectedTask.durationMinutes)
         : t.durationLabel;
 
+    const actualMinutesValue =
+      selectedTask.actualMinutes != null &&
+      Number.isFinite(selectedTask.actualMinutes) &&
+      selectedTask.actualMinutes > 0
+        ? Math.trunc(selectedTask.actualMinutes)
+        : 0;
+    const actualInspectorBadgeLabel =
+      actualMinutesValue > 0
+        ? selectedTask.durationMinutes != null && selectedTask.durationMinutes > 0
+          ? t.v32ActualVsEstimated(
+              formatStandaloneDuration(actualMinutesValue),
+              formatStandaloneDuration(selectedTask.durationMinutes)
+            )
+          : t.v32ActualFocusedShort(formatStandaloneDuration(actualMinutesValue))
+        : '';
+
     const effortLabel =
       selectedTask.effortLevel === 'QUICK_WIN'
         ? `⚡ ${t.effortQuickWin}`
@@ -852,6 +869,36 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 <span>{effortLabel}</span>
               </button>
             </div>
+
+            {actualMinutesValue > 0 && (
+              <div
+                className="inspector-actual-minutes-row"
+                data-testid="inspector-actual-minutes-row"
+              >
+                <span
+                  className="meta-badge duration-badge"
+                  data-testid="inspector-actual-minutes-badge"
+                >
+                  <Timer size={11} />
+                  <span>{actualInspectorBadgeLabel}</span>
+                </span>
+                <button
+                  type="button"
+                  className="chip-btn"
+                  data-testid="inspector-reset-actual-minutes-btn"
+                  title={t.v32ResetActualTime}
+                  onClick={() =>
+                    void localDb.upsertTask({
+                      id: selectedTask.id,
+                      actualMinutes: null
+                    })
+                  }
+                >
+                  <RotateCcw size={11} />
+                  <span>{t.v32ResetActualTime}</span>
+                </button>
+              </div>
+            )}
 
             {showTimeblockPicker && (
               <div className="inspector-inline-picker">

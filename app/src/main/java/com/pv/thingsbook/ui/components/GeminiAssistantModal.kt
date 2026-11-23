@@ -92,7 +92,7 @@ fun GeminiAssistantModal(
         mutableStateOf(dayPlanPreview?.blocks.orEmpty())
     }
     var selectedPlanTaskIds by remember(dayPlanPreview) {
-        mutableStateOf(dayPlanPreview?.blocks?.mapTo(linkedSetOf()) { it.taskId } ?: emptySet())
+        mutableStateOf<Set<String>>(dayPlanPreview?.blocks?.map { it.taskId }?.toSet() ?: emptySet())
     }
     var apiKeyInput by remember(currentApiKey) { mutableStateOf(currentApiKey) }
     var showApiKeyField by remember { mutableStateOf(false) }

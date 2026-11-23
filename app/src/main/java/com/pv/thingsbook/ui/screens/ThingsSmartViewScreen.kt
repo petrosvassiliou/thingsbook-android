@@ -3962,6 +3962,10 @@ private fun ThingsModalsOverlay(
     val isGeminiBusy by viewModel.isGeminiBusy.collectAsState()
     val geminiApiKey by viewModel.geminiApiKey.collectAsState()
     val geminiErrorMessage by viewModel.geminiErrorMessage.collectAsState()
+    val geminiInitialTab by viewModel.geminiInitialTab.collectAsState()
+    val geminiDayPlanPreview by viewModel.geminiDayPlanPreview.collectAsState()
+    val workdayStartMinutes by viewModel.workdayStartMinutes.collectAsState()
+    val workdayEndMinutes by viewModel.workdayEndMinutes.collectAsState()
 
     val isAuthModalOpen by viewModel.isAuthModalOpen.collectAsState()
     val isSigningIn by viewModel.isSigningIn.collectAsState()
@@ -4110,8 +4114,8 @@ private fun ThingsModalsOverlay(
             onSetGroupTodayByProjectOrArea = { viewModel.setGroupTodayByProjectOrArea(it) },
             showPerspectivesInSidebar = showPerspectivesInSidebar,
             onSetShowPerspectivesInSidebar = viewModel::setShowPerspectivesInSidebar,
-            workdayStartMinutes = workdayStartMinutesTop,
-            workdayEndMinutes = workdayEndMinutesTop,
+            workdayStartMinutes = workdayStartMinutes,
+            workdayEndMinutes = workdayEndMinutes,
             onSetWorkdayBounds = { s, e -> viewModel.setWorkdayBounds(s, e) },
             biometricAppLockEnabled = biometricAppLockEnabled,
             onSetBiometricAppLockEnabled = { viewModel.setBiometricAppLockEnabled(it) },
@@ -4182,9 +4186,9 @@ private fun ThingsModalsOverlay(
         GeminiAssistantModal(
             isProcessing = isGeminiBusy,
             currentApiKey = geminiApiKey,
-            initialTab = geminiInitialTabTop,
+            initialTab = geminiInitialTab,
             errorMessage = geminiErrorMessage,
-            dayPlanPreview = geminiDayPlanPreviewTop,
+            dayPlanPreview = geminiDayPlanPreview,
             todayOpenTasksById = todayOpenMap,
             onClearError = { viewModel.clearGeminiErrorMessage() },
             onUpdateApiKey = { viewModel.updateGeminiApiKey(it) },

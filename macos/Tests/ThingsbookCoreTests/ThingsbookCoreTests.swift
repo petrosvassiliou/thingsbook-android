@@ -6632,6 +6632,7 @@ final class ThingsbookCoreTests: XCTestCase {
         let macosRoot = testFileURL
             .deletingLastPathComponent() // ThingsbookCoreTests
             .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // macos
         let sourcesRoot = macosRoot.appendingPathComponent("Sources")
         let geminiSheetURL = sourcesRoot
             .appendingPathComponent("ThingsbookMac")

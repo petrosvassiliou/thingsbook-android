@@ -2388,14 +2388,27 @@ class ThingsbookViewModel @Inject constructor(
 
     fun triggerManualCloudSync() {
         if (_isLocalOnlyDbMode.value) {
-            _uiErrorMessage.value = getLocalizedString(R.string.settings_err_local_mode_sync)
+            val localErr = getLocalizedString(R.string.settings_err_local_mode_sync)
+            _uiErrorMessage.value = localErr
+            if (_isAuthModalOpen.value) {
+                _authErrorMessage.value = localErr
+            }
             return
         }
+        _authErrorMessage.value = null
         safeVmScope.launch {
-            syncRepository.syncBidirectionalDeltas().onFailure { err ->
-                Log.w(TAG, "Manual cloud sync failed", err)
-                _uiErrorMessage.value = err.localizedMessage ?: err.message.orEmpty()
-            }
+            syncRepository.syncBidirectionalDeltas()
+                .onSuccess {
+                    _authErrorMessage.value = null
+                }
+                .onFailure { err ->
+                    Log.w(TAG, "Manual cloud sync failed", err)
+                    val msg = err.localizedMessage ?: err.message.orEmpty()
+                    _uiErrorMessage.value = msg
+                    if (_isAuthModalOpen.value && msg.isNotBlank()) {
+                        _authErrorMessage.value = msg
+                    }
+                }
         }
     }
 

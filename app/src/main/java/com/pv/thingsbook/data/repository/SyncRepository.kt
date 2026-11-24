@@ -36,6 +36,7 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -46,6 +47,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -62,6 +64,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -295,6 +298,11 @@ class SyncRepository @Inject constructor(
                     val email = prefs[KEY_ACTIVE_USER_EMAIL]
                     val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC] ?: deriveOAuthChannelTopic(userId)
 
+                    if (isLiveFirebaseConfigured() && !ensureFirestoreAuthReady(userId, email, channelTopic)) {
+                        _syncStatus.value = CloudSyncStatus.OFFLINE
+                        return@runCatchingCancellable
+                    }
+
                     // If dirty rows accumulated while offline (>30s old), pull remote deltas FIRST
                     // and restamp surviving dirty rows so peers querying with 120s overlap never miss them.
                     if (hasStaleOfflineDirtyEntities()) {
@@ -328,6 +336,9 @@ class SyncRepository @Inject constructor(
         incrementalPullJob = scope.launch {
             if (delayMs > 0L) delay(delayMs)
             runCatchingCancellable {
+                if (runCatching { firebaseAuth.currentUser?.uid }.getOrNull() != userId) {
+                    return@runCatchingCancellable
+                }
                 syncMutex.withLock {
                     val lastSync = getLastSyncTimestamp(userId)
                     val fbMax = pullDeltaRecordsFromFirestore(userId, lastSync)
@@ -472,47 +483,53 @@ class SyncRepository @Inject constructor(
         _activeUserIdentifier.value = email
 
         if (!isLocalOnlyDbModeEnabled()) {
-            var maxPulled = 0L
-            val fbPulledOk = if (isLiveFirebaseConfigured()) {
-                runCatchingCancellable { pullDeltaRecordsFromFirestore(uid, 0L, forceFullPull = true) }
-                    .onSuccess { maxPulled = maxOf(maxPulled, it) }
-                    .isSuccess
-            } else {
-                false
-            }
-            var ntfyPulledOk = false
-            if (!fbPulledOk) {
-                val legacyPull = pullDeltaRecordsFromBuiltInCloudWithStatus(
-                    userId = uid,
-                    channelTopic = channelTopic,
-                    lastSyncTimestamp = 0L,
-                    forceFullHistory = true
-                )
-                ntfyPulledOk = legacyPull.second
-                maxPulled = maxOf(maxPulled, legacyPull.first)
-            } else {
-                scope.launch {
-                    runCatchingCancellable {
-                        for (legacyTopic in deriveLegacySyncTopics(uid, email, channelTopic)) {
-                            pullDeltaRecordsFromBuiltInCloud(uid, legacyTopic, 0L, forceFullHistory = true)
+            try {
+                var maxPulled = 0L
+                val fbPulledOk = if (isLiveFirebaseConfigured() && ensureFirestoreAuthReady(uid, email, channelTopic)) {
+                    runCatchingCancellable { pullDeltaRecordsFromFirestore(uid, 0L, forceFullPull = true) }
+                        .onSuccess { maxPulled = maxOf(maxPulled, it) }
+                        .isSuccess
+                } else {
+                    false
+                }
+                var ntfyPulledOk = false
+                if (!fbPulledOk) {
+                    val legacyPull = pullDeltaRecordsFromBuiltInCloudWithStatus(
+                        userId = uid,
+                        channelTopic = channelTopic,
+                        lastSyncTimestamp = 0L,
+                        forceFullHistory = true
+                    )
+                    ntfyPulledOk = legacyPull.second
+                    maxPulled = maxOf(maxPulled, legacyPull.first)
+                } else {
+                    scope.launch {
+                        runCatchingCancellable {
+                            for (legacyTopic in deriveLegacySyncTopics(uid, email, channelTopic)) {
+                                pullDeltaRecordsFromBuiltInCloud(uid, legacyTopic, 0L, forceFullHistory = true)
+                            }
                         }
                     }
                 }
+                pushDirtyRecordsPrimaryFirst(
+                    userId = uid,
+                    channelTopic = channelTopic,
+                    email = email,
+                    restampStaleOffline = true
+                )
+                val nowMillis = System.currentTimeMillis()
+                // Never advance pull cursor to nowMillis if BOTH Firestore and fallback pull failed!
+                if (fbPulledOk || (!isLiveFirebaseConfigured() && ntfyPulledOk)) {
+                    saveLastSyncTimestamp(uid, maxOf(clampRemoteTimestamp(maxPulled, nowMillis), nowMillis))
+                }
+                _lastSyncedAt.value = nowMillis
+                _syncStatus.value = if (fbPulledOk || ntfyPulledOk) CloudSyncStatus.SYNCED else CloudSyncStatus.OFFLINE
+                startRealtimeMultiDeviceSync(uid, channelTopic, email)
+            } finally {
+                if (_syncStatus.value == CloudSyncStatus.SYNCING) {
+                    _syncStatus.value = CloudSyncStatus.OFFLINE
+                }
             }
-            pushDirtyRecordsPrimaryFirst(
-                userId = uid,
-                channelTopic = channelTopic,
-                email = email,
-                restampStaleOffline = true
-            )
-            val nowMillis = System.currentTimeMillis()
-            // Never advance pull cursor to nowMillis if BOTH Firestore and fallback pull failed!
-            if (fbPulledOk || (!isLiveFirebaseConfigured() && ntfyPulledOk)) {
-                saveLastSyncTimestamp(uid, maxOf(clampRemoteTimestamp(maxPulled, nowMillis), nowMillis))
-            }
-            _lastSyncedAt.value = nowMillis
-            _syncStatus.value = if (fbPulledOk || ntfyPulledOk) CloudSyncStatus.SYNCED else CloudSyncStatus.OFFLINE
-            startRealtimeMultiDeviceSync(uid, channelTopic, email)
         } else {
             _syncStatus.value = CloudSyncStatus.OFFLINE
         }
@@ -1116,100 +1133,182 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    private suspend fun <T> withFirestoreTimeout(
+        timeoutMs: Long = 10_000L,
+        block: suspend CoroutineScope.() -> T
+    ): T {
+        return try {
+            withTimeout(timeoutMs, block)
+        } catch (tce: TimeoutCancellationException) {
+            throw IOException(localizedCloudOfflineError(), tce)
+        }
+    }
+
+    private suspend fun ensureFirestoreAuthReady(
+        expectedUid: String,
+        email: String? = null,
+        channelTopic: String? = null
+    ): Boolean {
+        if (!isLiveFirebaseConfigured() || expectedUid.isBlank()) return false
+        if (runCatching { firebaseAuth.currentUser?.uid }.getOrNull() == expectedUid) {
+            return true
+        }
+
+        // Wait briefly on cold start in case FirebaseAuth is hydrating currentUser from SharedPreferences
+        val hydratedUid = withTimeoutOrNull(1800L) {
+            val deferred = CompletableDeferred<String?>()
+            val listener = FirebaseAuth.AuthStateListener { auth ->
+                val u = auth.currentUser
+                if (u != null && !deferred.isCompleted) {
+                    deferred.complete(u.uid)
+                }
+            }
+            withContext(Dispatchers.Main) {
+                val immediate = runCatching { firebaseAuth.currentUser }.getOrNull()
+                if (immediate != null) {
+                    deferred.complete(immediate.uid)
+                } else {
+                    runCatching { firebaseAuth.addAuthStateListener(listener) }
+                }
+            }
+            try {
+                deferred.await()
+            } finally {
+                withContext(Dispatchers.Main) {
+                    runCatching { firebaseAuth.removeAuthStateListener(listener) }
+                }
+            }
+        }
+        if (hydratedUid == expectedUid) return true
+
+        // If Instant Email Sync was used and FirebaseAuth lost its local session, silently re-authenticate
+        val normEmail = email?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        if (
+            runCatching { firebaseAuth.currentUser }.getOrNull() == null &&
+            normEmail.contains("@") &&
+            !normEmail.endsWith("@thingsbook.app") &&
+            channelTopic == deriveInstantChannelTopic(normEmail)
+        ) {
+            val instantHash = sha256Hex("tb-instant-v2:$normEmail")
+            val derivedPw = "TbCloud!${instantHash.take(14)}"
+            val recoveredUid = withTimeoutOrNull(6000L) {
+                runCatchingCancellable {
+                    authenticateFirebaseEmailWithFallback(normEmail, derivedPw, allowAutoCreateOnSignIn = false)
+                }.getOrNull()
+            }
+            if (recoveredUid == expectedUid || runCatching { firebaseAuth.currentUser?.uid }.getOrNull() == expectedUid) {
+                return true
+            }
+        }
+
+        return runCatching { firebaseAuth.currentUser?.uid }.getOrNull() == expectedUid
+    }
+
     suspend fun syncBidirectionalDeltas(): Result<Unit> = withContext(Dispatchers.IO) {
         if (isLocalOnlyDbModeEnabled()) {
             _syncStatus.value = CloudSyncStatus.OFFLINE
             return@withContext Result.success(Unit)
         }
         syncMutex.withLock {
-            runCatchingCancellable {
-                val prefs = context.syncDataStore.data
-                    .catch { emit(emptyPreferences()) }
-                    .first()
-                dataStoreLocalOnlyFlag = prefs[SYNC_KEY_LOCAL_ONLY_DB_MODE] == true
-                if (isLocalOnlyDbModeEnabled()) {
-                    _syncStatus.value = CloudSyncStatus.OFFLINE
-                    return@runCatchingCancellable
-                }
-                val userId = prefs[KEY_ACTIVE_USER_ID]
-                    ?: runCatching { firebaseAuth.currentUser?.uid }.getOrNull()
-                    ?: return@runCatchingCancellable
-                val email = prefs[KEY_ACTIVE_USER_EMAIL]
-                val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC] ?: deriveOAuthChannelTopic(userId)
-
-                _syncStatus.value = CloudSyncStatus.SYNCING
-
-                val liveFb = isLiveFirebaseConfigured()
-                var anyTransportSucceeded = false
-
-                // 1. Pull remote deltas FIRST so offline/stale local rows never overwrite newer cloud state
-                val lastSync = getLastSyncTimestamp(userId)
-                var maxObservedTimestamp = lastSync
-                var fbPullSucceeded = false
-                if (liveFb) {
-                    runCatchingCancellable { pullDeltaRecordsFromFirestore(userId, lastSync) }
-                        .onSuccess { fbMax ->
-                            fbPullSucceeded = true
-                            anyTransportSucceeded = true
-                            val clampedFbMax = clampRemoteTimestamp(fbMax)
-                            if (clampedFbMax > maxObservedTimestamp) maxObservedTimestamp = clampedFbMax
-                        }
-                }
-
-                val legacyTopics = deriveLegacySyncTopics(userId, email, channelTopic)
-                if (!fbPullSucceeded) {
-                    for (topic in legacyTopics) {
-                        val (topicMax, ok) = pullDeltaRecordsFromBuiltInCloudWithStatus(
-                            userId = userId,
-                            channelTopic = topic,
-                            lastSyncTimestamp = lastSync,
-                            forceFullHistory = false
-                        )
-                        if (ok) {
-                            anyTransportSucceeded = true
-                            val clamped = clampRemoteTimestamp(topicMax)
-                            if (clamped > maxObservedTimestamp) maxObservedTimestamp = clamped
-                        }
+            try {
+                runCatchingCancellable {
+                    val prefs = context.syncDataStore.data
+                        .catch { emit(emptyPreferences()) }
+                        .first()
+                    dataStoreLocalOnlyFlag = prefs[SYNC_KEY_LOCAL_ONLY_DB_MODE] == true
+                    if (isLocalOnlyDbModeEnabled()) {
+                        _syncStatus.value = CloudSyncStatus.OFFLINE
+                        return@runCatchingCancellable
                     }
-                } else {
-                    scope.launch {
-                        runCatchingCancellable {
-                            for (topic in legacyTopics) {
-                                pullDeltaRecordsFromBuiltInCloud(userId, topic, lastSync, forceFullHistory = false)
+                    val userId = prefs[KEY_ACTIVE_USER_ID]
+                        ?: runCatching { firebaseAuth.currentUser?.uid }.getOrNull()
+                        ?: return@runCatchingCancellable
+                    val email = prefs[KEY_ACTIVE_USER_EMAIL]
+                    val channelTopic = prefs[KEY_ACTIVE_CHANNEL_TOPIC] ?: deriveOAuthChannelTopic(userId)
+
+                    val liveFb = isLiveFirebaseConfigured()
+                    if (liveFb && !ensureFirestoreAuthReady(userId, email, channelTopic)) {
+                        _syncStatus.value = CloudSyncStatus.OFFLINE
+                        throw IllegalStateException(localizedSessionExpiredError())
+                    }
+
+                    _syncStatus.value = CloudSyncStatus.SYNCING
+
+                    var anyTransportSucceeded = false
+
+                    // 1. Pull remote deltas FIRST so offline/stale local rows never overwrite newer cloud state
+                    val lastSync = getLastSyncTimestamp(userId)
+                    var maxObservedTimestamp = lastSync
+                    var fbPullSucceeded = false
+                    if (liveFb) {
+                        runCatchingCancellable { pullDeltaRecordsFromFirestore(userId, lastSync) }
+                            .onSuccess { fbMax ->
+                                fbPullSucceeded = true
+                                anyTransportSucceeded = true
+                                val clampedFbMax = clampRemoteTimestamp(fbMax)
+                                if (clampedFbMax > maxObservedTimestamp) maxObservedTimestamp = clampedFbMax
+                            }
+                    }
+
+                    val legacyTopics = deriveLegacySyncTopics(userId, email, channelTopic)
+                    if (!fbPullSucceeded) {
+                        for (topic in legacyTopics) {
+                            val (topicMax, ok) = pullDeltaRecordsFromBuiltInCloudWithStatus(
+                                userId = userId,
+                                channelTopic = topic,
+                                lastSyncTimestamp = lastSync,
+                                forceFullHistory = false
+                            )
+                            if (ok) {
+                                anyTransportSucceeded = true
+                                val clamped = clampRemoteTimestamp(topicMax)
+                                if (clamped > maxObservedTimestamp) maxObservedTimestamp = clamped
+                            }
+                        }
+                    } else {
+                        scope.launch {
+                            runCatchingCancellable {
+                                for (topic in legacyTopics) {
+                                    pullDeltaRecordsFromBuiltInCloud(userId, topic, lastSync, forceFullHistory = false)
+                                }
                             }
                         }
                     }
-                }
 
-                // 2. Restamp surviving stale offline dirty rows and push outbound deltas SECOND
-                if (pushDirtyRecordsPrimaryFirst(
-                        userId = userId,
-                        channelTopic = channelTopic,
-                        email = email,
-                        restampStaleOffline = true
-                    )
-                ) {
-                    anyTransportSucceeded = true
-                }
-
-                if (!anyTransportSucceeded) {
-                    throw IOException(localizedCloudOfflineError())
-                }
-
-                val nowMillis = System.currentTimeMillis()
-                if (fbPullSucceeded || !liveFb) {
-                    if (maxObservedTimestamp > lastSync) {
-                        saveLastSyncTimestamp(userId, clampRemoteTimestamp(maxObservedTimestamp, nowMillis))
-                    } else if (lastSync == 0L) {
-                        saveLastSyncTimestamp(userId, nowMillis)
+                    // 2. Restamp surviving stale offline dirty rows and push outbound deltas SECOND
+                    if (pushDirtyRecordsPrimaryFirst(
+                            userId = userId,
+                            channelTopic = channelTopic,
+                            email = email,
+                            restampStaleOffline = true
+                        )
+                    ) {
+                        anyTransportSucceeded = true
                     }
-                }
-                _lastSyncedAt.value = nowMillis
 
-                _syncStatus.value = CloudSyncStatus.SYNCED
-            }.onFailure { err ->
-                Log.w("SyncRepository", "syncBidirectionalDeltas failed", err)
-                _syncStatus.value = CloudSyncStatus.OFFLINE
+                    if (!anyTransportSucceeded) {
+                        throw IOException(localizedCloudOfflineError())
+                    }
+
+                    val nowMillis = System.currentTimeMillis()
+                    if (fbPullSucceeded || !liveFb) {
+                        if (maxObservedTimestamp > lastSync) {
+                            saveLastSyncTimestamp(userId, clampRemoteTimestamp(maxObservedTimestamp, nowMillis))
+                        } else if (lastSync == 0L) {
+                            saveLastSyncTimestamp(userId, nowMillis)
+                        }
+                    }
+                    _lastSyncedAt.value = nowMillis
+
+                    _syncStatus.value = CloudSyncStatus.SYNCED
+                }.onFailure { err ->
+                    Log.w("SyncRepository", "syncBidirectionalDeltas failed", err)
+                    _syncStatus.value = CloudSyncStatus.OFFLINE
+                }
+            } finally {
+                if (_syncStatus.value == CloudSyncStatus.SYNCING) {
+                    _syncStatus.value = CloudSyncStatus.OFFLINE
+                }
             }
         }
     }
@@ -1861,6 +1960,9 @@ class SyncRepository @Inject constructor(
 
     suspend fun pushDirtyRecordsToFirestore(userId: String, markAsSynced: Boolean = true) {
         if (isLocalOnlyDbModeEnabled()) return
+        if (isLiveFirebaseConfigured() && runCatching { firebaseAuth.currentUser?.uid }.getOrNull() != userId) {
+            throw IllegalStateException(localizedSessionExpiredError())
+        }
         val userDoc = firestore.collection("users").document(userId)
 
         val dirtyAreas = database.areaDao().getDirtyAreas()
@@ -1904,7 +2006,7 @@ class SyncRepository @Inject constructor(
             if (idx == metaChunks.lastIndex && dirtyAttachments.isEmpty()) {
                 batch.set(pulseRef, pulseMap, SetOptions.merge())
             }
-            batch.commit().await()
+            withFirestoreTimeout(10_000L) { batch.commit().await() }
         }
 
         // Sync attachments in batches of 8 with 700 KB inline cap and metadata-only merge when file exceeds cap/missing
@@ -1930,7 +2032,7 @@ class SyncRepository @Inject constructor(
             if (idx == attChunks.lastIndex) {
                 batch.set(pulseRef, pulseMap, SetOptions.merge())
             }
-            batch.commit().await()
+            withFirestoreTimeout(10_000L) { batch.commit().await() }
         }
 
         if (markAsSynced) {
@@ -1962,6 +2064,9 @@ class SyncRepository @Inject constructor(
         forceFullPull: Boolean = false
     ): Long {
         if (isLocalOnlyDbModeEnabled()) return lastSyncTimestamp
+        if (isLiveFirebaseConfigured() && runCatching { firebaseAuth.currentUser?.uid }.getOrNull() != userId) {
+            throw IllegalStateException(localizedSessionExpiredError())
+        }
         val userDoc = firestore.collection("users").document(userId)
 
         val prefs = context.syncDataStore.data
@@ -2019,29 +2124,31 @@ class SyncRepository @Inject constructor(
             val templates: com.google.firebase.firestore.QuerySnapshot?
         )
 
-        val fetched = coroutineScope {
-            val tagDef = async { queryCollectionSince(userDoc, "tags", tagFloor).get().await() }
-            val areaDef = async { queryCollectionSince(userDoc, "areas", areaFloor).get().await() }
-            val projectDef = async { queryCollectionSince(userDoc, "projects", projectFloor).get().await() }
-            val headingDef = async { queryCollectionSince(userDoc, "headings", headingFloor).get().await() }
-            val taskDef = async { queryCollectionSince(userDoc, "tasks", taskFloor).get().await() }
-            val checklistDef = async { queryCollectionSince(userDoc, "checklist_items", checklistFloor).get().await() }
-            val attachmentDef = async { queryCollectionSince(userDoc, "attachments", attachmentFloor).get().await() }
-            val templateDef = async {
-                runCatchingCancellable {
-                    queryCollectionSince(userDoc, "project_templates", templateFloor).get().await()
-                }.getOrNull()
+        val fetched = withFirestoreTimeout(12_000L) {
+            coroutineScope {
+                val tagDef = async { queryCollectionSince(userDoc, "tags", tagFloor).get().await() }
+                val areaDef = async { queryCollectionSince(userDoc, "areas", areaFloor).get().await() }
+                val projectDef = async { queryCollectionSince(userDoc, "projects", projectFloor).get().await() }
+                val headingDef = async { queryCollectionSince(userDoc, "headings", headingFloor).get().await() }
+                val taskDef = async { queryCollectionSince(userDoc, "tasks", taskFloor).get().await() }
+                val checklistDef = async { queryCollectionSince(userDoc, "checklist_items", checklistFloor).get().await() }
+                val attachmentDef = async { queryCollectionSince(userDoc, "attachments", attachmentFloor).get().await() }
+                val templateDef = async {
+                    runCatchingCancellable {
+                        queryCollectionSince(userDoc, "project_templates", templateFloor).get().await()
+                    }.getOrNull()
+                }
+                ParallelSnapshots(
+                    tags = tagDef.await(),
+                    areas = areaDef.await(),
+                    projects = projectDef.await(),
+                    headings = headingDef.await(),
+                    tasks = taskDef.await(),
+                    checklists = checklistDef.await(),
+                    attachments = attachmentDef.await(),
+                    templates = templateDef.await()
+                )
             }
-            ParallelSnapshots(
-                tags = tagDef.await(),
-                areas = areaDef.await(),
-                projects = projectDef.await(),
-                headings = headingDef.await(),
-                tasks = taskDef.await(),
-                checklists = checklistDef.await(),
-                attachments = attachmentDef.await(),
-                templates = templateDef.await()
-            )
         }
         val tagSnapshots = fetched.tags
         val areaSnapshots = fetched.areas
@@ -2223,6 +2330,13 @@ class SyncRepository @Inject constructor(
 
     suspend fun attachRealtimeDeltaListeners(userId: String) {
         if (isLocalOnlyDbModeEnabled()) return
+        if (isLiveFirebaseConfigured() && runCatching { firebaseAuth.currentUser?.uid }.getOrNull() != userId) {
+            synchronized(activeListeners) {
+                activeListeners.forEach { runCatching { it.remove() } }
+                activeListeners.clear()
+            }
+            return
+        }
         runCatchingCancellable {
             synchronized(activeListeners) {
                 activeListeners.forEach { runCatching { it.remove() } }
@@ -2243,7 +2357,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2289,7 +2403,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2320,7 +2434,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2355,7 +2469,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2386,7 +2500,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2421,7 +2535,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2461,7 +2575,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2496,7 +2610,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { snapshot, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2528,7 +2642,7 @@ class SyncRepository @Inject constructor(
                 .addSnapshotListener { docSnap, error ->
                     try {
                         if (error != null) {
-                            scheduleListenerReconnect(userId)
+                            scheduleListenerReconnect(userId, error)
                             return@addSnapshotListener
                         }
                         if (docSnap == null || !docSnap.exists() || isLocalOnlyDbModeEnabled()) return@addSnapshotListener
@@ -2546,12 +2660,26 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    private fun scheduleListenerReconnect(userId: String) {
+    private fun scheduleListenerReconnect(userId: String, error: Exception? = null) {
         if (isLocalOnlyDbModeEnabled() || !isLiveFirebaseConfigured()) return
+        val fsCode = (error as? FirebaseFirestoreException)?.code
+        val authInvalid = fsCode == FirebaseFirestoreException.Code.PERMISSION_DENIED ||
+            fsCode == FirebaseFirestoreException.Code.UNAUTHENTICATED ||
+            runCatching { firebaseAuth.currentUser?.uid }.getOrNull() != userId
+        if (authInvalid) {
+            synchronized(activeListeners) {
+                activeListeners.forEach { runCatching { it.remove() } }
+                activeListeners.clear()
+            }
+            if (_syncStatus.value == CloudSyncStatus.SYNCING) {
+                _syncStatus.value = CloudSyncStatus.OFFLINE
+            }
+            return
+        }
         if (listenerReconnectJob?.isActive == true) return
         listenerReconnectJob = scope.launch {
             delay(2000L)
-            if (!isLocalOnlyDbModeEnabled()) {
+            if (!isLocalOnlyDbModeEnabled() && runCatching { firebaseAuth.currentUser?.uid }.getOrNull() == userId) {
                 runCatchingCancellable { syncBidirectionalDeltas() }
                 runCatchingCancellable { attachRealtimeDeltaListeners(userId) }
             }
@@ -2635,6 +2763,14 @@ class SyncRepository @Inject constructor(
         "it" -> "La sincronizzazione Cloud è attualmente offline o non raggiungibile."
         "es" -> "La sincronización en la nube está desconectada o inaccesible."
         else -> "Cloud sync service is currently offline or unreachable."
+    }
+
+    private fun localizedSessionExpiredError(): String = when (activeLang()) {
+        "de" -> "Cloud-Sitzung abgelaufen. Bitte tippe auf „Abmelden“ und melde dich einmal kurz neu an."
+        "fr" -> "Session Cloud expirée. Appuyez sur « Se déconnecter » et reconnectez-vous."
+        "it" -> "Sessione Cloud scaduta. Tocca «Esci» ed effettua nuovamente l'accesso."
+        "es" -> "La sesión en la nube expiró. Pulsa «Cerrar sesión» y vuelve a iniciar sesión."
+        else -> "Cloud session expired. Please tap 'Sign Out' and sign back in once."
     }
 
     data class RecurringWinnerEnrichment(

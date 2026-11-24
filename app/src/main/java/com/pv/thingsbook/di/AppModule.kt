@@ -25,6 +25,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.io.File
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 import javax.inject.Provider
 import javax.inject.Singleton
 
@@ -235,10 +238,77 @@ object AppModule {
     @Provides
     fun provideProjectTemplateDao(db: ThingsDatabase): ProjectTemplateDao = db.projectTemplateDao()
 
+    internal fun computeFirebasePersistenceKey(appName: String, applicationId: String): String {
+        val encoder = Base64.getUrlEncoder().withoutPadding()
+        val encodedName = encoder.encodeToString(appName.toByteArray(StandardCharsets.UTF_8))
+        val encodedAppId = encoder.encodeToString(applicationId.toByteArray(StandardCharsets.UTF_8))
+        return "$encodedName+$encodedAppId"
+    }
+
+    /**
+     * Seamlessly migrates persisted FirebaseAuth user + refresh-token SharedPreferences across the
+     * v3.2.0 -> v3.2.1+ mobilesdk_app_id transition (2e24f279bece36e1c82b0e -> ae032e65e4138ee2c82b0e)
+     * before FirebaseAuth.getInstance(app) initializes, so existing signed-in users keep their live
+     * Firestore auth session without needing to sign out and back in.
+     */
+    private fun migrateLegacyFirebaseAuthStoreIfNeeded(context: Context, app: FirebaseApp) {
+        runCatching {
+            val currentAppId = app.options.applicationId
+            if (currentAppId.isBlank() || currentAppId.contains("000000000000")) return@runCatching
+
+            val storePrefix = "com.google.firebase.auth.api.Store."
+            val userKey = "com.google.firebase.auth.FIREBASE_USER"
+            val targetStoreName = storePrefix + computeFirebasePersistenceKey(app.name, currentAppId)
+            val targetPrefs = context.getSharedPreferences(targetStoreName, Context.MODE_PRIVATE)
+            if (!targetPrefs.getString(userKey, null).isNullOrBlank()) return@runCatching
+
+            val candidateStoreNames = LinkedHashSet<String>()
+            candidateStoreNames += storePrefix + computeFirebasePersistenceKey(
+                app.name,
+                "1:116792699915:android:2e24f279bece36e1c82b0e"
+            )
+            val sharedPrefsDir = File(context.applicationInfo.dataDir, "shared_prefs")
+            sharedPrefsDir.listFiles()?.forEach { file ->
+                val fileName = file.name
+                if (fileName.startsWith(storePrefix) && fileName.endsWith(".xml")) {
+                    val prefName = fileName.removeSuffix(".xml")
+                    if (prefName != targetStoreName) {
+                        candidateStoreNames += prefName
+                    }
+                }
+            }
+
+            for (legacyName in candidateStoreNames) {
+                if (legacyName == targetStoreName) continue
+                val legacyPrefs = context.getSharedPreferences(legacyName, Context.MODE_PRIVATE)
+                val allEntries = legacyPrefs.all
+                if ((allEntries[userKey] as? String).isNullOrBlank()) continue
+
+                val editor = targetPrefs.edit()
+                for ((k, v) in allEntries) {
+                    when (v) {
+                        is String -> editor.putString(k, v)
+                        is Boolean -> editor.putBoolean(k, v)
+                        is Int -> editor.putInt(k, v)
+                        is Long -> editor.putLong(k, v)
+                        is Float -> editor.putFloat(k, v)
+                        is Set<*> -> {
+                            @Suppress("UNCHECKED_CAST")
+                            (v as? Set<String>)?.let { editor.putStringSet(k, it) }
+                        }
+                    }
+                }
+                editor.commit()
+                break
+            }
+        }
+    }
+
     @Provides
     @Singleton
     fun provideFirebaseAuth(@ApplicationContext context: Context): FirebaseAuth {
         val app = ensureDefaultFirebaseApp(context)
+        migrateLegacyFirebaseAuthStoreIfNeeded(context, app)
         return FirebaseAuth.getInstance(app)
     }
 

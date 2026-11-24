@@ -734,4 +734,65 @@ class V33InProgressIndicatorTest {
             assertTrue("Missing $token at WorkspaceInspectorPanel call site", inspectorCallSiteChunk.contains(token))
         }
     }
+
+    @Test
+    fun `v3_3_0_stable migrates legacy FirebaseAuth store key across App ID change and prevents stuck SYNCING state`() {
+        val legacyKey = AppModule.computeFirebasePersistenceKey(
+            "[DEFAULT]",
+            "1:116792699915:android:2e24f279bece36e1c82b0e"
+        )
+        val currentKey = AppModule.computeFirebasePersistenceKey(
+            "[DEFAULT]",
+            "1:116792699915:android:ae032e65e4138ee2c82b0e"
+        )
+        assertEquals(
+            "W0RFRkFVTFRd+MToxMTY3OTI2OTk5MTU6YW5kcm9pZDoyZTI0ZjI3OWJlY2UzNmUxYzgyYjBl",
+            legacyKey
+        )
+        assertEquals(
+            "W0RFRkFVTFRd+MToxMTY3OTI2OTk5MTU6YW5kcm9pZDphZTAzMmU2NWU0MTM4ZWUyYzgyYjBl",
+            currentKey
+        )
+        assertFalse(legacyKey.contains("="))
+        assertFalse(currentKey.contains("="))
+
+        val appModuleFile = sequenceOf(
+            File("src/main/java/com/pv/thingsbook/di/AppModule.kt"),
+            File("app/src/main/java/com/pv/thingsbook/di/AppModule.kt")
+        ).first { it.isFile }
+        val appModuleSrc = appModuleFile.readText()
+        assertTrue(
+            "provideFirebaseAuth must migrate legacy FirebaseAuth store before FirebaseAuth.getInstance(app)",
+            appModuleSrc.indexOf("migrateLegacyFirebaseAuthStoreIfNeeded(context, app)") <
+                appModuleSrc.indexOf("FirebaseAuth.getInstance(app)")
+        )
+
+        val syncRepoFile = sequenceOf(
+            File("src/main/java/com/pv/thingsbook/data/repository/SyncRepository.kt"),
+            File("app/src/main/java/com/pv/thingsbook/data/repository/SyncRepository.kt")
+        ).first { it.isFile }
+        val syncRepoSrc = syncRepoFile.readText()
+
+        // No raw batch.commit().await() without withFirestoreTimeout
+        val pushStart = syncRepoSrc.indexOf("suspend fun pushDirtyRecordsToFirestore(")
+        val pushEnd = syncRepoSrc.indexOf("private fun queryCollectionSince(", pushStart)
+        assertTrue(pushStart > 0 && pushEnd > pushStart)
+        val pushBody = syncRepoSrc.substring(pushStart, pushEnd)
+        assertEquals(
+            "Both Firestore batch commits must be wrapped in withFirestoreTimeout",
+            2,
+            Regex("""withFirestoreTimeout\(10_000L\)\s*\{\s*batch\.commit\(\)\.await\(\)\s*\}""").findAll(pushBody).count()
+        )
+
+        // Realtime listener reconnect must short-circuit on PERMISSION_DENIED / UNAUTHENTICATED
+        val attachStart = syncRepoSrc.indexOf("suspend fun attachRealtimeDeltaListeners(")
+        val reconnectStart = syncRepoSrc.indexOf("private fun scheduleListenerReconnect(", attachStart)
+        val detachStart = syncRepoSrc.indexOf("fun detachRealtimeDeltaListeners()", reconnectStart)
+        assertTrue(attachStart > 0 && reconnectStart > attachStart && detachStart > reconnectStart)
+        val reconnectBody = syncRepoSrc.substring(reconnectStart, detachStart)
+        assertTrue(reconnectBody.contains("FirebaseFirestoreException.Code.PERMISSION_DENIED"))
+        assertTrue(reconnectBody.contains("FirebaseFirestoreException.Code.UNAUTHENTICATED"))
+        assertTrue(syncRepoSrc.contains("ensureFirestoreAuthReady("))
+        assertTrue(syncRepoSrc.contains("localizedSessionExpiredError()"))
+    }
 }

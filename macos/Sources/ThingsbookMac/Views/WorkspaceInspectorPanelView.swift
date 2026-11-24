@@ -1321,9 +1321,10 @@ public struct WorkspaceInspectorPanelView: View {
 
     private var visiblePinnedOpenTasks: [TaskItem] {
         let openById = Dictionary(
-            uniqueKeysWithValues: store.allOpenTasks
+            store.allOpenTasks
                 .filter { !$0.isDeleted && $0.status == .open }
-                .map { ($0.id, $0) }
+                .map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         var seen = Set<String>()
         var result: [TaskItem] = []

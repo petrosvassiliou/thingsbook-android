@@ -577,7 +577,7 @@ public struct SmartViewCanvas: View {
         let filtered = store.filterTasksByActiveTag(store.upcomingTasks)
         let milestones = upcomingPhaseMilestones
         let forecast = store.sevenDayWorkloadForecast()
-        let workloadByEpochDay = Dictionary(uniqueKeysWithValues: forecast.map { ($0.epochDay, $0) })
+        let workloadByEpochDay = Dictionary(forecast.map { ($0.epochDay, $0) }, uniquingKeysWith: { first, _ in first })
 
         if !forecast.isEmpty {
             SevenDayWorkloadStripCard(store: store, forecast: forecast, compact: false)

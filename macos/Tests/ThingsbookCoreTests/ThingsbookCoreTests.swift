@@ -409,11 +409,11 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.2.1")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.2.1")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 117)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.2.2")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.2.2")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 118)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.2.1", current: "3.2.0"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.2.2", current: "3.2.1"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -6624,6 +6624,36 @@ final class ThingsbookCoreTests: XCTestCase {
                 XCTAssertNotEqual(text, key, "Missing v32 key \(key) in \(lang.rawValue)")
                 XCTAssertFalse(text.isEmpty)
             }
+        }
+    }
+
+    func testV322GeminiSheetLayoutAndZeroUniqueKeysWithValuesTraps() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let macosRoot = testFileURL
+            .deletingLastPathComponent() // ThingsbookCoreTests
+            .deletingLastPathComponent() // Tests
+        let sourcesRoot = macosRoot.appendingPathComponent("Sources")
+        let geminiSheetURL = sourcesRoot
+            .appendingPathComponent("ThingsbookMac")
+            .appendingPathComponent("Views")
+            .appendingPathComponent("GeminiAssistantSheet.swift")
+        let geminiSource = try String(contentsOf: geminiSheetURL, encoding: .utf8)
+        XCTAssertFalse(
+            geminiSource.contains(".pickerStyle(.segmented)"),
+            "GeminiAssistantSheet must use responsive geminiTabBar rather than AppKit NSSegmentedControl to prevent DE/FR/IT/ES horizontal clipping"
+        )
+        XCTAssertTrue(geminiSource.contains("private var geminiTabBar: some View"))
+        XCTAssertTrue(geminiSource.contains("uniquingKeysWith:"))
+        XCTAssertFalse(geminiSource.contains("uniqueKeysWithValues"))
+
+        let enumerator = FileManager.default.enumerator(at: sourcesRoot, includingPropertiesForKeys: nil)
+        while let fileURL = enumerator?.nextObject() as? URL {
+            guard fileURL.pathExtension == "swift" else { continue }
+            let src = try String(contentsOf: fileURL, encoding: .utf8)
+            XCTAssertFalse(
+                src.contains("uniqueKeysWithValues"),
+                "Unsafe Dictionary(uniqueKeysWithValues:) found in \(fileURL.lastPathComponent); use uniquingKeysWith instead"
+            )
         }
     }
 }

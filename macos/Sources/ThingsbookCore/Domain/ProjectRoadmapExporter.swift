@@ -1067,7 +1067,7 @@ private struct CoreRoadmapPagedPDFPageView: View {
                             }
                             cursorY += h + rowSpacing
                         }
-                        let barById = Dictionary(uniqueKeysWithValues: layout.allTaskBars.map { ($0.id, $0) })
+                        let barById = Dictionary(layout.allTaskBars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
                         for edge in layout.dependencyEdges {
                             guard let fromBar = barById[edge.fromTaskId],
@@ -1456,7 +1456,7 @@ private struct CoreRoadmapSnapshotExportView: View {
                             }
                             cursorY += h + rowSpacing
                         }
-                        let barById = Dictionary(uniqueKeysWithValues: layout.allTaskBars.map { ($0.id, $0) })
+                        let barById = Dictionary(layout.allTaskBars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
                         for edge in layout.dependencyEdges {
                             guard let fromBar = barById[edge.fromTaskId],

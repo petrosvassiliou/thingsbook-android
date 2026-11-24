@@ -36,26 +36,30 @@ public struct GeminiAssistantSheet: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
+            HStack(spacing: 10) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(ThingsMacPalette.geminiPurple)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(store.tr("gemini_hub_title"))
                         .font(.system(size: 16, weight: .semibold))
+                        .lineLimit(1)
                     Text(store.tr("macos_gemini_subtitle"))
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 Button {
                     showApiKeyField.toggle()
                 } label: {
                     Label(store.tr("macos_gemini_api_key_btn"), systemImage: "key.fill")
                         .font(.system(size: 11.5))
+                        .lineLimit(1)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .fixedSize()
                 .thingsTooltip(store.tr("gemini_api_key_label"))
 
                 Button {
@@ -91,14 +95,7 @@ public struct GeminiAssistantSheet: View {
                 .thingsCardSurface(cornerRadius: 9)
             }
 
-            Picker("", selection: $selectedTab) {
-                Text(store.tr("gemini_brain_dump_title")).tag(GeminiSheetTab.brainDump)
-                Text(store.tr("gemini_project_architect_title")).tag(GeminiSheetTab.projectArchitect)
-                Text(store.tr("gemini_logbook_review_title")).tag(GeminiSheetTab.logbookReview)
-                Text(store.tr("v31_gemini_plan_day_tab")).tag(GeminiSheetTab.planMyDay)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            geminiTabBar
 
             if isWorking {
                 HStack(spacing: 8) {
@@ -127,7 +124,7 @@ public struct GeminiAssistantSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 660, height: 540)
+        .frame(width: 720, height: 560)
         .background(ThingsMacPalette.canvasBackground)
         .onAppear {
             selectedTab = store.geminiInitialTab
@@ -137,6 +134,62 @@ public struct GeminiAssistantSheet: View {
                 architectAreaId = aid
             }
         }
+    }
+
+    private var geminiTabBar: some View {
+        let tabs: [(tab: GeminiSheetTab, icon: String, title: String)] = [
+            (.brainDump, "brain.head.profile", store.tr("gemini_brain_dump_title")),
+            (.projectArchitect, "wand.and.stars", store.tr("gemini_project_architect_title")),
+            (.logbookReview, "text.book.closed", store.tr("gemini_logbook_review_title")),
+            (.planMyDay, "calendar.badge.clock", store.tr("v31_gemini_plan_day_tab"))
+        ]
+        return HStack(spacing: 4) {
+            ForEach(tabs, id: \.tab) { item in
+                let isSelected = selectedTab == item.tab
+                Button {
+                    selectedTab = item.tab
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(isSelected ? ThingsMacPalette.accentBlue : .secondary)
+                        Text(item.title)
+                            .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? .primary : .secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6.5)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(
+                        Group {
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(ThingsMacPalette.cardSurface)
+                                    .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(ThingsMacPalette.accentBlue.opacity(0.28), lineWidth: 0.8)
+                                    )
+                            }
+                        }
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(ThingsMacPalette.subtleContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.75)
+                )
+        )
     }
 
     // MARK: - Tab 1: Brain Dump -> GTD Tasks
@@ -159,13 +212,14 @@ public struct GeminiAssistantSheet: View {
             }
 
             HStack(spacing: 10) {
-                Picker(store.tr("entity_area"), selection: $brainDumpAreaId) {
+                Picker("", selection: $brainDumpAreaId) {
                     Text(store.tr("areas_none")).tag(String?.none)
                     ForEach(store.areas) { area in
                         Text(area.title).tag(Optional(area.id))
                     }
                 }
-                .frame(maxWidth: 190)
+                .labelsHidden()
+                .frame(width: 150)
 
                 Button {
                     runBrainDump()
@@ -408,7 +462,8 @@ public struct GeminiAssistantSheet: View {
 
     private var planMyDayTab: some View {
         let todayTasksById = Dictionary(
-            uniqueKeysWithValues: (store.todayDaytimeTasks + store.thisEveningTasks + store.allOpenTasks).map { ($0.id, $0) }
+            (store.todayDaytimeTasks + store.thisEveningTasks + store.allOpenTasks).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let chosenBlocks = editablePlanBlocks.filter { selectedPlanTaskIds.contains($0.taskId) }
 
@@ -656,10 +711,12 @@ public struct GeminiAssistantSheet: View {
         Task {
             do {
                 let plan = try await store.generateGeminiDayPlan(includeAlreadyScheduled: includeScheduled)
+                var seenIds = Set<String>()
+                let uniqueBlocks = plan.blocks.filter { seenIds.insert($0.taskId).inserted }
                 await MainActor.run {
                     self.dayPlanPreview = plan
-                    self.editablePlanBlocks = plan.blocks
-                    self.selectedPlanTaskIds = Set(plan.blocks.map(\.taskId))
+                    self.editablePlanBlocks = uniqueBlocks
+                    self.selectedPlanTaskIds = Set(uniqueBlocks.map(\.taskId))
                     self.isWorking = false
                 }
             } catch {

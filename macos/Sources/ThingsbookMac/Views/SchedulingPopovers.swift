@@ -2110,7 +2110,10 @@ public struct DependenciesPopoverView: View {
     public var body: some View {
         let currentTask = liveTask
         let selectedIds = Set(currentTask.blockedByTaskIds)
-        let blockedByMap = Dictionary(uniqueKeysWithValues: store.allOpenTasks.map { ($0.id, $0.blockedByTaskIds) })
+        let blockedByMap = Dictionary(
+            store.allOpenTasks.map { ($0.id, $0.blockedByTaskIds) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let candidates: [TaskItem] = {
             let base = store.allOpenTasks.filter { $0.id != currentTask.id }
             let filtered: [TaskItem]

@@ -657,7 +657,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         try queue.sync {
             let areas = try fetchActiveAreasLocked()
             let tags = try fetchActiveTagsLocked()
-            let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+            let tagsById = Dictionary(tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let projects = try fetchActiveProjectsLocked()
             let trashedProjects = try fetchProjectsWhereLocked("p.is_deleted = 1 AND p.is_purged = 0")
                 .sorted { $0.updatedAt > $1.updatedAt }
@@ -797,7 +797,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
         return try queue.sync {
             let tags = try fetchActiveTagsLocked()
-            let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+            let tagsById = Dictionary(tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let activeTagIds = Set(tags.map(\.id))
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
             let (attachmentsByTask, _) = try fetchAllActiveAttachmentsGroupedLocked()
@@ -1025,7 +1025,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     private func fetchOpenRecurringTasksWithRawTagIdsLocked() throws -> (tasks: [TaskItem], rawTagIdsByTask: [String: [String]]) {
         let tags = try fetchActiveTagsLocked()
-        let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+        let tagsById = Dictionary(tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let tagIds = try fetchAllTaskTagIdsLocked()
         let tasks = try fetchTasksWhereLocked(
             whereClause: "is_deleted = 0 AND status = 'OPEN' AND recurrence_rule IS NOT NULL",
@@ -1045,7 +1045,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             overrideTagIdsByTaskId: rawTagIdsByTask
         )
         guard !plan.loserIds.isEmpty || !plan.winnerEnrichments.isEmpty else { return 0 }
-        let openById = Dictionary(uniqueKeysWithValues: openRecurring.map { ($0.id, $0) })
+        let openById = Dictionary(openRecurring.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         for patch in plan.winnerEnrichments {
             guard var winner = openById[patch.winnerId] else { continue }
@@ -1566,8 +1566,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
         let escapedNewId = newTaskId.replacingOccurrences(of: "'", with: "''")
         let priorChecklistsById = Dictionary(
-            uniqueKeysWithValues: ((try? fetchChecklistsWhereLocked("task_id = '\(escapedNewId)'")) ?? [])
-                .map { ($0.id, $0) }
+            ((try? fetchChecklistsWhereLocked("task_id = '\(escapedNewId)'")) ?? [])
+                .map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let clonedChecklists = completedTask.checklistItems.map { chk -> ChecklistItem in
             let nextChkId = Self.deriveRecurringChecklistItemId(
@@ -3420,7 +3421,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 }
 
                 let tags = try fetchActiveTagsLocked()
-                let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+                let tagsById = Dictionary(tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
                 let tagIdsByTask = try fetchAllTaskTagIdsLocked()
 
@@ -3576,7 +3577,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 .sorted { $0.sortOrder < $1.sortOrder }
 
             let tags = try fetchActiveTagsLocked()
-            let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+            let tagsById = Dictionary(tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
 
@@ -4684,8 +4685,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
     public func exportCsv(calendar: Calendar = .current) throws -> String {
         let snap = try loadWorkspaceSnapshot(calendar: calendar)
-        let areasById = Dictionary(uniqueKeysWithValues: snap.areas.map { ($0.id, $0) })
-        let projectsById = Dictionary(uniqueKeysWithValues: snap.projects.map { ($0.id, $0) })
+        let areasById = Dictionary(snap.areas.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let projectsById = Dictionary(snap.projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let allActiveTasks = (snap.allOpenTasks + snap.logbookTasks).sorted { $0.createdAt < $1.createdAt }
         return CsvCodec.exportTasksToCsv(tasks: allActiveTasks, areasById: areasById, projectsById: projectsById, calendar: calendar)
     }
@@ -4998,7 +4999,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 "project_id = '\(escapedPid)' AND is_deleted = 0 AND is_archived = 0"
             )
             let activeTags = try fetchActiveTagsLocked()
-            let tagsById = Dictionary(uniqueKeysWithValues: activeTags.map { ($0.id, $0) })
+            let tagsById = Dictionary(activeTags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
 
@@ -5074,7 +5075,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             }
 
             let tags = try fetchActiveTagsLocked()
-            let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+            let tagsById = Dictionary(tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let checklistsByTask = try fetchAllActiveChecklistItemsByTaskLocked()
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
 
@@ -5441,7 +5442,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let projects = try fetchProjectsWhereLocked("p.is_dirty = 1")
             let headings = try fetchHeadingsWhereLocked("is_dirty = 1")
             let allTags = try fetchActiveTagsLocked()
-            let tagsById = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
+            let tagsById = Dictionary(allTags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let tagIdsByTask = try fetchAllTaskTagIdsLocked()
             let tasks = try fetchTasksWhereLocked(
                 whereClause: "is_dirty = 1",
@@ -7293,7 +7294,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     private func fetchTaskByIdLocked(_ id: String) throws -> TaskItem? {
         let escapedId = id.replacingOccurrences(of: "'", with: "''")
         let tags = try fetchActiveTagsLocked()
-        let tagsById = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+        let tagsById = Dictionary(tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let checklists = try fetchChecklistsWhereLocked("task_id = '\(escapedId)' AND is_deleted = 0")
         let attachments = try fetchAttachmentsWhereLocked("task_id = '\(escapedId)' AND is_deleted = 0")
         let tagIds = try fetchAllTaskTagIdsLocked()

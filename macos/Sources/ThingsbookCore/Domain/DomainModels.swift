@@ -3970,7 +3970,7 @@ public enum ProjectRoadmapEngine {
             }
         }
 
-        let plottedById = Dictionary(uniqueKeysWithValues: orderedAllTaskBars.map { ($0.id, $0) })
+        let plottedById = Dictionary(orderedAllTaskBars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var edges: [RoadmapDependencyEdge] = []
         for targetBar in orderedAllTaskBars {
             var seenBlockers = Set<String>()
@@ -4334,7 +4334,7 @@ public enum ProjectRoadmapEngine {
             todayMillis: todayMillis,
             calendar: calendar
         )
-        return Dictionary(uniqueKeysWithValues: shifts.map { ($0.task.id, $0.deltaDays) })
+        return Dictionary(shifts.map { ($0.task.id, $0.deltaDays) }, uniquingKeysWith: { first, _ in first })
     }
 
     public static func buildAreaPortfolioLayout(

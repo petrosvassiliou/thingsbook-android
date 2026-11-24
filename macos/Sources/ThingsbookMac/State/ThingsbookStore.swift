@@ -396,7 +396,7 @@ public final class ThingsbookStore: ObservableObject {
     public func activeBlockers(for task: TaskItem) -> [TaskItem] {
         let ids = TaskDependencyGraph.activeBlockerIds(for: task, openTaskIds: openTaskIds)
         guard !ids.isEmpty else { return [] }
-        let byId = Dictionary(uniqueKeysWithValues: allOpenTasks.map { ($0.id, $0) })
+        let byId = Dictionary(allOpenTasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ids.compactMap { byId[$0] }
     }
 
@@ -512,7 +512,7 @@ public final class ThingsbookStore: ObservableObject {
     }
 
     public func tasksForPerspective(_ perspective: SavedPerspective) -> [TaskItem] {
-        let projectsById = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
+        let projectsById = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let todayMs = DateEpochConverter.startOfDayMillis(for: Date())
         let matched = PerspectiveFilterEngine.filter(
             tasks: allOpenTasks,
@@ -1319,7 +1319,7 @@ public final class ThingsbookStore: ObservableObject {
     public func shiftTaskRoadmapDates(_ task: TaskItem, deltaDays: Int) {
         guard deltaDays != 0 else { return }
         let todayMs = DateEpochConverter.startOfDayMillis(for: Date())
-        let byId = Dictionary(uniqueKeysWithValues: (allOpenTasks + logbookTasks).map { ($0.id, $0) })
+        let byId = Dictionary((allOpenTasks + logbookTasks).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         var shiftsToApply: [CascadedTaskShift] = []
         if selectedTaskIds.contains(task.id) && selectedTaskIds.count > 1 {
@@ -1923,7 +1923,7 @@ public final class ThingsbookStore: ObservableObject {
         flushModalDraftsIfNeeded()
         let orderedIds = orderedTaskIds(matching: selectedTaskIds)
         let pool = allOpenTasks + logbookTasks
-        let byId = Dictionary(uniqueKeysWithValues: pool.map { ($0.id, $0) })
+        let byId = Dictionary(pool.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let items = orderedIds.compactMap { byId[$0] }
         guard !items.isEmpty else { return }
         let markdown = items

@@ -1944,7 +1944,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                     }
                     cursorY += rH + rowSpacing
                 }
-                let barById = Dictionary(uniqueKeysWithValues: layout.allTaskBars.map { ($0.id, $0) })
+                let barById = Dictionary(layout.allTaskBars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
                 for edge in layout.dependencyEdges {
                     guard let fromBar = barById[edge.fromTaskId],
@@ -3602,7 +3602,7 @@ struct RoadmapExportSnapshotView: View {
                             }
                             cursorY += rH + rowSpacing
                         }
-                        let barById = Dictionary(uniqueKeysWithValues: layout.allTaskBars.map { ($0.id, $0) })
+                        let barById = Dictionary(layout.allTaskBars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
                         for edge in layout.dependencyEdges {
                             guard let fromBar = barById[edge.fromTaskId],
@@ -4739,7 +4739,7 @@ public struct AreaPortfolioRoadmapWorkspaceView: View {
                 }
 
                 for pLane in layout.projectLanes where expandedProjectIds.contains(pLane.projectId) {
-                    let barById = Dictionary(uniqueKeysWithValues: pLane.projectLayout.allTaskBars.map { ($0.id, $0) })
+                    let barById = Dictionary(pLane.projectLayout.allTaskBars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                     for edge in pLane.projectLayout.dependencyEdges {
                         guard let fromBar = barById[edge.fromTaskId],
                               let toBar = barById[edge.toTaskId],

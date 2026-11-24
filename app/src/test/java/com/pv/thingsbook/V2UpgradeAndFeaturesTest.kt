@@ -64,8 +64,12 @@ import com.pv.thingsbook.ui.components.ThingsTooltipHostState
 import com.pv.thingsbook.ui.components.TooltipTimingPolicy
 import com.pv.thingsbook.ui.components.computeMagicPlusDropSlot
 import com.pv.thingsbook.ui.components.resolveMagicPlusDropMode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -801,9 +805,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(116, BuildConfig.VERSION_CODE)
-        assertEquals("3.2.0", BuildConfig.VERSION_NAME)
-        assertFalse("3.2.0 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(117, BuildConfig.VERSION_CODE)
+        assertEquals("3.2.1", BuildConfig.VERSION_NAME)
+        assertFalse("3.2.1 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2858,5 +2862,69 @@ class V2UpgradeAndFeaturesTest {
         assertFalse(kanbanMenuChunk.contains("onOpenTimeblockDialog"))
         assertFalse(kanbanMenuChunk.contains("onOpenRepeatDialog"))
         assertFalse(kanbanMenuChunk.contains("gemini_magic_breakdown"))
+    }
+
+    @Test
+    fun `v3_2_1 google_services_json registers com_pv_thingsbook App ID + SHA1 and SyncRepository Web OAuth fallback handles INVALID_APP_ID`() {
+        val gsFile = sequenceOf(
+            File("google-services.json"),
+            File("app/google-services.json")
+        ).first { it.isFile }
+        val root = Json.parseToJsonElement(gsFile.readText()).jsonObject
+        val clients = root["client"]!!.jsonArray
+        val pvClient = clients.map { it.jsonObject }.firstOrNull { client ->
+            client["client_info"]?.jsonObject
+                ?.get("android_client_info")?.jsonObject
+                ?.get("package_name")?.jsonPrimitive?.content == "com.pv.thingsbook"
+        }
+        assertNotNull("com.pv.thingsbook client entry missing in google-services.json", pvClient)
+        val appId = pvClient!!["client_info"]!!.jsonObject["mobilesdk_app_id"]!!.jsonPrimitive.content
+        assertEquals("1:116792699915:android:ae032e65e4138ee2c82b0e", appId)
+        assertNotEquals("1:116792699915:android:2e24f279bece36e1c82b0e", appId)
+
+        val oauthClients = pvClient["oauth_client"]!!.jsonArray.map { it.jsonObject }
+        val androidOAuth = oauthClients.firstOrNull {
+            it["client_type"]?.jsonPrimitive?.content == "1"
+        }
+        assertNotNull("Android SHA-1 client_type=1 OAuth entry missing for com.pv.thingsbook", androidOAuth)
+        assertEquals(
+            "c4d7a9d8131dd64ba97f7342c8ffced89f79caf7",
+            androidOAuth!!["android_info"]!!.jsonObject["certificate_hash"]!!.jsonPrimitive.content
+        )
+
+        assertTrue(
+            SyncRepository.shouldFallbackToWebGoogleOAuth(
+                RuntimeException("An internal error has occurred. [ INVALID_APP_ID ]")
+            )
+        )
+        assertTrue(
+            SyncRepository.shouldFallbackToWebGoogleOAuth(
+                RuntimeException("Wrapper", IllegalStateException("INVALID_CERT_HASH"))
+            )
+        )
+        assertFalse(
+            SyncRepository.shouldFallbackToWebGoogleOAuth(
+                RuntimeException("The web operation was canceled by the user.")
+            )
+        )
+
+        val deferred = CompletableDeferred<SyncRepository.Companion.GoogleWebBridgeTokens>()
+        SyncRepository.registerPendingWebGoogleOAuth("nonce123", deferred)
+        assertFalse(
+            SyncRepository.handleIncomingGoogleOAuthUriString(
+                "thingsbook://oauth-callback?state=wrong_nonce&id_token=tok1"
+            )
+        )
+        assertFalse(deferred.isCompleted)
+        assertTrue(
+            SyncRepository.handleIncomingGoogleOAuthUriString(
+                "thingsbook://oauth-callback?state=nonce123&id_token=eyJ.test.sig&access_token=ya29.tok"
+            )
+        )
+        assertTrue(deferred.isCompleted)
+        val completed = deferred.getCompleted()
+        assertEquals("nonce123", completed.state)
+        assertEquals("eyJ.test.sig", completed.idToken)
+        assertEquals("ya29.tok", completed.accessToken)
     }
 }

@@ -12,15 +12,17 @@ import { getActiveFirebaseOptions } from '../data/firebaseClient';
 import { TRANSLATIONS, resolveLanguage } from '../i18n/translations';
 
 interface Props {
-  port: number;
+  platform?: 'macos' | 'android';
+  port?: number;
   state: string;
 }
 
-export const MacosGoogleAuthBridge: React.FC<Props> = ({ port, state }) => {
+export const MacosGoogleAuthBridge: React.FC<Props> = ({ platform = 'macos', port, state }) => {
   const lang = resolveLanguage('system');
   const t = TRANSLATIONS[lang];
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [callbackHref, setCallbackHref] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleContinueWithGoogle = async () => {
@@ -46,13 +48,26 @@ export const MacosGoogleAuthBridge: React.FC<Props> = ({ port, state }) => {
         throw new Error('Google Sign-In did not return an OAuth token.');
       }
 
+      let targetHref: string;
+      if (platform === 'android') {
+        const params = new URLSearchParams();
+        params.set('state', state);
+        if (idToken) params.set('id_token', idToken);
+        if (accessToken) params.set('access_token', accessToken);
+        if (email) params.set('email', email);
+        targetHref = `thingsbook://oauth-callback?${params.toString()}`;
+      } else {
+        const callbackUrl = new URL(`http://127.0.0.1:${port}/callback`);
+        callbackUrl.searchParams.set('state', state);
+        if (idToken) callbackUrl.searchParams.set('id_token', idToken);
+        if (accessToken) callbackUrl.searchParams.set('access_token', accessToken);
+        if (email) callbackUrl.searchParams.set('email', email);
+        targetHref = callbackUrl.toString();
+      }
+
+      setCallbackHref(targetHref);
       setDone(true);
-      const callbackUrl = new URL(`http://127.0.0.1:${port}/callback`);
-      callbackUrl.searchParams.set('state', state);
-      if (idToken) callbackUrl.searchParams.set('id_token', idToken);
-      if (accessToken) callbackUrl.searchParams.set('access_token', accessToken);
-      if (email) callbackUrl.searchParams.set('email', email);
-      window.location.href = callbackUrl.toString();
+      window.location.href = targetHref;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -102,24 +117,45 @@ export const MacosGoogleAuthBridge: React.FC<Props> = ({ port, state }) => {
         </div>
 
         <h1 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 700, color: '#111827' }}>
-          {t.syncTitle} — macOS
+          {t.syncTitle} — {platform === 'android' ? 'Android' : 'macOS'}
         </h1>
         <p style={{ margin: '0 0 24px', fontSize: 13.5, lineHeight: 1.5, color: '#6b7280' }}>
           {t.authMultiDeviceHint}
         </p>
 
         {done ? (
-          <div
-            style={{
-              padding: '12px 16px',
-              borderRadius: 11,
-              background: 'rgba(16, 185, 129, 0.12)',
-              color: '#047857',
-              fontSize: 13.5,
-              fontWeight: 600
-            }}
-          >
-            ✓ {t.syncStatusSynced}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div
+              style={{
+                padding: '12px 16px',
+                borderRadius: 11,
+                background: 'rgba(16, 185, 129, 0.12)',
+                color: '#047857',
+                fontSize: 13.5,
+                fontWeight: 600
+              }}
+            >
+              ✓ {t.syncStatusSynced}
+            </div>
+            {platform === 'android' && callbackHref && (
+              <a
+                href={callbackHref}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '11px 16px',
+                  borderRadius: 11,
+                  background: '#1c7ed6',
+                  color: '#ffffff',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  textDecoration: 'none'
+                }}
+              >
+                Thingsbook ↗
+              </a>
+            )}
           </div>
         ) : (
           <button

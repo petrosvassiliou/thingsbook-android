@@ -32,11 +32,11 @@ import {
   shouldShowQuickThisEveningPill
 } from '../src/domain/v2Utils.ts';
 
-test('v3.2.0 build metadata constants are set to 3.2.0 (Build 116, stable release)', () => {
-  assert.equal(APP_VERSION, '3.2.0');
-  assert.equal(APP_BUILD_CODE, 116);
-  assert.equal(versionFromUtils, '3.2.0');
-  assert.equal(buildFromUtils, 116);
+test('v3.2.1 build metadata constants are set to 3.2.1 (Build 117, stable release)', () => {
+  assert.equal(APP_VERSION, '3.2.1');
+  assert.equal(APP_BUILD_CODE, 117);
+  assert.equal(versionFromUtils, '3.2.1');
+  assert.equal(buildFromUtils, 117);
   assert.equal(isPrereleaseVersion(APP_VERSION), false);
   assert.equal(isPrereleaseVersion('3.0.0'), false);
   assert.equal(isPrereleaseVersion('2.5.0'), false);

@@ -37,6 +37,7 @@ import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pv.thingsbook.data.repository.SYNC_KEY_LOCAL_ONLY_DB_MODE
+import com.pv.thingsbook.data.repository.SyncRepository
 import com.pv.thingsbook.data.repository.syncDataStore
 import com.pv.thingsbook.ui.components.SmartViewType
 import com.pv.thingsbook.ui.components.ThingsTooltipHostBox
@@ -73,10 +74,23 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    private fun consumeGoogleOAuthCallbackIfPresent(candidate: Intent?): Boolean {
+        if (candidate?.action == Intent.ACTION_VIEW) {
+            val rawUri = candidate.dataString
+            if (!rawUri.isNullOrBlank() && SyncRepository.handleIncomingGoogleOAuthUriString(rawUri)) {
+                candidate.data = null
+                candidate.action = Intent.ACTION_MAIN
+                return true
+            }
+        }
+        return false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         CrashGuardian.install(applicationContext)
         activeActivityRef = WeakReference(this)
         super.onCreate(savedInstanceState)
+        consumeGoogleOAuthCallbackIfPresent(intent)
         launchIntentState = intent
         runCatching { enableEdgeToEdge() }
         requestNotificationPermissionIfNeeded()
@@ -85,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        consumeGoogleOAuthCallbackIfPresent(intent)
         setIntent(intent)
         launchIntentState = intent
     }

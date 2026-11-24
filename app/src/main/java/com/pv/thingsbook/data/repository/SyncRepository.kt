@@ -2,6 +2,8 @@ package com.pv.thingsbook.data.repository
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -28,7 +30,9 @@ import com.pv.thingsbook.domain.model.RecurrenceRule
 import com.pv.thingsbook.domain.model.ScheduleState
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.util.runCatchingCancellable
+import com.google.firebase.auth.AuthResult
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
@@ -36,6 +40,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +61,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -65,7 +71,9 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -510,6 +518,45 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    private suspend fun signInWithGoogleViaWebBridge(activity: Activity): AuthResult {
+        val stateNonce = UUID.randomUUID().toString().replace("-", "")
+        val deferred = CompletableDeferred<GoogleWebBridgeTokens>()
+        registerPendingWebGoogleOAuth(stateNonce, deferred)
+        try {
+            val configuredProjectId = runCatching { firebaseAuth.app.options.projectId }
+                .getOrNull()
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && it != "thingsbook-offline-local" }
+                ?: "thingsbook-prod"
+            val bridgeUrl = "https://$configuredProjectId.web.app/?android_google_auth=1&state=" +
+                URLEncoder.encode(stateNonce, StandardCharsets.UTF_8.name())
+
+            withContext(Dispatchers.Main) {
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(bridgeUrl)).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                }
+                activity.startActivity(browserIntent)
+            }
+
+            val tokens = withTimeout(180_000L) {
+                deferred.await()
+            }
+            if (!tokens.error.isNullOrBlank()) {
+                throw IllegalStateException(tokens.error)
+            }
+            if (tokens.idToken.isBlank() && tokens.accessToken.isBlank()) {
+                throw IllegalStateException(localizedGoogleSignInFailedError())
+            }
+            val credential = GoogleAuthProvider.getCredential(
+                tokens.idToken.takeIf { it.isNotBlank() },
+                tokens.accessToken.takeIf { it.isNotBlank() }
+            )
+            return firebaseAuth.signInWithCredential(credential).await()
+        } finally {
+            clearPendingWebGoogleOAuth(stateNonce)
+        }
+    }
+
     suspend fun signInWithGoogleOAuth(activity: Activity): Result<String> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
             _syncStatus.value = CloudSyncStatus.SYNCING
@@ -518,9 +565,24 @@ class SyncRepository @Inject constructor(
                 addCustomParameter("prompt", "select_account")
             }.build()
 
-            val authResult = withContext(Dispatchers.Main) {
-                firebaseAuth.pendingAuthResult?.await()
-                    ?: firebaseAuth.startActivityForSignInWithProvider(activity, provider).await()
+            val authResult = try {
+                withContext(Dispatchers.Main) {
+                    firebaseAuth.pendingAuthResult?.await()
+                        ?: firebaseAuth.startActivityForSignInWithProvider(activity, provider).await()
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (primaryErr: Exception) {
+                if (shouldFallbackToWebGoogleOAuth(primaryErr)) {
+                    Log.w(
+                        "SyncRepository",
+                        "Primary Android Google OAuth failed (${primaryErr.message}); falling back to authorized Web OAuth bridge",
+                        primaryErr
+                    )
+                    signInWithGoogleViaWebBridge(activity)
+                } else {
+                    throw primaryErr
+                }
             }
 
             val fbUser = authResult.user
@@ -3041,6 +3103,109 @@ class SyncRepository @Inject constructor(
                     file.delete()
                 }
             }
+        }
+
+        data class GoogleWebBridgeTokens(
+            val state: String,
+            val idToken: String,
+            val accessToken: String,
+            val error: String? = null
+        )
+
+        private val webOAuthLock = Any()
+        @Volatile
+        private var pendingWebGoogleOAuthState: String? = null
+        @Volatile
+        private var pendingWebGoogleOAuthDeferred: CompletableDeferred<GoogleWebBridgeTokens>? = null
+
+        internal fun registerPendingWebGoogleOAuth(
+            state: String,
+            deferred: CompletableDeferred<GoogleWebBridgeTokens>
+        ) {
+            synchronized(webOAuthLock) {
+                pendingWebGoogleOAuthDeferred?.cancel()
+                pendingWebGoogleOAuthState = state
+                pendingWebGoogleOAuthDeferred = deferred
+            }
+        }
+
+        internal fun clearPendingWebGoogleOAuth(state: String) {
+            synchronized(webOAuthLock) {
+                if (pendingWebGoogleOAuthState == state) {
+                    pendingWebGoogleOAuthState = null
+                    pendingWebGoogleOAuthDeferred = null
+                }
+            }
+        }
+
+        fun shouldFallbackToWebGoogleOAuth(err: Throwable): Boolean {
+            var current: Throwable? = err
+            var depth = 0
+            while (current != null && depth < 6) {
+                val msg = (current.message ?: "").lowercase(Locale.ROOT)
+                if (
+                    msg.contains("invalid_app_id") ||
+                    msg.contains("invalid_cert_hash") ||
+                    msg.contains("developer_error") ||
+                    msg.contains("api_not_available") ||
+                    msg.contains("service_missing") ||
+                    msg.contains("service_disabled") ||
+                    msg.contains("play_services")
+                ) {
+                    return true
+                }
+                current = current.cause
+                depth += 1
+            }
+            return false
+        }
+
+        fun parseGoogleOAuthCallbackUri(rawUri: String): GoogleWebBridgeTokens? {
+            val trimmed = rawUri.trim()
+            if (trimmed.isEmpty()) return null
+            return runCatching {
+                val parsed = URI(trimmed)
+                if (
+                    !parsed.scheme.equals("thingsbook", ignoreCase = true) ||
+                    !parsed.host.equals("oauth-callback", ignoreCase = true)
+                ) {
+                    return null
+                }
+                val params = linkedMapOf<String, String>()
+                val rawQuery = parsed.rawQuery ?: ""
+                for (pair in rawQuery.split('&')) {
+                    if (pair.isBlank()) continue
+                    val eqIdx = pair.indexOf('=')
+                    val key = if (eqIdx >= 0) pair.substring(0, eqIdx) else pair
+                    val rawVal = if (eqIdx >= 0) pair.substring(eqIdx + 1) else ""
+                    val decodedKey = URLDecoder.decode(key, StandardCharsets.UTF_8.name())
+                    val decodedVal = URLDecoder.decode(rawVal, StandardCharsets.UTF_8.name())
+                    params[decodedKey] = decodedVal
+                }
+                val state = params["state"]?.trim().orEmpty()
+                if (state.isEmpty()) return null
+                GoogleWebBridgeTokens(
+                    state = state,
+                    idToken = params["id_token"]?.trim().orEmpty(),
+                    accessToken = params["access_token"]?.trim().orEmpty(),
+                    error = params["error"]?.trim()?.takeIf { it.isNotEmpty() }
+                )
+            }.getOrNull()
+        }
+
+        fun handleIncomingGoogleOAuthUriString(rawUri: String): Boolean {
+            val tokens = parseGoogleOAuthCallbackUri(rawUri) ?: return false
+            synchronized(webOAuthLock) {
+                val expected = pendingWebGoogleOAuthState
+                val deferred = pendingWebGoogleOAuthDeferred
+                if (expected != null && deferred != null && expected == tokens.state) {
+                    pendingWebGoogleOAuthState = null
+                    pendingWebGoogleOAuthDeferred = null
+                    deferred.complete(tokens)
+                    return true
+                }
+            }
+            return false
         }
     }
 }

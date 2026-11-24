@@ -9,10 +9,47 @@
       "client_info": {
         "mobilesdk_app_id": "1:116792699915:android:2e24f279bece36e1c82b0e",
         "android_client_info": {
+          "package_name": "com.culturedcode.things3"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "116792699915-mkdblm3pde3b6ch44otcdeki1h7iuscf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCUtSvssQOesHW-heLhNzNvykI1zCl7deY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "116792699915-mkdblm3pde3b6ch44otcdeki1h7iuscf.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:116792699915:android:ae032e65e4138ee2c82b0e",
+        "android_client_info": {
           "package_name": "com.pv.thingsbook"
         }
       },
       "oauth_client": [
+        {
+          "client_id": "116792699915-saf6dv92ondkjo8j9v52rkv0vc5s7c2p.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.pv.thingsbook",
+            "certificate_hash": "c4d7a9d8131dd64ba97f7342c8ffced89f79caf7"
+          }
+        },
         {
           "client_id": "116792699915-mkdblm3pde3b6ch44otcdeki1h7iuscf.apps.googleusercontent.com",
           "client_type": 3

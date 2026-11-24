@@ -761,10 +761,14 @@ class V33InProgressIndicatorTest {
             File("app/src/main/java/com/pv/thingsbook/di/AppModule.kt")
         ).first { it.isFile }
         val appModuleSrc = appModuleFile.readText()
+        val provideAuthBody = appModuleSrc
+            .substringAfter("fun provideFirebaseAuth(")
+            .substringBefore("fun provideFirebaseFirestore(")
+        val migrateIdx = provideAuthBody.indexOf("migrateLegacyFirebaseAuthStoreIfNeeded(context, app)")
+        val getAuthIdx = provideAuthBody.indexOf("FirebaseAuth.getInstance(app)")
         assertTrue(
             "provideFirebaseAuth must migrate legacy FirebaseAuth store before FirebaseAuth.getInstance(app)",
-            appModuleSrc.indexOf("migrateLegacyFirebaseAuthStoreIfNeeded(context, app)") <
-                appModuleSrc.indexOf("FirebaseAuth.getInstance(app)")
+            migrateIdx > 0 && getAuthIdx > migrateIdx
         )
 
         val syncRepoFile = sequenceOf(

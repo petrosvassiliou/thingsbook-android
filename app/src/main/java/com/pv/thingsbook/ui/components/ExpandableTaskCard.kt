@@ -2155,7 +2155,7 @@ private fun BentoAlignedTwoColumnRow(
     }
 }
 
-private fun formatTaskMarkdownForClipboard(task: TaskItem, fallbackTitle: String): String {
+internal fun formatTaskMarkdownForClipboard(task: TaskItem, fallbackTitle: String): String {
     val box = when (task.status) {
         TaskStatus.COMPLETED -> "[x]"
         TaskStatus.CANCELED -> "[-]"
@@ -4598,7 +4598,7 @@ private fun InlineChecklistRow(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ThingsCustomDurationDialog(
+internal fun ThingsCustomDurationDialog(
     currentDurationMinutes: Int?,
     onApply: (Int?) -> Unit,
     onDismiss: () -> Unit

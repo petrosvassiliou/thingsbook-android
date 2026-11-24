@@ -1611,6 +1611,9 @@ fun ThingsSmartViewScreen(
                             }
 
                             if (showInspectorPane) {
+                                val tagSortMode by viewModel.tagSortMode.collectAsState()
+                                val tagUsageCounts by viewModel.tagUsageCounts.collectAsState()
+                                val magicBreakdownTaskId by viewModel.magicBreakdownTaskId.collectAsState()
                                 VerticalDivider(
                                     color = colors.hairlineDivider,
                                     thickness = 1.dp,
@@ -1630,9 +1633,16 @@ fun ThingsSmartViewScreen(
                                     sevenDayWorkload = sevenDayWorkloadForecastTop,
                                     areas = areas,
                                     projects = activeProjects,
+                                    allHeadings = allHeadingsTop,
+                                    allTags = allTags,
+                                    tagSortMode = tagSortMode,
+                                    tagUsageCounts = tagUsageCounts,
+                                    openTaskIds = openTaskIds,
                                     todayDate = todayDateTop,
                                     locale = activeLocale,
                                     activeFocusTaskId = focusTimerState?.taskId,
+                                    isGeneratingMagicBreakdown = selectedInspectorTask != null &&
+                                        magicBreakdownTaskId == selectedInspectorTask.id,
                                     onCloseInspector = { viewModel.setInspectorVisible(false) },
                                     onClearSelection = { viewModel.clearTaskSelection() },
                                     onSelectTask = { taskId -> viewModel.selectSingleTask(taskId) },
@@ -1649,6 +1659,18 @@ fun ThingsSmartViewScreen(
                                     onUpdateTaskSchedule = { task, state, whenDate ->
                                         viewModel.updateTaskSchedule(task, state, whenDate)
                                     },
+                                    onUpdateTaskScheduleWithReminder = { task, state, whenDate, reminderTime ->
+                                        viewModel.updateTaskScheduleWithReminder(task, state, whenDate, reminderTime)
+                                    },
+                                    onUpdateTaskDeadline = { task, deadline ->
+                                        viewModel.updateTaskDeadline(task, deadline)
+                                    },
+                                    onUpdateTaskRecurrence = { taskId, rule ->
+                                        viewModel.updateTaskRecurrence(taskId, rule)
+                                    },
+                                    onUpdateTimeblock = { taskId, startMins, durMins ->
+                                        viewModel.updateTaskTimeblock(taskId, startMins, durMins)
+                                    },
                                     onTogglePin = { taskId -> viewModel.toggleTaskPinned(taskId) },
                                     onToggleMilestone = { taskId, isMilestone ->
                                         viewModel.setTaskMilestone(taskId, isMilestone)
@@ -1660,6 +1682,19 @@ fun ThingsSmartViewScreen(
                                     onUpdateEffort = { taskId, effort ->
                                         viewModel.setTaskEffortLevel(taskId, effort)
                                     },
+                                    onUpdateBlockedBy = { taskId, blockerIds ->
+                                        viewModel.setTaskBlockedBy(taskId, blockerIds)
+                                    },
+                                    onMoveTaskToContainer = { taskId, projectId, headingId, areaId ->
+                                        viewModel.moveTaskToContainer(taskId, projectId, headingId, areaId)
+                                    },
+                                    onUpdateTaskTags = { task, tagIds ->
+                                        viewModel.updateTaskTags(task, tagIds)
+                                    },
+                                    onCreateAndAssignTag = { task, newTagTitle ->
+                                        viewModel.createAndAssignTagToTask(task, newTagTitle)
+                                    },
+                                    onOpenFullTagManager = { viewModel.setTagManagerOpen(true) },
                                     onStartFocusTimer = { task ->
                                         viewModel.startFocusTimer(task.id, task.title, task.durationMinutes)
                                     },
@@ -1669,11 +1704,41 @@ fun ThingsSmartViewScreen(
                                     onAddChecklistItem = { taskId, title ->
                                         viewModel.addChecklistItem(taskId, title)
                                     },
+                                    onInsertChecklistItemAfter = { taskId, afterId, newId, initialTitle ->
+                                        viewModel.insertChecklistItemAfter(taskId, afterId, newId, initialTitle)
+                                    },
                                     onToggleChecklistItem = { itemId, completed ->
                                         viewModel.toggleChecklistItem(itemId, completed)
                                     },
+                                    onRenameChecklistItem = { itemId, newTitle ->
+                                        viewModel.renameChecklistItem(itemId, newTitle)
+                                    },
+                                    onMoveChecklistItem = { taskId, itemId, moveUp ->
+                                        viewModel.moveChecklistItem(taskId, itemId, moveUp)
+                                    },
                                     onDeleteChecklistItem = { itemId ->
                                         viewModel.deleteChecklistItem(itemId)
+                                    },
+                                    onTriggerGeminiMagicBreakdown = { task ->
+                                        viewModel.triggerGeminiMagicBreakdown(task, activeLocale)
+                                    },
+                                    onApplySmartSyntax = { taskId, parsed, latestNotes ->
+                                        viewModel.applySmartSyntaxToTask(taskId, parsed, latestNotes)
+                                    },
+                                    onAddTaskAttachment = { taskId, fName, mime, bytes ->
+                                        viewModel.addTaskAttachment(taskId, fName, mime, bytes)
+                                    },
+                                    onDeleteAttachment = { attId ->
+                                        viewModel.deleteAttachment(attId)
+                                    },
+                                    onDuplicateTask = { taskId ->
+                                        viewModel.duplicateTask(taskId)
+                                    },
+                                    onDeleteTask = { taskId ->
+                                        viewModel.deleteTask(taskId)
+                                    },
+                                    onShowMessage = { msg ->
+                                        viewModel.showUiMessage(msg)
                                     },
                                     onNavigateToProject = { projectId -> viewModel.selectProject(projectId) },
                                     onNavigateToArea = { areaId -> viewModel.selectArea(areaId) }

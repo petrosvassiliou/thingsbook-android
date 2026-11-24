@@ -1,22 +1,36 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import ThingsbookCore
 
 public struct WorkspaceInspectorPanelView: View {
     @ObservedObject var store: ThingsbookStore
 
+    @StateObject private var voiceDictation = MacVoiceDictationController()
     @State private var activeDraftTaskId: String? = nil
     @State private var draftTitle: String = ""
     @State private var draftNotes: String = ""
     @State private var newChecklistTitle: String = ""
+    @State private var dictationTargetsTitle: Bool = false
+    @State private var dictationBaseNotes: String = ""
     @State private var draftSaveTask: Task<Void, Never>? = nil
 
     @State private var isWhenPopoverOpen = false
     @State private var isDeadlinePopoverOpen = false
     @State private var isTimeblockPopoverOpen = false
+    @State private var isRepeatPopoverOpen = false
+    @State private var isDependenciesPopoverOpen = false
     @State private var isCustomDurationPopoverOpen = false
     @State private var isMovePopoverOpen = false
     @State private var isTagPopoverOpen = false
+
+    @State private var isGeneratingChecklist = false
+    @State private var isEditingNotes = false
+    @State private var isFileDropTargeted = false
+    @State private var isHoveringMic = false
+    @State private var isHoveringMoreMenu = false
+    @State private var isHoveringMagic = false
+    @State private var isHoveringAttachBar = false
 
     @FocusState private var isTitleFocused: Bool
     @FocusState private var isNotesFocused: Bool
@@ -31,6 +45,10 @@ public struct WorkspaceInspectorPanelView: View {
             return nil
         }
         return store.task(byId: firstId)
+    }
+
+    private var parsedDraftSyntax: ParsedSmartSyntax {
+        store.parseSmartSyntax(draftTitle)
     }
 
     public var body: some View {
@@ -61,16 +79,34 @@ public struct WorkspaceInspectorPanelView: View {
         .frame(width: 348)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(ThingsMacPalette.subtleContainer.opacity(0.60))
+        .overlay(
+            Rectangle()
+                .strokeBorder(
+                    (isFileDropTargeted && singleSelectedTask != nil)
+                        ? ThingsMacPalette.accentBlue
+                        : Color.clear,
+                    lineWidth: 1.8
+                )
+                .allowsHitTesting(false)
+        )
+        .onDrop(of: [UTType.fileURL], isTargeted: $isFileDropTargeted) { providers in
+            guard let task = singleSelectedTask else { return false }
+            draftSaveTask?.cancel()
+            commitDraftEditsIfNeeded()
+            return store.handleFileDropProviders(providers, taskId: task.id)
+        }
         .onAppear {
             syncDraftsForSelectedTask(singleSelectedTask)
         }
         .onDisappear {
             draftSaveTask?.cancel()
-            commitDraftEditsIfNeeded()
+            voiceDictation.stopRecording()
+            commitDraftEditsIfNeeded(commitPendingChecklist: true)
         }
         .onChange(of: singleSelectedTask?.id) { _, _ in
             draftSaveTask?.cancel()
-            commitDraftEditsIfNeeded()
+            voiceDictation.stopRecording()
+            commitDraftEditsIfNeeded(commitPendingChecklist: true)
             resetTransientPopovers()
             newChecklistTitle = ""
             syncDraftsForSelectedTask(singleSelectedTask)
@@ -112,7 +148,7 @@ public struct WorkspaceInspectorPanelView: View {
     // MARK: - Headers
 
     private func singleTaskHeader(for task: TaskItem) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: task.isMilestone ? "diamond.fill" : "slider.horizontal.3")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(task.isMilestone ? ThingsMacPalette.milestoneViolet : ThingsMacPalette.accentBlue)
@@ -122,7 +158,134 @@ public struct WorkspaceInspectorPanelView: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: 4)
+
+            // Live Voice Dictation Button
+            Button {
+                toggleVoiceDictation()
+            } label: {
+                Image(systemName: voiceDictation.isRecording ? "waveform" : "mic.fill")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(
+                        voiceDictation.isRecording
+                            ? .white
+                            : (isHoveringMic ? ThingsMacPalette.accentBlue : .secondary)
+                    )
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                            .fill(
+                                voiceDictation.isRecording
+                                    ? ThingsMacPalette.deadlineCrimson
+                                    : (isHoveringMic ? ThingsMacPalette.accentBlue.opacity(0.11) : Color.primary.opacity(0.04))
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                            .strokeBorder(
+                                voiceDictation.isRecording
+                                    ? ThingsMacPalette.deadlineCrimson
+                                    : (isHoveringMic ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.primary.opacity(0.07)),
+                                lineWidth: 0.75
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHoveringMic = hovering
+                }
+            }
+            .thingsTooltip(store.tr(voiceDictation.isRecording ? "macos_voice_stop" : "voice_capture_btn"))
+
+            // More Actions Menu (Duplicate, Copy Markdown, Cancel/Reopen, Delete)
+            Menu {
+                Button {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    let fresh = store.task(byId: task.id) ?? task
+                    if let copy = try? store.database.duplicateTask(fresh.id, copySuffix: store.tr("v25_copy_suffix")) {
+                        store.reloadSnapshot()
+                        store.selectedTaskIds = [copy.id]
+                        store.lastSelectedTaskId = copy.id
+                    }
+                } label: {
+                    Label(store.tr("action_duplicate_todo"), systemImage: "plus.square.on.square")
+                }
+
+                Button {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    let fresh = store.task(byId: task.id) ?? task
+                    store.copyTaskToPasteboard(fresh)
+                } label: {
+                    Label(store.tr("action_copy_todo"), systemImage: "doc.on.doc")
+                }
+
+                Divider()
+
+                if task.status == .completed {
+                    Button {
+                        draftSaveTask?.cancel()
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                        let fresh = store.task(byId: task.id) ?? task
+                        store.toggleTaskCompletion(fresh)
+                    } label: {
+                        Label(store.tr("action_reopen_todo"), systemImage: "arrow.uturn.backward.circle")
+                    }
+                }
+
+                Button {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    let fresh = store.task(byId: task.id) ?? task
+                    store.cancelTask(fresh)
+                } label: {
+                    Label(
+                        task.status == .canceled ? store.tr("action_reopen_todo") : store.tr("action_cancel_todo"),
+                        systemImage: task.status == .canceled ? "arrow.uturn.backward.circle" : "xmark.circle"
+                    )
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    draftSaveTask?.cancel()
+                    voiceDictation.stopRecording()
+                    activeDraftTaskId = nil
+                    let fresh = store.taskIncludingTrash(byId: task.id) ?? task
+                    store.deleteTask(fresh)
+                } label: {
+                    Label(store.tr("action_delete"), systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isHoveringMoreMenu ? ThingsMacPalette.accentBlue : .secondary)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                            .fill(isHoveringMoreMenu ? ThingsMacPalette.accentBlue.opacity(0.11) : Color.primary.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                            .strokeBorder(
+                                isHoveringMoreMenu ? ThingsMacPalette.accentBlue.opacity(0.28) : Color.primary.opacity(0.07),
+                                lineWidth: 0.75
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHoveringMoreMenu = hovering
+                }
+            }
+            .thingsTooltip(store.tr("action_more_options"))
 
             InspectorHeaderIconButton(
                 systemImage: "arrow.up.left.and.arrow.down.right",
@@ -130,6 +293,7 @@ public struct WorkspaceInspectorPanelView: View {
                 helpText: store.tr("v30_open_details_action")
             ) {
                 draftSaveTask?.cancel()
+                voiceDictation.stopRecording()
                 commitDraftEditsIfNeeded(commitPendingChecklist: true)
                 store.openTaskModal(task.id)
             }
@@ -140,6 +304,7 @@ public struct WorkspaceInspectorPanelView: View {
                 helpText: store.tr("context_deselect_task")
             ) {
                 draftSaveTask?.cancel()
+                voiceDictation.stopRecording()
                 commitDraftEditsIfNeeded(commitPendingChecklist: true)
                 store.clearSelection()
             }
@@ -150,6 +315,7 @@ public struct WorkspaceInspectorPanelView: View {
                 helpText: store.tr("v30_inspector_toggle_tooltip")
             ) {
                 draftSaveTask?.cancel()
+                voiceDictation.stopRecording()
                 commitDraftEditsIfNeeded(commitPendingChecklist: true)
                 store.toggleInspector()
             }
@@ -189,10 +355,33 @@ public struct WorkspaceInspectorPanelView: View {
 
     @ViewBuilder
     private func singleTaskInspectorContent(for task: TaskItem) -> some View {
+        if voiceDictation.isRecording {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(ThingsMacPalette.deadlineCrimson)
+                    .frame(width: 7, height: 7)
+                Text(store.tr("macos_voice_listening"))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.deadlineCrimson)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(ThingsMacPalette.deadlineCrimson.opacity(0.09))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(ThingsMacPalette.deadlineCrimson.opacity(0.22), lineWidth: 0.85)
+                    )
+            )
+        }
+
         titleAndFlagsCard(for: task)
         scheduleAndPropertiesCard(for: task)
         checklistCard(for: task)
         notesCard(for: task)
+        attachmentsCard(for: task)
     }
 
     private func titleAndFlagsCard(for task: TaskItem) -> some View {
@@ -237,6 +426,17 @@ public struct WorkspaceInspectorPanelView: View {
                         commitDraftEditsIfNeeded()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if parsedDraftSyntax.hasAnyMatch {
+                SmartSyntaxPreviewPillsView(
+                    store: store,
+                    parsed: parsedDraftSyntax,
+                    showDetectedLabel: true,
+                    onApply: {
+                        applyDraftSmartSyntax(for: task)
+                    }
+                )
             }
 
             ThingsFlowLayout(horizontalSpacing: 7, verticalSpacing: 6) {
@@ -347,13 +547,25 @@ public struct WorkspaceInspectorPanelView: View {
         let dlInfo = task.deadline.map { deadlineSummaryInfo(for: $0) }
         let currentEffort = task.resolvedEffort
         let currentDuration = (task.durationMinutes ?? 0) > 0 ? task.durationMinutes : nil
+        let blockedLabel = store.blockedByBadgeText(for: task)
+        let isBlockedActive = blockedLabel != nil || !task.blockedByTaskIds.isEmpty
         let breadcrumb = contextBreadcrumb(for: task)
+        let projectHeadings: [Heading] = {
+            guard let pid = task.projectId else { return [] }
+            return (store.headingsByProject[pid] ?? [])
+                .filter { !$0.isDeleted && !$0.isArchived }
+                .sorted {
+                    if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+                    return $0.id < $1.id
+                }
+        }()
+        let activeHeading = projectHeadings.first { $0.id == task.headingId }
         let isFocusRunningForTask = store.focusTimer?.taskId == task.id
 
         return VStack(alignment: .leading, spacing: 10) {
             inspectorSectionHeader(icon: "calendar", title: store.tr("action_when"))
 
-            // Quick When Pills (Today, Evening, Tomorrow, Someday) + Custom Date Popover
+            // Quick When Pills (Today, Evening, Tomorrow, Anytime, Someday) + Custom Date Popover + Dedicated Reminder Pill
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 quickWhenPill(
                     title: store.tr("view_today"),
@@ -389,6 +601,17 @@ public struct WorkspaceInspectorPanelView: View {
                 }
 
                 quickWhenPill(
+                    title: store.tr("view_anytime"),
+                    icon: "safari.fill",
+                    isActive: task.scheduleState == .anytime,
+                    tint: ThingsMacPalette.anytimeTeal
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    store.scheduleTasks([task.id], to: .anytime)
+                }
+
+                quickWhenPill(
                     title: store.tr("view_someday"),
                     icon: "cloud.fill",
                     isActive: task.scheduleState == .someday,
@@ -399,32 +622,32 @@ public struct WorkspaceInspectorPanelView: View {
                     store.scheduleTasks([task.id], to: .someday)
                 }
 
-                let customWhenLabel = customUpcomingOrReminderLabel(for: task, isTomorrow: isTomorrow)
+                let customWhenDateLabel = customUpcomingDateLabel(for: task, isTomorrow: isTomorrow)
                 Button {
                     draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     isWhenPopoverOpen = true
                 } label: {
                     HStack(spacing: 4.5) {
-                        Image(systemName: task.reminderTime != nil ? "bell.fill" : "calendar.badge.clock")
+                        Image(systemName: "calendar.badge.clock")
                             .font(.system(size: 10.5, weight: .semibold))
-                        if let customWhenLabel {
-                            Text(customWhenLabel)
+                        if let customWhenDateLabel {
+                            Text(customWhenDateLabel)
                                 .font(.system(size: 11, weight: .semibold))
                                 .lineLimit(1)
                         }
                     }
-                    .foregroundStyle(customWhenLabel != nil ? ThingsMacPalette.accentBlue : .secondary)
-                    .padding(.horizontal, customWhenLabel != nil ? 8.5 : 7.5)
+                    .foregroundStyle(customWhenDateLabel != nil ? ThingsMacPalette.accentBlue : .secondary)
+                    .padding(.horizontal, customWhenDateLabel != nil ? 8.5 : 7.5)
                     .padding(.vertical, 4.5)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(customWhenLabel != nil ? ThingsMacPalette.accentBlue.opacity(0.12) : ThingsMacPalette.subtleContainer)
+                            .fill(customWhenDateLabel != nil ? ThingsMacPalette.accentBlue.opacity(0.12) : ThingsMacPalette.subtleContainer)
                     )
                     .overlay(
                         Capsule(style: .continuous)
                             .strokeBorder(
-                                customWhenLabel != nil ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.08),
+                                customWhenDateLabel != nil ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.08),
                                 lineWidth: 0.75
                             )
                     )
@@ -439,10 +662,25 @@ public struct WorkspaceInspectorPanelView: View {
                         currentReminderMillis: task.reminderTime
                     ) { resolved in
                         var copy = store.task(byId: task.id) ?? task
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
                         copy.scheduleState = resolved.scheduleState
                         copy.whenDate = resolved.whenDateEpochMillis
                         copy.reminderTime = resolved.reminderEpochMillis
                         store.updateTask(copy)
+                    }
+                }
+
+                if let rem = task.reminderTime {
+                    ThingsActionChipButton(
+                        title: shortTimeString(rem),
+                        systemImage: "bell.fill",
+                        isActive: true,
+                        helpText: store.trf("when_task_reminder_set", shortTimeString(rem))
+                    ) {
+                        draftSaveTask?.cancel()
+                        commitDraftEditsIfNeeded()
+                        isWhenPopoverOpen = true
                     }
                 }
             }
@@ -450,7 +688,7 @@ public struct WorkspaceInspectorPanelView: View {
             Divider()
                 .opacity(0.55)
 
-            // Deadline, Timeblock, Duration & Effort Badges
+            // Deadline, Timeblock, Repeat, Duration, Effort & Dependencies Badges
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 ThingsActionChipButton(
                     title: dlInfo?.label ?? store.tr("action_deadline"),
@@ -466,6 +704,8 @@ public struct WorkspaceInspectorPanelView: View {
                 .popover(isPresented: $isDeadlinePopoverOpen) {
                     DeadlinePopoverView(store: store, currentDeadlineMillis: task.deadline) { dl in
                         var copy = store.task(byId: task.id) ?? task
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
                         copy.deadline = dl
                         store.updateTask(copy)
                     }
@@ -491,6 +731,30 @@ public struct WorkspaceInspectorPanelView: View {
                         currentDurationMinutes: task.durationMinutes
                     ) { startMins, durMins in
                         store.setTaskTimeblock(task.id, startMinutes: startMins, durationMinutes: durMins)
+                    }
+                }
+
+                ThingsActionChipButton(
+                    title: task.recurrenceRule?.formatShortLabel(locale: store.preferences.language.locale) ?? store.tr("action_repeat"),
+                    systemImage: "repeat",
+                    isActive: task.recurrenceRule != nil,
+                    helpText: repeatButtonTooltip(for: task)
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    isRepeatPopoverOpen = true
+                }
+                .popover(isPresented: $isRepeatPopoverOpen) {
+                    RepeatEditorPopoverView(store: store, currentRule: task.recurrenceRule) { newRule in
+                        var copy = store.task(byId: task.id) ?? task
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
+                        copy.recurrenceRule = newRule
+                        if newRule != nil && copy.whenDate == nil {
+                            copy.scheduleState = .today
+                            copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
+                        }
+                        store.updateTask(copy)
                     }
                 }
 
@@ -603,12 +867,28 @@ public struct WorkspaceInspectorPanelView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+
+                // Dependencies / Blocked By Chip
+                ThingsActionChipButton(
+                    title: blockedLabel ?? store.tr("v30_blocked_by_label"),
+                    systemImage: "hourglass",
+                    isActive: isBlockedActive,
+                    activeTint: ThingsMacPalette.somedayAmber,
+                    helpText: blockedLabel ?? store.tr("v30_blocked_by_label")
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    isDependenciesPopoverOpen = true
+                }
+                .popover(isPresented: $isDependenciesPopoverOpen) {
+                    DependenciesPopoverView(store: store, task: task)
+                }
             }
 
             Divider()
                 .opacity(0.55)
 
-            // Area › Project Breadcrumb & Tag Pills
+            // Area › Project › Heading Breadcrumb, Phase/Heading Menu & Tag Pills
             VStack(alignment: .leading, spacing: 7) {
                 Button {
                     draftSaveTask?.cancel()
@@ -644,6 +924,8 @@ public struct WorkspaceInspectorPanelView: View {
                 .popover(isPresented: $isMovePopoverOpen) {
                     MoveDestinationPopoverView(store: store, task: task) { projId, headId, areaId, schedOverride in
                         var copy = store.task(byId: task.id) ?? task
+                        copy.title = draftTitle
+                        copy.notes = draftNotes
                         copy.projectId = projId
                         copy.headingId = headId
                         copy.areaId = areaId
@@ -655,6 +937,55 @@ public struct WorkspaceInspectorPanelView: View {
                 }
 
                 ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                    if !projectHeadings.isEmpty {
+                        Menu {
+                            Button {
+                                draftSaveTask?.cancel()
+                                commitDraftEditsIfNeeded()
+                                var copy = store.task(byId: task.id) ?? task
+                                copy.title = draftTitle
+                                copy.notes = draftNotes
+                                copy.headingId = nil
+                                store.updateTask(copy)
+                            } label: {
+                                if activeHeading == nil {
+                                    Label(store.tr("v30_board_ungrouped_column"), systemImage: "checkmark")
+                                } else {
+                                    Text(store.tr("v30_board_ungrouped_column"))
+                                }
+                            }
+                            Divider()
+                            ForEach(projectHeadings) { heading in
+                                Button {
+                                    draftSaveTask?.cancel()
+                                    commitDraftEditsIfNeeded()
+                                    var copy = store.task(byId: task.id) ?? task
+                                    copy.title = draftTitle
+                                    copy.notes = draftNotes
+                                    copy.headingId = heading.id
+                                    store.updateTask(copy)
+                                } label: {
+                                    if activeHeading?.id == heading.id {
+                                        Label(heading.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(heading.title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            inspectorPropertyPillLabel(
+                                title: activeHeading?.title ?? store.tr("entity_heading"),
+                                systemImage: "flag.checkered",
+                                isActive: activeHeading != nil,
+                                tint: ThingsMacPalette.accentBlue
+                            )
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .thingsTooltip(store.tr("entity_heading"))
+                    }
+
                     ForEach(task.tags) { tag in
                         TagPillBadge(
                             title: tag.title,
@@ -690,7 +1021,10 @@ public struct WorkspaceInspectorPanelView: View {
                                 } else {
                                     tids.insert(tagId)
                                 }
-                                store.updateTask(base, tagIds: Array(tids))
+                                var copy = base
+                                copy.title = draftTitle
+                                copy.notes = draftNotes
+                                store.updateTask(copy, tagIds: Array(tids))
                             }
                         )
                     }
@@ -748,7 +1082,13 @@ public struct WorkspaceInspectorPanelView: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                inspectorSectionHeader(icon: "checklist", title: store.tr("action_checklist"))
+                Image(systemName: "checklist")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(store.tr("action_checklist"))
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
                 if !items.isEmpty {
                     Text("\(doneCount)/\(items.count)")
@@ -764,19 +1104,55 @@ public struct WorkspaceInspectorPanelView: View {
                                 )
                         )
                 }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    runMagicBreakdown(for: task)
+                } label: {
+                    HStack(spacing: 4) {
+                        if isGeneratingChecklist {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        Text(store.tr("gemini_magic_breakdown"))
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(ThingsMacPalette.accentBlue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3.5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(ThingsMacPalette.accentBlue.opacity(isHoveringMagic ? 0.19 : 0.12))
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(
+                                        ThingsMacPalette.accentBlue.opacity(isHoveringMagic ? 0.42 : 0.0),
+                                        lineWidth: 0.8
+                                    )
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isGeneratingChecklist)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringMagic = hovering
+                    }
+                }
+                .thingsTooltip(store.tr("gemini_magic_breakdown_desc"))
             }
 
             if !items.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     ForEach(items) { item in
-                        InspectorChecklistRow(
-                            store: store,
-                            item: item,
-                            onToggle: { store.toggleChecklistItem(item) },
-                            onDelete: { store.deleteChecklistItem(item) }
-                        )
+                        ChecklistItemRowView(store: store, item: item, allItems: items)
                     }
                 }
+                .padding(.horizontal, 2)
             }
 
             HStack(spacing: 7) {
@@ -817,29 +1193,108 @@ public struct WorkspaceInspectorPanelView: View {
     }
 
     private func notesCard(for task: TaskItem) -> some View {
+        let hasNotes = !draftNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let links = MarkdownNotesParser.extractDetectedLinks(from: draftNotes)
+        let toggleLabel = isEditingNotes ? store.tr("macos_preview_markdown") : store.tr("macos_edit_markdown")
+        let noteLineCount = max(1, draftNotes.components(separatedBy: .newlines).count)
+        let notesEditorHeight = min(196, max(92, CGFloat(noteLineCount) * 20 + 20))
 
         return VStack(alignment: .leading, spacing: 8) {
-            inspectorSectionHeader(icon: "doc.text", title: store.tr("placeholder_notes"))
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(store.tr("placeholder_notes"))
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
-            TextField(store.tr("placeholder_notes"), text: $draftNotes, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .lineLimit(4...14)
-                .focused($isNotesFocused)
+                Spacer(minLength: 4)
+
+                if hasNotes || isEditingNotes {
+                    Button {
+                        isEditingNotes.toggle()
+                        if isEditingNotes {
+                            DispatchQueue.main.async {
+                                isNotesFocused = true
+                            }
+                        }
+                    } label: {
+                        Text(toggleLabel)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.accentBlue)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(toggleLabel)
+                }
+            }
+
+            if !isEditingNotes {
+                Group {
+                    if hasNotes {
+                        Text(MarkdownNotesParser.renderAttributed(draftNotes))
+                            .font(.system(size: 13))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(store.tr("placeholder_notes"))
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 68, alignment: .topLeading)
                 .padding(9)
-                .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(ThingsMacPalette.subtleContainer)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.75)
+                        )
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isEditingNotes = true
+                    DispatchQueue.main.async {
+                        isNotesFocused = true
+                    }
+                }
+            } else {
+                ZStack(alignment: .topLeading) {
+                    if draftNotes.isEmpty {
+                        Text(store.tr("placeholder_notes"))
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 9)
+                            .padding(.leading, 11)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: $draftNotes)
+                        .font(.system(size: 13))
+                        .scrollContentBackground(.hidden)
+                        .focused($isNotesFocused)
+                        .padding(6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: notesEditorHeight,
+                    idealHeight: notesEditorHeight,
+                    alignment: .topLeading
+                )
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(ThingsMacPalette.subtleContainer)
                         .overlay(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
                                 .strokeBorder(
-                                    isNotesFocused ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.07),
+                                    isNotesFocused ? ThingsMacPalette.accentBlue.opacity(0.42) : Color.primary.opacity(0.09),
                                     lineWidth: isNotesFocused ? 1.0 : 0.75
                                 )
                         )
                 )
+            }
 
             if !links.isEmpty {
                 ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
@@ -872,6 +1327,86 @@ public struct WorkspaceInspectorPanelView: View {
         }
         .padding(12)
         .background(inspectorBentoCardSurface())
+    }
+
+    private func attachmentsCard(for task: TaskItem) -> some View {
+        Group {
+            if !task.attachments.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    AttachmentsStripView(store: store, attachments: task.attachments) {
+                        draftSaveTask?.cancel()
+                        commitDraftEditsIfNeeded()
+                        store.pickAndAttachFiles(taskId: task.id)
+                    }
+                }
+                .padding(12)
+                .background(inspectorBentoCardSurface())
+            } else {
+                Button {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    store.pickAndAttachFiles(taskId: task.id)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isFileDropTargeted ? "arrow.down.doc.fill" : "paperclip")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
+
+                        Text(store.tr("attachments_section_title"))
+                            .font(.system(size: 11.5, weight: .bold))
+                            .foregroundStyle(isFileDropTargeted ? ThingsMacPalette.accentBlue : .secondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 6)
+
+                        HStack(spacing: 3.5) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 10, weight: .bold))
+                            Text(store.tr("action_attach_file"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(ThingsMacPalette.accentBlue)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(ThingsMacPalette.accentBlue.opacity(isHoveringAttachBar ? 0.18 : 0.11))
+                        )
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9.5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(
+                                isFileDropTargeted
+                                    ? ThingsMacPalette.accentBlue.opacity(0.08)
+                                    : (isHoveringAttachBar ? ThingsMacPalette.accentBlue.opacity(0.045) : ThingsMacPalette.cardSurface)
+                            )
+                            .shadow(color: Color.black.opacity(0.035), radius: 5, x: 0, y: 1.5)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(
+                                        isFileDropTargeted
+                                            ? ThingsMacPalette.accentBlue
+                                            : (isHoveringAttachBar ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.08)),
+                                        lineWidth: isFileDropTargeted ? 1.3 : 0.75
+                                    )
+                            )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringAttachBar = hovering
+                    }
+                }
+                .thingsTooltip(store.tr("macos_attachment_drop_hint"))
+            }
+        }
     }
 
     // MARK: - Mode B: Day & Workspace Overview
@@ -1457,11 +1992,13 @@ public struct WorkspaceInspectorPanelView: View {
             activeDraftTaskId = nil
             draftTitle = ""
             draftNotes = ""
+            isEditingNotes = false
             return
         }
         activeDraftTaskId = task.id
         draftTitle = task.title
         draftNotes = task.notes
+        isEditingNotes = TaskCardInteractionRules.shouldAutoEditNotesOnExpand(notes: task.notes)
     }
 
     private func scheduleDraftAutoSave() {
@@ -1489,6 +2026,112 @@ public struct WorkspaceInspectorPanelView: View {
         }
     }
 
+    private func applyDraftSmartSyntax(for task: TaskItem) {
+        let parsed = parsedDraftSyntax
+        guard parsed.hasAnyMatch else { return }
+        draftSaveTask?.cancel()
+
+        var copy = store.task(byId: task.id) ?? task
+        copy.title = parsed.cleanTitle
+        copy.notes = draftNotes
+
+        if let sched = parsed.scheduleState {
+            copy.scheduleState = sched
+            copy.whenDate = parsed.whenDate
+        }
+        if let dl = parsed.deadline {
+            copy.deadline = dl
+        }
+        if let dur = parsed.durationMinutes {
+            copy.durationMinutes = dur
+        }
+        if parsed.isMilestone {
+            copy.isMilestone = true
+        }
+        if parsed.isInProgress && copy.status == .open {
+            copy.isInProgress = true
+        }
+        if let proj = parsed.matchedProject {
+            copy.projectId = proj.id
+            copy.headingId = nil
+            copy.areaId = proj.areaId
+            if copy.scheduleState == .inbox && parsed.scheduleState == nil {
+                copy.scheduleState = .anytime
+            }
+        } else if let area = parsed.matchedArea {
+            copy.projectId = nil
+            copy.headingId = nil
+            copy.areaId = area.id
+            if copy.scheduleState == .inbox && parsed.scheduleState == nil {
+                copy.scheduleState = .anytime
+            }
+        }
+
+        var mergedTagIds = copy.tagIds
+        for tid in parsed.matchedTagIds where !mergedTagIds.contains(tid) {
+            mergedTagIds.append(tid)
+        }
+
+        draftTitle = parsed.cleanTitle
+        store.updateTask(copy, tagIds: mergedTagIds)
+    }
+
+    private func toggleVoiceDictation() {
+        if !voiceDictation.isRecording {
+            dictationTargetsTitle = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            dictationBaseNotes = draftNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        voiceDictation.toggleRecording(
+            locale: store.preferences.language.locale,
+            onTranscript: { spoken in
+                if dictationTargetsTitle {
+                    let lines = spoken.components(separatedBy: .newlines)
+                    draftTitle = String((lines.first ?? spoken).prefix(240))
+                    if lines.count > 1 {
+                        let extra = lines.dropFirst().joined(separator: "\n")
+                        draftNotes = dictationBaseNotes.isEmpty ? extra : "\(dictationBaseNotes)\n\(extra)"
+                    }
+                } else {
+                    draftNotes = dictationBaseNotes.isEmpty ? spoken : "\(dictationBaseNotes)\n\(spoken)"
+                }
+            },
+            onUnavailable: {
+                store.showToast(store.tr("voice_not_available"))
+            }
+        )
+    }
+
+    private func runMagicBreakdown(for task: TaskItem) {
+        draftSaveTask?.cancel()
+        commitDraftEditsIfNeeded()
+        isGeneratingChecklist = true
+        let base = store.task(byId: task.id) ?? task
+        let titleToBreak = draftTitle.isEmpty ? base.title : draftTitle
+        let notesToBreak = draftNotes
+        let targetId = base.id
+        Task {
+            do {
+                let steps = try await ThingsbookGeminiService.generateMagicChecklist(
+                    taskTitle: titleToBreak,
+                    taskNotes: notesToBreak,
+                    lang: store.preferences.language
+                )
+                await MainActor.run {
+                    for step in steps {
+                        _ = try? store.database.addChecklistItem(taskId: targetId, title: step)
+                    }
+                    store.reloadSnapshot()
+                    isGeneratingChecklist = false
+                }
+            } catch {
+                await MainActor.run {
+                    isGeneratingChecklist = false
+                    store.showToast(error.localizedDescription)
+                }
+            }
+        }
+    }
+
     private func submitNewChecklistItem(for taskId: String) {
         let clean = newChecklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
@@ -1500,6 +2143,8 @@ public struct WorkspaceInspectorPanelView: View {
         isWhenPopoverOpen = false
         isDeadlinePopoverOpen = false
         isTimeblockPopoverOpen = false
+        isRepeatPopoverOpen = false
+        isDependenciesPopoverOpen = false
         isCustomDurationPopoverOpen = false
         isMovePopoverOpen = false
         isTagPopoverOpen = false
@@ -1594,26 +2239,38 @@ public struct WorkspaceInspectorPanelView: View {
         )
     }
 
-    private func customUpcomingOrReminderLabel(for task: TaskItem, isTomorrow: Bool) -> String? {
-        var parts: [String] = []
-        if task.scheduleState == .upcoming && !isTomorrow, let w = task.whenDate {
-            let df = DateFormatter()
-            df.locale = store.preferences.language.locale
-            df.dateStyle = .short
-            parts.append(df.string(from: DateEpochConverter.date(fromMillis: w)))
+    private func customUpcomingDateLabel(for task: TaskItem, isTomorrow: Bool) -> String? {
+        guard task.scheduleState == .upcoming && !isTomorrow, let w = task.whenDate else {
+            return nil
         }
-        if let rem = task.reminderTime {
-            parts.append(shortTimeString(rem))
+        let df = DateFormatter()
+        df.locale = store.preferences.language.locale
+        df.dateStyle = .short
+        return df.string(from: DateEpochConverter.date(fromMillis: w))
+    }
+
+    private func repeatButtonTooltip(for target: TaskItem) -> String {
+        let base = store.tr("context_configure_repeat")
+        if let rule = target.recurrenceRule {
+            return "\(base) — \(rule.formatShortLabel(locale: store.preferences.language.locale))"
         }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return base
     }
 
     private func contextBreadcrumb(for target: TaskItem) -> String? {
         if let pid = target.projectId, let proj = store.project(byId: pid) {
-            if let aid = proj.areaId, let area = store.area(byId: aid) {
-                return "\(area.title) › \(proj.title)"
+            let activeHeadingTitle = target.headingId.flatMap { hid in
+                (store.headingsByProject[pid] ?? []).first(where: { !$0.isDeleted && $0.id == hid })?.title
             }
-            return proj.title
+            var parts: [String] = []
+            if let aid = proj.areaId, let area = store.area(byId: aid) {
+                parts.append(area.title)
+            }
+            parts.append(proj.title)
+            if let headingTitle = activeHeadingTitle, !headingTitle.isEmpty {
+                parts.append(headingTitle)
+            }
+            return parts.joined(separator: " › ")
         }
         if let aid = target.areaId, let area = store.area(byId: aid) {
             return area.title
@@ -1697,93 +2354,5 @@ private struct InspectorHeaderIconButton: View {
             }
         }
         .thingsTooltip(helpText)
-    }
-}
-
-private struct InspectorChecklistRow: View {
-    @ObservedObject var store: ThingsbookStore
-    let item: ChecklistItem
-    let onToggle: () -> Void
-    let onDelete: () -> Void
-
-    @State private var draftText: String = ""
-    @State private var saveTask: Task<Void, Never>? = nil
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Button(action: {
-                saveTask?.cancel()
-                commitTitleIfNeeded()
-                onToggle()
-            }) {
-                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(item.isCompleted ? ThingsMacPalette.accentBlue : .secondary)
-            }
-            .buttonStyle(.plain)
-            .thingsTooltip(store.tr(item.isCompleted ? "action_reopen_todo" : "action_complete"))
-
-            TextField("", text: $draftText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-                .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                .strikethrough(item.isCompleted, color: .secondary)
-                .onSubmit {
-                    saveTask?.cancel()
-                    commitTitleIfNeeded()
-                }
-
-            if isHovering {
-                Button(action: {
-                    saveTask?.cancel()
-                    onDelete()
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr("action_delete"))
-            }
-        }
-        .padding(.vertical, 2)
-        .onHover { hovering in
-            isHovering = hovering
-        }
-        .onAppear {
-            draftText = item.title
-        }
-        .onDisappear {
-            saveTask?.cancel()
-            commitTitleIfNeeded()
-        }
-        .onChange(of: item.title) { _, updated in
-            if draftText != updated {
-                draftText = updated
-            }
-        }
-        .onChange(of: draftText) { _, _ in
-            saveTask?.cancel()
-            saveTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                guard !Task.isCancelled else { return }
-                commitTitleIfNeeded()
-            }
-        }
-    }
-
-    private func commitTitleIfNeeded() {
-        let clean = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty,
-              let fresh = store.checklistItems(for: item.taskId).first(where: { $0.id == item.id }),
-              clean != fresh.title else {
-            return
-        }
-        var copy = fresh
-        copy.title = clean
-        try? store.database.updateChecklistItem(copy)
-        store.reloadSnapshot()
     }
 }

@@ -7346,6 +7346,31 @@ button.v2-stalled-pill:hover {
   padding-top: 4px;
 }
 
+.inspector-phase-select {
+  height: 27px;
+  max-width: 100%;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 560;
+  outline: none;
+  cursor: pointer;
+}
+
+.inspector-phase-select:focus {
+  border-color: var(--things-blue);
+}
+
+.inspector-checklist-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 /* Zen Focus Mode Full-Window Soft Bento Overlay */
 .v32-zen-focus-backdrop {
   z-index: 260;

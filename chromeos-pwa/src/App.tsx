@@ -6237,11 +6237,17 @@ export const App: React.FC = () => {
             allOpenTasks={openInActiveProj}
             visibleViewTasks={visibleViewTasks}
             checklistItems={snapshot.checklistItems}
+            headings={snapshot.headings}
+            attachments={snapshot.attachments}
+            openTaskIdSet={openTaskIdSet}
+            tasksByIdMap={tasksByIdMap}
             areasMap={areasMap}
             projectsMap={allNonDeletedProjectsMap}
             tagsMap={tagsMap}
             lang={lang}
+            geminiApiKey={prefs.geminiApiKey}
             t={t}
+            onToast={showToast}
             onSelectTaskFromInspector={handleSelectTaskFromInspector}
             onOpenTaskEditor={(taskId) => {
               setSelectedTaskIds([]);
@@ -6253,8 +6259,11 @@ export const App: React.FC = () => {
             onOpenDeadlineModal={(taskId) =>
               setDeadlineModalTarget({ kind: 'task', taskId })
             }
+            onOpenRepeatModal={(id) => setRepeatModalTaskId(id)}
             onOpenMoveModal={(taskId) => setMoveModalTaskIds([taskId])}
             onOpenTagsModal={(taskId) => setTagPickerTaskId(taskId)}
+            onOpenDependenciesModal={(id) => setDependencyModalTaskId(id)}
+            onDuplicateTask={handleDuplicateTask}
             onStartFocusTimer={handleStartFocusTimer}
           />
         )}

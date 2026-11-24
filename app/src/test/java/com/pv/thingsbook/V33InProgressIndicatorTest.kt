@@ -593,8 +593,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 119"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.0-beta.1\""))
+        assertTrue(buildGradleKt.contains("versionCode = 120"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.0-beta.2\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
@@ -648,6 +648,90 @@ class V33InProgressIndicatorTest {
                 assertNotNull("Missing $key in $folder/strings.xml", map[key])
                 assertTrue("Blank $key in $folder/strings.xml", map[key]!!.isNotBlank())
             }
+        }
+    }
+
+    @Test
+    fun `v3_3_0_beta_2 Build 120 WorkspaceInspectorPanel achieves 1_to_1 feature parity with ExpandedTaskCardBody`() {
+        val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
+        val appSrcMain = File(appRoot, "src/main")
+
+        val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
+        val inspectorKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/WorkspaceInspectorPanel.kt").readText()
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+
+        // 1. Shared helpers exposed as internal in ExpandableTaskCard.kt with zero duplication
+        assertTrue(cardKt.contains("internal fun ThingsCustomDurationDialog("))
+        assertTrue(cardKt.contains("internal fun formatTaskMarkdownForClipboard("))
+
+        // 2. SelectedTaskInspectorContent wires all reusable dialogs, rich editors, AI, voice, and attachments directly
+        val selectedInspectorChunk = inspectorKt
+            .substringAfter("private fun SelectedTaskInspectorContent(")
+            .substringBefore("private fun InspectorEditableChecklistRow(")
+
+        val requiredInspectorComponents = listOf(
+            "TaskDependenciesPickerDialog(",
+            "ThingsRepeatDialog(",
+            "ThingsTimeblockPickerDialog(",
+            "DeadlineDatePickerDialog(",
+            "WhenNaturalDateDialog(",
+            "MoveTaskToProjectOrAreaDialog(",
+            "TaskTagPickerDialog(",
+            "ThingsCustomDurationDialog(",
+            "TaskAttachmentsStrip(",
+            "SmartSyntaxPreviewChipsRow(",
+            "rememberThingsMarkdownVisualTransformation()",
+            "onTriggerGeminiMagicBreakdown",
+            "formatTaskMarkdownForClipboard(",
+            "RecognizerIntent.ACTION_RECOGNIZE_SPEECH",
+            "ActivityResultContracts.OpenDocument()",
+            "ActivityResultContracts.TakePicturePreview()",
+            "isTaskActivelyBlocked("
+        )
+        for (token in requiredInspectorComponents) {
+            assertTrue("Missing $token in SelectedTaskInspectorContent", selectedInspectorChunk.contains(token))
+        }
+
+        // Only the Header Bar's Open Full Modal button invokes onExpandTask inside SelectedTaskInspectorContent
+        assertEquals(
+            "Badges in SelectedTaskInspectorContent must open inline dialogs instead of bouncing to onExpandTask",
+            1,
+            Regex("""onExpandTask\(""").findAll(selectedInspectorChunk).count()
+        )
+
+        // 3. ThingsSmartViewScreen wires all state flows and callbacks into WorkspaceInspectorPanel
+        val inspectorCallSiteChunk = smartViewKt
+            .substringAfter("val showInspectorPane = canFitInspector && isInspectorVisible")
+            .substringBefore("// App Version Badge at bottom-left")
+
+        val requiredCallSiteTokens = listOf(
+            "viewModel.tagSortMode.collectAsState()",
+            "viewModel.tagUsageCounts.collectAsState()",
+            "viewModel.magicBreakdownTaskId.collectAsState()",
+            "allHeadings = allHeadingsTop",
+            "allTags = allTags",
+            "openTaskIds = openTaskIds",
+            "onUpdateTaskScheduleWithReminder =",
+            "onUpdateTaskDeadline =",
+            "onUpdateTaskRecurrence =",
+            "onUpdateTimeblock =",
+            "onUpdateBlockedBy =",
+            "onMoveTaskToContainer =",
+            "onUpdateTaskTags =",
+            "onCreateAndAssignTag =",
+            "onOpenFullTagManager =",
+            "onInsertChecklistItemAfter =",
+            "onRenameChecklistItem =",
+            "onMoveChecklistItem =",
+            "onTriggerGeminiMagicBreakdown =",
+            "onApplySmartSyntax =",
+            "onAddTaskAttachment =",
+            "onDeleteAttachment =",
+            "onDuplicateTask =",
+            "onDeleteTask ="
+        )
+        for (token in requiredCallSiteTokens) {
+            assertTrue("Missing $token at WorkspaceInspectorPanel call site", inspectorCallSiteChunk.contains(token))
         }
     }
 }

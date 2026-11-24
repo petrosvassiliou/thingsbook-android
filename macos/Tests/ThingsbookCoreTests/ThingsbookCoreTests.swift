@@ -409,12 +409,13 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.0-beta.1")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.0-beta.1")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 119)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.0-beta.2")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.0-beta.2")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 120)
         XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.0-beta.1", current: "3.2.2", includeBeta: true))
-        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.3.0-beta.1", current: "3.2.2", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.0-beta.2", current: "3.3.0-beta.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.0-beta.2", current: "3.2.2", includeBeta: true))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.3.0-beta.2", current: "3.2.2", includeBeta: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false, current: "3.2.2"))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
@@ -6923,6 +6924,44 @@ final class ThingsbookCoreTests: XCTestCase {
                 XCTAssertNotEqual(text, key, "Missing v33 key \(key) in \(lang.rawValue)")
                 XCTAssertFalse(text.isEmpty)
             }
+        }
+    }
+
+    func testV330Beta2WorkspaceInspectorPanelParityContract() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let macosRoot = testFileURL
+            .deletingLastPathComponent() // ThingsbookCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // macos
+        let inspectorURL = macosRoot
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("ThingsbookMac")
+            .appendingPathComponent("Views")
+            .appendingPathComponent("WorkspaceInspectorPanelView.swift")
+        let inspectorSource = try String(contentsOf: inspectorURL, encoding: .utf8)
+
+        let requiredParityTokens = [
+            "DependenciesPopoverView",
+            "RepeatEditorPopoverView",
+            "AttachmentsStripView",
+            "SmartSyntaxPreviewPillsView",
+            "MacVoiceDictationController",
+            "generateMagicChecklist",
+            "MarkdownNotesParser.renderAttributed",
+            "ChecklistItemRowView",
+            "handleFileDropProviders",
+            "view_anytime",
+            "flag.checkered",
+            "action_duplicate_todo",
+            "action_copy_todo",
+            "action_cancel_todo",
+            "action_reopen_todo"
+        ]
+        for token in requiredParityTokens {
+            XCTAssertTrue(
+                inspectorSource.contains(token),
+                "WorkspaceInspectorPanelView.swift must wire \(token) for 1:1 TaskBentoModalView parity"
+            )
         }
     }
 }

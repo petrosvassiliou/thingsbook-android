@@ -1,48 +1,68 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-   BarChart3,
+  ArrowDown,
+  ArrowUp,
+  BarChart3,
+  Bell,
   Calendar,
   CalendarDays,
+  Camera,
   Check,
+  CheckCircle2,
   CheckSquare,
   Circle,
   Clock,
   Cloud,
+  Compass,
+  Copy,
   Diamond,
   FileText,
   Flag,
   Folder,
   Hourglass,
   LayoutGrid,
+  Link2,
   Maximize2,
+  Mic,
   Moon,
+  MoreHorizontal,
   PanelRightClose,
+  Paperclip,
   Pin,
   PinOff,
   Plus,
+  Repeat,
   RotateCcw,
+  Sparkles,
   Sun,
   Timer,
+  Trash2,
   X,
+  XCircle,
   Zap
 } from 'lucide-react';
 import {
   addDaysLocal,
   daysBetweenToday,
+  formatRecurrenceShort,
   type AreaRecord,
+  type AttachmentRecord,
   type CalendarEventItem,
   type ChecklistItemRecord,
   type EffortLevel,
+  type HeadingRecord,
   type ProjectRecord,
   type SupportedLang,
   type TagRecord,
-  type TaskRecord
+  type TaskRecord,
+  type TaskStatus
 } from '../domain/types';
 import {
   DEFAULT_TIMEBLOCK_DURATION_MINUTES,
   DEFAULT_WORKDAY_END_MINUTES,
   DEFAULT_WORKDAY_START_MINUTES,
   STANDALONE_DURATION_PRESETS,
+  TIMEBLOCK_DURATION_PRESETS,
   TIMEBLOCK_QUICK_START_MINUTES,
   buildDailyTimeline,
   computeMultiDayWorkloadForecast,
@@ -50,20 +70,52 @@ import {
   formatMinutesAsClock,
   formatStandaloneDuration,
   formatTimeblockRange,
+  isTaskActivelyBlocked,
   normalizeWorkdayBounds,
+  parseClockToMinutes,
+  parseCustomDurationMinutes,
   type DayWorkloadSummary
 } from '../domain/v2Utils';
-import { extractDetectedLinksFromNotes } from '../domain/powerUtils';
+import {
+  parseSmartTaskSyntax,
+  type ParsedSmartSyntax
+} from '../domain/smartSyntaxParser';
+import { generateMagicChecklist } from '../data/geminiService';
+import { processAndAddAttachmentFile } from '../data/attachmentHelpers';
 import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
-import { DetectedNotesLinksRow } from './MarkdownNotesField';
+import { MarkdownNotesField } from './MarkdownNotesField';
+import { AttachmentsStrip } from './AttachmentStrip';
+
+const EMPTY_OPEN_ID_SET: ReadonlySet<string> = new Set();
+const EMPTY_TASKS_MAP: ReadonlyMap<string, TaskRecord> = new Map();
+const EMPTY_HEADINGS: readonly HeadingRecord[] = [];
+const EMPTY_ATTACHMENTS: readonly AttachmentRecord[] = [];
+const NOOP_TOAST = (_msg: string) => {};
 
 interface InspectorChecklistRowProps {
   item: ChecklistItemRecord;
+  idx: number;
+  totalCount: number;
+  taskId: string;
   t: TranslationStrings;
+  registerRef: (el: HTMLInputElement | null) => void;
+  onFocusAddBottom: () => void;
+  onFocusNewSubtask: (newId: string) => void;
+  onSwapWith: (dir: 'up' | 'down') => void;
 }
 
-const InspectorChecklistRow: React.FC<InspectorChecklistRowProps> = ({ item, t }) => {
+const InspectorChecklistRow: React.FC<InspectorChecklistRowProps> = ({
+  item,
+  idx,
+  totalCount,
+  taskId,
+  t,
+  registerRef,
+  onFocusAddBottom,
+  onFocusNewSubtask,
+  onSwapWith
+}) => {
   const [subTitle, setSubTitle] = useState(item.title);
   const [prevTitle, setPrevTitle] = useState(item.title);
   const [isFocused, setIsFocused] = useState(false);
@@ -90,6 +142,7 @@ const InspectorChecklistRow: React.FC<InspectorChecklistRowProps> = ({ item, t }
       </button>
 
       <input
+        ref={registerRef}
         type="text"
         className={`checklist-input ${item.isCompleted ? 'done' : ''}`}
         value={subTitle}
@@ -106,33 +159,70 @@ const InspectorChecklistRow: React.FC<InspectorChecklistRowProps> = ({ item, t }
           setSubTitle(next);
           void localDb.updateChecklistItem(item.id, { title: next });
         }}
-        onKeyDown={(e) => {
+        onKeyDown={async (e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
-            e.currentTarget.blur();
+            const inputEl = e.currentTarget;
+            const val = subTitle;
+            if (!val.trim()) {
+              await localDb.deleteChecklistItem(item.id);
+              onFocusAddBottom();
+              return;
+            }
+            const cursor = inputEl.selectionStart ?? val.length;
+            if (cursor < val.length) {
+              const leftPart = val.slice(0, cursor).trimEnd();
+              const rightPart = val.slice(cursor).trimStart();
+              setSubTitle(leftPart);
+              const newId = await localDb.insertChecklistItemAfter(
+                taskId,
+                item.id,
+                rightPart,
+                leftPart
+              );
+              onFocusNewSubtask(newId);
+            } else {
+              const newId = await localDb.insertChecklistItemAfter(taskId, item.id, '', val);
+              onFocusNewSubtask(newId);
+            }
           }
         }}
       />
 
-      <button
-        type="button"
-        className="icon-btn inspector-checklist-del-btn"
-        title={t.actionDelete}
-        aria-label={t.actionDelete}
-        onClick={() => void localDb.deleteChecklistItem(item.id)}
-      >
-        <X size={13} />
-      </button>
+      <div className="inspector-checklist-row-actions">
+        <button
+          type="button"
+          className="icon-btn inspector-checklist-del-btn"
+          disabled={idx === 0}
+          title={t.actionMove}
+          aria-label={t.actionMove}
+          onClick={() => onSwapWith('up')}
+        >
+          <ArrowUp size={12} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn inspector-checklist-del-btn"
+          disabled={idx === totalCount - 1}
+          title={t.actionMove}
+          aria-label={t.actionMove}
+          onClick={() => onSwapWith('down')}
+        >
+          <ArrowDown size={12} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn inspector-checklist-del-btn"
+          title={t.actionDelete}
+          aria-label={t.actionDelete}
+          onClick={() => void localDb.deleteChecklistItem(item.id)}
+        >
+          <X size={13} />
+        </button>
+      </div>
     </div>
   );
 };
-
-function nextCycledEffort(cur: EffortLevel | null | undefined): EffortLevel | null {
-  if (!cur) return 'QUICK_WIN';
-  if (cur === 'QUICK_WIN') return 'MEDIUM';
-  if (cur === 'MEDIUM') return 'DEEP_FOCUS';
-  return null;
-}
 
 export interface SevenDayWorkloadCardProps {
   forecast: readonly DayWorkloadSummary[];
@@ -265,24 +355,63 @@ export interface WorkspaceInspectorPanelProps {
   allOpenTasks: TaskRecord[];
   visibleViewTasks: TaskRecord[];
   checklistItems: ChecklistItemRecord[];
+  headings?: readonly HeadingRecord[];
+  attachments?: readonly AttachmentRecord[];
+  openTaskIdSet?: ReadonlySet<string>;
+  tasksByIdMap?: ReadonlyMap<string, TaskRecord>;
   areasMap: Map<string, AreaRecord>;
   projectsMap: Map<string, ProjectRecord>;
   tagsMap: Map<string, TagRecord>;
   lang: SupportedLang;
+  geminiApiKey?: string;
   t: TranslationStrings;
+  onToast?: (msg: string) => void;
   onSelectTaskFromInspector: (task: TaskRecord) => void;
   onOpenTaskEditor: (taskId: string) => void;
   onClearSelection: () => void;
   onCollapsePanel: () => void;
   onOpenWhenModal: (taskId: string) => void;
   onOpenDeadlineModal: (taskId: string) => void;
+  onOpenRepeatModal?: (taskId: string) => void;
   onOpenMoveModal: (taskId: string) => void;
   onOpenTagsModal: (taskId: string) => void;
+  onOpenDependenciesModal?: (taskId: string) => void;
+  onDuplicateTask?: (taskId: string) => void | Promise<void>;
   onStartFocusTimer: (
     taskId: string,
     taskTitle: string,
     durationMinutes?: number | null
   ) => void;
+}
+
+function buildSmartSyntaxPatch(parsed: ParsedSmartSyntax, baseTask: TaskRecord) {
+  return {
+    id: baseTask.id,
+    title: parsed.cleanTitle,
+    ...(parsed.scheduleState != null
+      ? { scheduleState: parsed.scheduleState, whenDate: parsed.whenDate }
+      : {}),
+    ...(parsed.reminderTime != null ? { reminderTime: parsed.reminderTime } : {}),
+    ...(parsed.deadline != null ? { deadline: parsed.deadline } : {}),
+    ...(parsed.durationMinutes != null ? { durationMinutes: parsed.durationMinutes } : {}),
+    ...(parsed.matchedTagIds.length > 0 ? { addTagIds: parsed.matchedTagIds } : {}),
+    ...(parsed.matchedProject
+      ? {
+          projectId: parsed.matchedProject.id,
+          headingId:
+            baseTask.projectId === parsed.matchedProject.id ? baseTask.headingId : null,
+          areaId: null
+        }
+      : parsed.matchedArea
+        ? {
+            projectId: null,
+            headingId: null,
+            areaId: parsed.matchedArea.id
+          }
+        : {}),
+    ...(parsed.isMilestone ? { isMilestone: true } : {}),
+    ...(parsed.isInProgress ? { isInProgress: true } : {})
+  };
 }
 
 export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = ({
@@ -298,19 +427,28 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
   allOpenTasks,
   visibleViewTasks,
   checklistItems,
+  headings = EMPTY_HEADINGS,
+  attachments = EMPTY_ATTACHMENTS,
+  openTaskIdSet = EMPTY_OPEN_ID_SET,
+  tasksByIdMap = EMPTY_TASKS_MAP,
   areasMap,
   projectsMap,
   tagsMap,
   lang,
+  geminiApiKey = '',
   t,
+  onToast = NOOP_TOAST,
   onSelectTaskFromInspector,
   onOpenTaskEditor,
   onClearSelection,
   onCollapsePanel,
   onOpenWhenModal,
   onOpenDeadlineModal,
+  onOpenRepeatModal,
   onOpenMoveModal,
   onOpenTagsModal,
+  onOpenDependenciesModal,
+  onDuplicateTask,
   onStartFocusTimer
 }) => {
   const [prevTaskId, setPrevTaskId] = useState<string | null>(selectedTask?.id ?? null);
@@ -321,10 +459,21 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
   const [isTitleFocused, setIsTitleFocused] = useState(false);
   const [isNotesFocused, setIsNotesFocused] = useState(false);
   const [newChecklistTitle, setNewChecklistTitle] = useState('');
+  const [focusSubtaskId, setFocusSubtaskId] = useState<string | null>(null);
+  const [loadingAi, setLoadingAi] = useState(false);
   const [showTimeblockPicker, setShowTimeblockPicker] = useState(false);
   const [showDurationPicker, setShowDurationPicker] = useState(false);
+  const [showEffortPicker, setShowEffortPicker] = useState(false);
+  const [customDurationDraft, setCustomDurationDraft] = useState('');
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [statusMenuFlipUp, setStatusMenuFlipUp] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [fileDropOver, setFileDropOver] = useState(false);
 
-  const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const subtaskRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const addChecklistInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentFileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraCaptureInputRef = useRef<HTMLInputElement | null>(null);
 
   if ((selectedTask?.id ?? null) !== prevTaskId) {
     setPrevTaskId(selectedTask?.id ?? null);
@@ -335,8 +484,15 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
     setIsTitleFocused(false);
     setIsNotesFocused(false);
     setNewChecklistTitle('');
+    setFocusSubtaskId(null);
+    setLoadingAi(false);
     setShowTimeblockPicker(false);
     setShowDurationPicker(false);
+    setShowEffortPicker(false);
+    setCustomDurationDraft('');
+    setStatusMenuOpen(false);
+    setMoreMenuOpen(false);
+    setFileDropOver(false);
   } else if (selectedTask) {
     if (prevServerTitle !== selectedTask.title) {
       setPrevServerTitle(selectedTask.title);
@@ -352,16 +508,39 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
     }
   }
 
-  // Auto-size notes textarea cleanly without scrollbars
   useEffect(() => {
-    const el = notesTextareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.max(76, Math.min(320, el.scrollHeight))}px`;
-  }, [notesDraft, selectedTask?.id]);
+    if (focusSubtaskId && subtaskRefs.current[focusSubtaskId]) {
+      const el = subtaskRefs.current[focusSubtaskId]!;
+      el.focus();
+      el.setSelectionRange(0, 0);
+      setFocusSubtaskId(null);
+    }
+  }, [focusSubtaskId, checklistItems]);
 
   const formatShortDate = (ms: number) =>
     new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' }).format(new Date(ms));
+
+  const formatReminderClock = (ms: number) => {
+    const d = new Date(ms);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const allTagsList = useMemo(() => Array.from(tagsMap.values()), [tagsMap]);
+  const allProjectsList = useMemo(() => Array.from(projectsMap.values()), [projectsMap]);
+  const allAreasList = useMemo(() => Array.from(areasMap.values()), [areasMap]);
+
+  const inspectorParsedSmart = useMemo(
+    () =>
+      selectedTask
+        ? parseSmartTaskSyntax(titleDraft, {
+            tags: allTagsList,
+            projects: allProjectsList,
+            areas: allAreasList,
+            lang
+          })
+        : null,
+    [selectedTask, titleDraft, allTagsList, allProjectsList, allAreasList, lang]
+  );
 
   const workdayBounds = useMemo(
     () => normalizeWorkdayBounds(workdayStartMinutes, workdayEndMinutes),
@@ -457,6 +636,21 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
       .sort((a, b) => a.sortOrder - b.sortOrder);
     const doneChecklistsCount = activeChecklists.filter((c) => c.isCompleted).length;
 
+    const taskAttachments = attachments
+      .filter((a) => !a.isDeleted && a.taskId === selectedTask.id)
+      .sort((a, b) => a.createdAt - b.createdAt);
+
+    const projectHeadings = selectedTask.projectId
+      ? headings
+          .filter(
+            (h) => !h.isDeleted && !h.isArchived && h.projectId === selectedTask.projectId
+          )
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+      : [];
+    const currentHeading = selectedTask.headingId
+      ? headings.find((h) => !h.isDeleted && h.id === selectedTask.headingId)
+      : undefined;
+
     const proj = selectedTask.projectId
       ? projectsMap.get(selectedTask.projectId)
       : undefined;
@@ -466,7 +660,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
         : selectedTask.areaId
           ? areasMap.get(selectedTask.areaId)
           : undefined;
-    const containerBreadcrumb =
+    const baseBreadcrumb =
       area && proj
         ? `${area.title} › ${proj.title}`
         : proj
@@ -474,6 +668,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
           : area
             ? area.title
             : t.noProjectNoArea;
+    const containerBreadcrumb =
+      proj && currentHeading
+        ? `${baseBreadcrumb} › ${currentHeading.title}`
+        : baseBreadcrumb;
 
     const taskTags = selectedTask.tagIds
       .map((id) => tagsMap.get(id))
@@ -484,6 +682,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
       selectedTask.scheduleState === 'UPCOMING' &&
       selectedTask.whenDate != null &&
       daysBetweenToday(selectedTask.whenDate) === 1;
+    const isCustomUpcomingSelected =
+      selectedTask.scheduleState === 'UPCOMING' &&
+      selectedTask.whenDate != null &&
+      !isTomorrowSelected;
 
     const dlDiff =
       selectedTask.deadline != null ? daysBetweenToday(selectedTask.deadline) : null;
@@ -506,6 +708,8 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             selectedTask.durationMinutes
           )
         : t.actionTimeblock;
+    const currentTimeblockDuration =
+      selectedTask.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES;
 
     const durationLabel =
       selectedTask.durationMinutes != null && selectedTask.durationMinutes > 0
@@ -537,10 +741,172 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             ? `🧠 ${t.effortDeepFocus}`
             : t.effortLabel;
 
+    const activeBlockerIds = (selectedTask.blockedByTaskIds || []).filter(
+      (bid) => bid && bid !== selectedTask.id && openTaskIdSet.has(bid)
+    );
+    const isActivelyBlocked = isTaskActivelyBlocked(selectedTask, openTaskIdSet);
+    const firstBlockerTitle =
+      activeBlockerIds.length === 1
+        ? (tasksByIdMap.get(activeBlockerIds[0])?.title?.trim() ?? '')
+        : '';
+    const blockedSummaryLabel = isActivelyBlocked
+      ? activeBlockerIds.length === 1 && firstBlockerTitle
+        ? t.waitingOnNamedBadge(firstBlockerTitle)
+        : t.waitingOnBadge(activeBlockerIds.length)
+      : '';
+    const totalBlockerCount = (selectedTask.blockedByTaskIds || []).filter(
+      (bid) => bid && bid !== selectedTask.id
+    ).length;
+
     const focusMinutes =
       selectedTask.durationMinutes != null && selectedTask.durationMinutes > 0
         ? Math.min(720, selectedTask.durationMinutes)
         : 25;
+
+    const flushDraftsIfNeeded = () => {
+      const pendingSub = newChecklistTitle.trim();
+      if (pendingSub) {
+        setNewChecklistTitle('');
+        void localDb.addChecklistItems(selectedTask.id, [pendingSub]);
+      }
+      const patch: { id: string; title?: string; notes?: string } = { id: selectedTask.id };
+      let changed = false;
+      const cleanTitle = titleDraft.trim();
+      if (cleanTitle !== selectedTask.title) {
+        patch.title = cleanTitle;
+        changed = true;
+      }
+      if (notesDraft !== selectedTask.notes) {
+        patch.notes = notesDraft;
+        changed = true;
+      }
+      if (changed) {
+        void localDb.upsertTask(patch);
+      }
+    };
+
+    const commitStatus = async (nextStatus: TaskStatus) => {
+      flushDraftsIfNeeded();
+      await localDb.upsertTask({
+        id: selectedTask.id,
+        status: nextStatus
+      });
+    };
+
+    const updateCheckboxMenuPlacement = (target: EventTarget | null) => {
+      if (target instanceof HTMLElement) {
+        const rect = target.getBoundingClientRect();
+        setStatusMenuFlipUp(rect.bottom + 120 > window.innerHeight - 12);
+      }
+    };
+
+    const triggerInspectorVoiceDictation = () => {
+      const w = window as unknown as {
+        SpeechRecognition?: new () => {
+          lang: string;
+          interimResults: boolean;
+          onresult:
+            | ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void)
+            | null;
+          start: () => void;
+        };
+        webkitSpeechRecognition?: new () => {
+          lang: string;
+          interimResults: boolean;
+          onresult:
+            | ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void)
+            | null;
+          start: () => void;
+        };
+      };
+      const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+      if (!Ctor) {
+        onToast(t.voiceDictationLabel);
+        return;
+      }
+      try {
+        const rec = new Ctor();
+        rec.lang =
+          lang === 'de'
+            ? 'de-DE'
+            : lang === 'fr'
+              ? 'fr-FR'
+              : lang === 'it'
+                ? 'it-IT'
+                : lang === 'es'
+                  ? 'es-ES'
+                  : 'en-US';
+        rec.interimResults = false;
+        rec.onresult = (ev) => {
+          const spoken = ev.results?.[0]?.[0]?.transcript?.trim() ?? '';
+          if (!spoken) return;
+          if (!titleDraft.trim()) {
+            setTitleDraft(spoken);
+            void localDb.upsertTask({ id: selectedTask.id, title: spoken });
+          } else {
+            const merged = notesDraft.trim() ? `${notesDraft.trim()}\n${spoken}` : spoken;
+            setNotesDraft(merged);
+            void localDb.upsertTask({ id: selectedTask.id, notes: merged });
+          }
+        };
+        onToast(t.voiceListeningHint);
+        rec.start();
+      } catch {
+        onToast(t.voiceDictationLabel);
+      }
+    };
+
+    const copyTaskAsMarkdown = async () => {
+      flushDraftsIfNeeded();
+      const statusBox =
+        selectedTask.status === 'COMPLETED'
+          ? '[x]'
+          : selectedTask.status === 'CANCELED'
+            ? '[-]'
+            : '[ ]';
+      const cleanTitle = (
+        titleDraft.trim() ||
+        selectedTask.title ||
+        t.placeholderTodoTitle
+      ).trim();
+      const lines: string[] = [`- ${statusBox} ${cleanTitle}`];
+      const cleanNotes = notesDraft.trim();
+      if (cleanNotes) {
+        for (const nl of cleanNotes.split(/\r?\n/)) {
+          lines.push(`  ${nl}`);
+        }
+      }
+      for (const item of activeChecklists) {
+        lines.push(`  - [${item.isCompleted ? 'x' : ' '}] ${item.title}`);
+      }
+      const md = lines.join('\n');
+      try {
+        await navigator.clipboard.writeText(md);
+        onToast(`✓ ${t.copiedMarkdownToast}`);
+      } catch {
+        onToast(t.actionCopyMarkdown);
+      }
+    };
+
+    const runMagicBreakdown = async () => {
+      if (loadingAi) return;
+      flushDraftsIfNeeded();
+      setLoadingAi(true);
+      try {
+        const steps = await generateMagicChecklist(
+          titleDraft || selectedTask.title,
+          notesDraft || selectedTask.notes,
+          lang,
+          geminiApiKey
+        );
+        await localDb.addChecklistItems(selectedTask.id, steps);
+        onToast(`✨ +${steps.length} ${t.actionChecklist}`);
+      } catch (err) {
+        onToast(err instanceof Error ? err.message : 'Gemini error');
+      } finally {
+        setLoadingAi(false);
+      }
+    };
 
     const commitChecklistAdd = async () => {
       const clean = newChecklistTitle.trim();
@@ -559,7 +925,29 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
         className="workspace-inspector-panel"
         data-testid="workspace-inspector-panel"
         data-inspector-mode="task"
+        style={
+          fileDropOver
+            ? { outline: '2px dashed var(--things-blue)', outlineOffset: -2 }
+            : undefined
+        }
         onClick={(e) => e.stopPropagation()}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            setFileDropOver(true);
+          }
+        }}
+        onDragLeave={() => setFileDropOver(false)}
+        onDrop={async (e) => {
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            e.preventDefault();
+            setFileDropOver(false);
+            const files = Array.from(e.dataTransfer.files);
+            for (const f of files) {
+              await processAndAddAttachmentFile(f, { taskId: selectedTask.id }, t, onToast);
+            }
+          }
+        }}
       >
         <div className="inspector-header" data-testid="inspector-task-header">
           <span className="inspector-header-title">{t.inspectorTitle}</span>
@@ -567,10 +955,191 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             <button
               type="button"
               className="icon-btn"
+              data-testid="inspector-voice-dictation-btn"
+              title={t.voiceDictationLabel}
+              aria-label={t.voiceDictationLabel}
+              onClick={triggerInspectorVoiceDictation}
+            >
+              <Mic size={14.5} />
+            </button>
+
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                type="button"
+                className="icon-btn"
+                data-testid="inspector-more-menu-btn"
+                title={t.actionMoreOptions}
+                aria-label={t.actionMoreOptions}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMoreMenuOpen((v) => !v);
+                }}
+              >
+                <MoreHorizontal size={15.5} />
+              </button>
+
+              {moreMenuOpen && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 85 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMoreMenuOpen(false);
+                    }}
+                  />
+                  <div
+                    className="dropdown-popover"
+                    style={{
+                      right: 0,
+                      left: 'auto',
+                      top: 'calc(100% + 6px)',
+                      minWidth: 215,
+                      zIndex: 95
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        attachmentFileInputRef.current?.click();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Paperclip size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.attachmentsAddPhotoBtn}</span>
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        cameraCaptureInputRef.current?.click();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Camera size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.actionTakePhoto}</span>
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        triggerInspectorVoiceDictation();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Mic size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.voiceDictationLabel}</span>
+                      </span>
+                    </button>
+
+                    {onDuplicateTask && (
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="inspector-duplicate-btn"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          flushDraftsIfNeeded();
+                          void onDuplicateTask(selectedTask.id);
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <Copy size={14} style={{ color: 'var(--things-blue)' }} />
+                          <span>{t.actionDuplicateTodo}</span>
+                        </span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="inspector-copy-markdown-btn"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        void copyTaskAsMarkdown();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <FileText size={14} style={{ color: 'var(--things-blue)' }} />
+                        <span>{t.actionCopyMarkdown}</span>
+                      </span>
+                    </button>
+
+                    {selectedTask.status !== 'CANCELED' && (
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="inspector-cancel-todo-btn"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          void commitStatus('CANCELED');
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <XCircle size={14} style={{ color: 'var(--text-secondary)' }} />
+                          <span>{t.actionCancelTodo}</span>
+                        </span>
+                      </button>
+                    )}
+
+                    {selectedTask.status !== 'OPEN' && (
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="inspector-reopen-todo-btn"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          void commitStatus('OPEN');
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <RotateCcw size={14} style={{ color: 'var(--things-blue)' }} />
+                          <span>{t.actionReopenTodo}</span>
+                        </span>
+                      </button>
+                    )}
+
+                    <div className="dropdown-divider" />
+
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="inspector-delete-btn"
+                      style={{ color: 'var(--deadline-red)' }}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        void localDb.softDeleteTasks([selectedTask.id]);
+                        onClearSelection();
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Trash2 size={14} style={{ color: 'var(--deadline-red)' }} />
+                        <span>{t.actionDelete}</span>
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="icon-btn"
               data-testid="inspector-open-modal-btn"
               title={t.openDetailsAction}
               aria-label={t.openDetailsAction}
-              onClick={() => onOpenTaskEditor(selectedTask.id)}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onOpenTaskEditor(selectedTask.id);
+              }}
             >
               <Maximize2 size={15} />
             </button>
@@ -580,7 +1149,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               data-testid="inspector-deselect-btn"
               title={t.ctxDeselect}
               aria-label={t.ctxDeselect}
-              onClick={onClearSelection}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onClearSelection();
+              }}
             >
               <X size={15.5} />
             </button>
@@ -590,7 +1162,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               data-testid="inspector-collapse-btn"
               title={t.inspectorToggleTooltip}
               aria-label={t.inspectorToggleTooltip}
-              onClick={onCollapsePanel}
+              onClick={() => {
+                flushDraftsIfNeeded();
+                onCollapsePanel();
+              }}
             >
               <PanelRightClose size={16} />
             </button>
@@ -598,48 +1173,165 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
         </div>
 
         <div className="inspector-scroll-body">
-          {/* 1. Title & Flags Soft Bento Card */}
+          {/* 1. Title, Smart-Syntax Strip & Flags Soft Bento Card */}
           <section
             className="inspector-bento-card"
             data-testid="inspector-task-title-card"
           >
             <div className="inspector-title-row">
-              <button
-                type="button"
-                className={`things-checkbox ${
-                  selectedTask.isMilestone ? 'milestone' : ''
-                } ${
-                  selectedTask.status === 'OPEN' && selectedTask.isInProgress ? 'in-progress' : ''
-                } ${isSomedayDashed ? 'someday-dashed' : ''} ${
-                  isCompleted ? 'completed checked' : ''
-                } ${isCanceled ? 'canceled' : ''}`}
-                title={
-                  selectedTask.status === 'OPEN'
-                    ? `${t.actionComplete} · Shift+Click: ${
-                        selectedTask.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
-                      }`
-                    : t.actionReopenTodo
-                }
-                aria-label={
-                  selectedTask.status === 'OPEN' ? t.actionComplete : t.actionReopenTodo
-                }
-                onClick={(e) => {
-                  if (e.shiftKey && selectedTask.status === 'OPEN') {
-                    void localDb.toggleTaskInProgress(selectedTask.id);
-                    return;
+              <div className="checkbox-anchor" onDoubleClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className={`things-checkbox ${
+                    selectedTask.isMilestone ? 'milestone' : ''
+                  } ${
+                    selectedTask.status === 'OPEN' && selectedTask.isInProgress
+                      ? 'in-progress'
+                      : ''
+                  } ${isSomedayDashed ? 'someday-dashed' : ''} ${
+                    isCompleted ? 'completed checked' : ''
+                  } ${isCanceled ? 'canceled' : ''}`}
+                  title={
+                    selectedTask.status === 'OPEN'
+                      ? `${t.actionComplete} · Shift+Click: ${
+                          selectedTask.isInProgress
+                            ? t.v33ClearInProgress
+                            : t.v33MarkInProgress
+                        } · ${t.shortcutCancelHint}`
+                      : t.actionReopenTodo
                   }
-                  void localDb.upsertTask({
-                    id: selectedTask.id,
-                    status: selectedTask.status === 'OPEN' ? 'COMPLETED' : 'OPEN'
-                  });
-                }}
-              >
-                {isCompleted ? (
-                  <Check size={12.5} strokeWidth={3} />
-                ) : isCanceled ? (
-                  <X size={12.5} strokeWidth={3} />
-                ) : null}
-              </button>
+                  aria-label={
+                    selectedTask.status === 'OPEN' ? t.actionComplete : t.actionReopenTodo
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (e.altKey) {
+                      updateCheckboxMenuPlacement(e.currentTarget);
+                      setStatusMenuOpen((v) => !v);
+                      return;
+                    }
+                    if (e.shiftKey && selectedTask.status === 'OPEN') {
+                      flushDraftsIfNeeded();
+                      void localDb.toggleTaskInProgress(selectedTask.id);
+                      return;
+                    }
+                    void commitStatus(selectedTask.status === 'OPEN' ? 'COMPLETED' : 'OPEN');
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    updateCheckboxMenuPlacement(e.currentTarget);
+                    setStatusMenuOpen(true);
+                  }}
+                >
+                  {isCompleted ? (
+                    <Check size={12.5} strokeWidth={3} />
+                  ) : isCanceled ? (
+                    <X size={12.5} strokeWidth={3} />
+                  ) : null}
+                </button>
+
+                {statusMenuOpen && (
+                  <>
+                    <div
+                      style={{ position: 'fixed', inset: 0, zIndex: 80 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStatusMenuOpen(false);
+                      }}
+                    />
+                    <div
+                      className="dropdown-popover"
+                      style={{
+                        left: 0,
+                        right: 'auto',
+                        minWidth: 185,
+                        zIndex: 90,
+                        ...(statusMenuFlipUp
+                          ? { top: 'auto', bottom: 'calc(100% + 6px)' }
+                          : {})
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {selectedTask.status === 'OPEN' && (
+                        <button
+                          type="button"
+                          className="dropdown-item"
+                          data-testid="inspector-status-menu-in-progress-btn"
+                          onClick={() => {
+                            setStatusMenuOpen(false);
+                            flushDraftsIfNeeded();
+                            void localDb.toggleTaskInProgress(selectedTask.id);
+                          }}
+                        >
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <span
+                              style={{
+                                color: 'var(--in-progress-amber-ring)',
+                                fontSize: 13.5,
+                                lineHeight: 1
+                              }}
+                              aria-hidden="true"
+                            >
+                              ◐
+                            </span>
+                            <span>
+                              {selectedTask.isInProgress
+                                ? t.v33ClearInProgress
+                                : t.v33MarkInProgress}
+                            </span>
+                          </span>
+                        </button>
+                      )}
+                      {selectedTask.status !== 'COMPLETED' && (
+                        <button
+                          type="button"
+                          className="dropdown-item"
+                          onClick={() => {
+                            setStatusMenuOpen(false);
+                            void commitStatus('COMPLETED');
+                          }}
+                        >
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <CheckCircle2 size={14} style={{ color: 'var(--things-blue)' }} />
+                            <span>{t.actionComplete}</span>
+                          </span>
+                        </button>
+                      )}
+                      {selectedTask.status !== 'CANCELED' && (
+                        <button
+                          type="button"
+                          className="dropdown-item"
+                          onClick={() => {
+                            setStatusMenuOpen(false);
+                            void commitStatus('CANCELED');
+                          }}
+                        >
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <XCircle size={14} style={{ color: 'var(--text-secondary)' }} />
+                            <span>{t.actionCancelTodo}</span>
+                          </span>
+                        </button>
+                      )}
+                      {selectedTask.status !== 'OPEN' && (
+                        <button
+                          type="button"
+                          className="dropdown-item"
+                          onClick={() => {
+                            setStatusMenuOpen(false);
+                            void commitStatus('OPEN');
+                          }}
+                        >
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <RotateCcw size={14} style={{ color: 'var(--things-blue)' }} />
+                            <span>{t.actionReopenTodo}</span>
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
               <input
                 type="text"
@@ -668,6 +1360,85 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 }}
               />
             </div>
+
+            {inspectorParsedSmart?.hasAnyMatch && (
+              <div
+                className="v32-smart-syntax-strip compact"
+                data-testid="inspector-smart-syntax-strip"
+              >
+                <span className="v32-smart-syntax-label">{t.v32SmartSyntaxDetected}</span>
+                <div className="v32-smart-syntax-pills">
+                  {inspectorParsedSmart.scheduleState != null && (
+                    <span className="meta-badge today">
+                      <Calendar size={10.5} />
+                      <span>
+                        {inspectorParsedSmart.whenLabel ||
+                          inspectorParsedSmart.scheduleState}
+                      </span>
+                    </span>
+                  )}
+                  {inspectorParsedSmart.deadline != null && (
+                    <span className="meta-badge urgent">
+                      <Flag size={10.5} />
+                      <span>{inspectorParsedSmart.deadlineLabel}</span>
+                    </span>
+                  )}
+                  {inspectorParsedSmart.durationMinutes != null && (
+                    <span className="meta-badge duration-badge">
+                      <Hourglass size={10} />
+                      <span>
+                        {formatStandaloneDuration(inspectorParsedSmart.durationMinutes)}
+                      </span>
+                    </span>
+                  )}
+                  {inspectorParsedSmart.isMilestone && (
+                    <span className="meta-badge milestone-badge">
+                      <Diamond size={10} />
+                      <span>{t.milestoneLabel}</span>
+                    </span>
+                  )}
+                  {inspectorParsedSmart.isInProgress && (
+                    <span className="meta-badge in-progress-badge">
+                      <span>◐ {t.v33InProgressBadge}</span>
+                    </span>
+                  )}
+                  {inspectorParsedSmart.matchedProject && (
+                    <span className="meta-badge">
+                      <Folder size={10.5} />
+                      <span>{inspectorParsedSmart.matchedProject.title}</span>
+                    </span>
+                  )}
+                  {!inspectorParsedSmart.matchedProject &&
+                    inspectorParsedSmart.matchedArea && (
+                      <span className="meta-badge">
+                        <Folder size={10.5} />
+                        <span>{inspectorParsedSmart.matchedArea.title}</span>
+                      </span>
+                    )}
+                  {inspectorParsedSmart.matchedTags.map((tg) => (
+                    <span key={tg.id} className="meta-badge">
+                      <LayoutGrid size={9.5} />
+                      <span>#{tg.title}</span>
+                    </span>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="chip-btn active v32-smart-apply-btn"
+                  data-testid="inspector-smart-syntax-apply-btn"
+                  onClick={() => {
+                    setTitleDraft(inspectorParsedSmart.cleanTitle);
+                    void localDb.upsertTask({
+                      ...buildSmartSyntaxPatch(inspectorParsedSmart, selectedTask),
+                      notes: notesDraft
+                    });
+                  }}
+                >
+                  <Check size={12} />
+                  <span>{t.v32SmartSyntaxApply}</span>
+                </button>
+              </div>
+            )}
 
             <div className="inspector-flags-bar">
               <button
@@ -746,7 +1517,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 className="icon-btn inspector-mini-icon-btn"
                 title={t.ctxWhenReminder}
                 aria-label={t.ctxWhenReminder}
-                onClick={() => onOpenWhenModal(selectedTask.id)}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenWhenModal(selectedTask.id);
+                }}
               >
                 <Calendar size={13.5} />
               </button>
@@ -811,6 +1585,29 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn ${
+                  selectedTask.scheduleState === 'ANYTIME' &&
+                  selectedTask.whenDate == null
+                    ? 'active'
+                    : ''
+                }`}
+                data-testid="inspector-when-anytime"
+                title={t.viewAnytime}
+                onClick={() =>
+                  void localDb.upsertTask({
+                    id: selectedTask.id,
+                    scheduleState: 'ANYTIME',
+                    whenDate: null,
+                    scheduledStartMinutes: null
+                  })
+                }
+              >
+                <Compass size={12} />
+                <span>{t.viewAnytime}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`chip-btn ${
                   selectedTask.scheduleState === 'SOMEDAY' ? 'active' : ''
                 }`}
                 data-testid="inspector-when-someday"
@@ -827,9 +1624,41 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 <Cloud size={12} />
                 <span>{t.viewSomeday}</span>
               </button>
+
+              {isCustomUpcomingSelected && selectedTask.whenDate != null && (
+                <button
+                  type="button"
+                  className="chip-btn active"
+                  data-testid="inspector-when-custom-date"
+                  title={t.ctxWhenReminder}
+                  onClick={() => {
+                    flushDraftsIfNeeded();
+                    onOpenWhenModal(selectedTask.id);
+                  }}
+                >
+                  <Calendar size={12} />
+                  <span>{formatShortDate(selectedTask.whenDate)}</span>
+                </button>
+              )}
             </div>
 
             <div className="inspector-prop-pills-wrap">
+              {selectedTask.reminderTime != null && (
+                <button
+                  type="button"
+                  className="chip-btn active"
+                  data-testid="inspector-reminder-btn"
+                  title={`${t.actionReminder}: ${formatReminderClock(selectedTask.reminderTime)}`}
+                  onClick={() => {
+                    flushDraftsIfNeeded();
+                    onOpenWhenModal(selectedTask.id);
+                  }}
+                >
+                  <Bell size={12} />
+                  <span>{formatReminderClock(selectedTask.reminderTime)}</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 className={`chip-btn ${
@@ -841,10 +1670,33 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 }`}
                 data-testid="inspector-deadline-btn"
                 title={t.actionDeadline}
-                onClick={() => onOpenDeadlineModal(selectedTask.id)}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenDeadlineModal(selectedTask.id);
+                }}
               >
                 <Flag size={12} />
                 <span>{dlLabel}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`chip-btn ${
+                  selectedTask.recurrenceRule != null ? 'active' : ''
+                }`}
+                data-testid="inspector-repeat-btn"
+                title={t.actionRepeat}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenRepeatModal?.(selectedTask.id);
+                }}
+              >
+                <Repeat size={12} />
+                <span>
+                  {selectedTask.recurrenceRule != null
+                    ? formatRecurrenceShort(selectedTask.recurrenceRule, lang)
+                    : t.actionRepeat}
+                </span>
               </button>
 
               <button
@@ -858,6 +1710,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 title={t.actionTimeblock}
                 onClick={() => {
                   setShowDurationPicker(false);
+                  setShowEffortPicker(false);
                   setShowTimeblockPicker((v) => !v);
                 }}
               >
@@ -878,6 +1731,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 title={t.durationLabel}
                 onClick={() => {
                   setShowTimeblockPicker(false);
+                  setShowEffortPicker(false);
                   setShowDurationPicker((v) => !v);
                 }}
               >
@@ -887,18 +1741,41 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
 
               <button
                 type="button"
-                className={`chip-btn ${selectedTask.effortLevel ? 'active' : ''}`}
+                className={`chip-btn ${
+                  selectedTask.effortLevel != null || showEffortPicker ? 'active' : ''
+                }`}
                 data-testid="inspector-effort-btn"
                 title={t.effortLabel}
-                onClick={() =>
-                  void localDb.upsertTask({
-                    id: selectedTask.id,
-                    effortLevel: nextCycledEffort(selectedTask.effortLevel)
-                  })
-                }
+                onClick={() => {
+                  setShowTimeblockPicker(false);
+                  setShowDurationPicker(false);
+                  setShowEffortPicker((v) => !v);
+                }}
               >
                 <Zap size={12} />
                 <span>{effortLabel}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`chip-btn task-waiting-on-chip ${
+                  isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
+                }`}
+                data-testid="task-waiting-on-chip"
+                title={t.waitingOnLabel}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenDependenciesModal?.(selectedTask.id);
+                }}
+              >
+                <Link2 size={12} />
+                <span>
+                  {blockedSummaryLabel
+                    ? blockedSummaryLabel
+                    : totalBlockerCount > 0
+                      ? `${t.dependencyModalTitle} (${totalBlockerCount})`
+                      : t.waitingOnLabel}
+                </span>
               </button>
             </div>
 
@@ -933,7 +1810,33 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             )}
 
             {showTimeblockPicker && (
-              <div className="inspector-inline-picker">
+              <div className="inspector-inline-picker" data-testid="inspector-timeblock-picker">
+                <div className="inspector-inline-slots" style={{ marginBottom: 6 }}>
+                  <span className="v2-timeblock-label">{t.timeblockStartTime}</span>
+                  <input
+                    type="time"
+                    className="v2-inline-time-input"
+                    aria-label={t.timeblockStartTime}
+                    value={
+                      selectedTask.scheduledStartMinutes != null
+                        ? formatMinutesAsClock(selectedTask.scheduledStartMinutes)
+                        : ''
+                    }
+                    onChange={(e) => {
+                      const mins = parseClockToMinutes(e.target.value);
+                      if (mins != null) {
+                        void localDb.upsertTask({
+                          id: selectedTask.id,
+                          scheduledStartMinutes: mins,
+                          durationMinutes:
+                            selectedTask.durationMinutes ??
+                            DEFAULT_TIMEBLOCK_DURATION_MINUTES
+                        });
+                      }
+                    }}
+                  />
+                </div>
+
                 <div className="inspector-inline-slots">
                   {TIMEBLOCK_QUICK_START_MINUTES.map((mins) => (
                     <button
@@ -956,6 +1859,33 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                       {formatMinutesAsClock(mins)}
                     </button>
                   ))}
+                </div>
+
+                <div className="inspector-inline-slots" style={{ marginTop: 8 }}>
+                  <span className="v2-timeblock-label">{t.timeblockDuration}</span>
+                  {TIMEBLOCK_DURATION_PRESETS.map((dur) => {
+                    const label = formatStandaloneDuration(dur);
+                    return (
+                      <button
+                        key={dur}
+                        type="button"
+                        className={`chip-btn ${
+                          currentTimeblockDuration === dur ? 'active' : ''
+                        }`}
+                        title={`${t.timeblockDuration}: ${label}`}
+                        onClick={() =>
+                          void localDb.upsertTask({
+                            id: selectedTask.id,
+                            scheduledStartMinutes:
+                              selectedTask.scheduledStartMinutes ?? 9 * 60,
+                            durationMinutes: dur
+                          })
+                        }
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                   {selectedTask.scheduledStartMinutes != null && (
                     <button
                       type="button"
@@ -968,7 +1898,8 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                         })
                       }
                     >
-                      {t.actionClear}
+                      <X size={11.5} />
+                      <span>{t.actionClear}</span>
                     </button>
                   )}
                 </div>
@@ -976,7 +1907,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             )}
 
             {showDurationPicker && (
-              <div className="inspector-inline-picker">
+              <div className="inspector-inline-picker" data-testid="inspector-duration-picker">
                 <div className="inspector-inline-slots">
                   {STANDALONE_DURATION_PRESETS.map((dur) => (
                     <button
@@ -989,7 +1920,8 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                       onClick={() =>
                         void localDb.upsertTask({
                           id: selectedTask.id,
-                          durationMinutes: dur
+                          durationMinutes:
+                            selectedTask.durationMinutes === dur ? null : dur
                         })
                       }
                     >
@@ -1008,9 +1940,98 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                         })
                       }
                     >
-                      {t.actionClear}
+                      <X size={11.5} />
+                      <span>{t.actionClear}</span>
                     </button>
                   )}
+                </div>
+
+                <div className="v3-custom-duration-row compact">
+                  <span className="v2-timeblock-label">{t.durationCustom}</span>
+                  <input
+                    type="text"
+                    className="v3-custom-duration-input"
+                    data-testid="inspector-custom-duration-input"
+                    value={customDurationDraft}
+                    placeholder={t.durationCustomPlaceholder}
+                    onChange={(e) => setCustomDurationDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const mins = parseCustomDurationMinutes(customDurationDraft);
+                        if (mins != null) {
+                          setCustomDurationDraft('');
+                          void localDb.upsertTask({
+                            id: selectedTask.id,
+                            durationMinutes: mins
+                          });
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className={`chip-btn ${
+                      parseCustomDurationMinutes(customDurationDraft) != null
+                        ? 'active'
+                        : ''
+                    }`}
+                    data-testid="inspector-custom-duration-apply"
+                    disabled={parseCustomDurationMinutes(customDurationDraft) == null}
+                    onClick={() => {
+                      const mins = parseCustomDurationMinutes(customDurationDraft);
+                      if (mins != null) {
+                        setCustomDurationDraft('');
+                        void localDb.upsertTask({
+                          id: selectedTask.id,
+                          durationMinutes: mins
+                        });
+                      }
+                    }}
+                  >
+                    <Check size={11.5} />
+                    <span>
+                      {(() => {
+                        const mins = parseCustomDurationMinutes(customDurationDraft);
+                        return mins != null
+                          ? formatStandaloneDuration(mins)
+                          : t.actionDone;
+                      })()}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showEffortPicker && (
+              <div className="inspector-inline-picker" data-testid="inspector-effort-picker">
+                <div className="inspector-inline-slots">
+                  {(
+                    [
+                      [null, t.effortNone],
+                      ['QUICK_WIN', `⚡ ${t.effortQuickWin}`],
+                      ['MEDIUM', t.effortMedium],
+                      ['DEEP_FOCUS', `🧠 ${t.effortDeepFocus}`]
+                    ] as Array<[EffortLevel | null, string]>
+                  ).map(([lvl, label]) => (
+                    <button
+                      key={lvl ?? 'none'}
+                      type="button"
+                      className={`chip-btn ${
+                        (selectedTask.effortLevel ?? null) === lvl ? 'active' : ''
+                      }`}
+                      data-testid={`inspector-effort-option-${lvl ?? 'none'}`}
+                      onClick={() =>
+                        void localDb.upsertTask({
+                          id: selectedTask.id,
+                          effortLevel: lvl
+                        })
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -1023,11 +2044,38 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 }`}
                 data-testid="inspector-container-btn"
                 title={t.ctxMoveContainer}
-                onClick={() => onOpenMoveModal(selectedTask.id)}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenMoveModal(selectedTask.id);
+                }}
               >
                 <Folder size={12} />
                 <span>{containerBreadcrumb}</span>
               </button>
+
+              {selectedTask.projectId != null && projectHeadings.length > 0 && (
+                <select
+                  className="inspector-phase-select"
+                  data-testid="inspector-heading-select"
+                  aria-label={t.entityHeading}
+                  title={t.entityHeading}
+                  value={selectedTask.headingId ?? ''}
+                  onChange={(e) => {
+                    const nextHeadingId = e.target.value || null;
+                    void localDb.upsertTask({
+                      id: selectedTask.id,
+                      headingId: nextHeadingId
+                    });
+                  }}
+                >
+                  <option value="">{t.projectUngroupedColumn}</option>
+                  {projectHeadings.map((hd) => (
+                    <option key={hd.id} value={hd.id}>
+                      {hd.title}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div className="inspector-tags-row">
@@ -1037,7 +2085,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                   type="button"
                   className="chip-btn active"
                   title={`${t.entityTag}: ${tg.title}`}
-                  onClick={() => onOpenTagsModal(selectedTask.id)}
+                  onClick={() => {
+                    flushDraftsIfNeeded();
+                    onOpenTagsModal(selectedTask.id);
+                  }}
                 >
                   <LayoutGrid size={11} />
                   <span>{tg.title}</span>
@@ -1048,7 +2099,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 className="chip-btn"
                 data-testid="inspector-tags-btn"
                 title={t.ctxAssignTags}
-                onClick={() => onOpenTagsModal(selectedTask.id)}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenTagsModal(selectedTask.id);
+                }}
               >
                 <Plus size={11.5} />
                 <span>{t.actionTags}</span>
@@ -1061,13 +2115,14 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 className="inspector-focus-timer-btn"
                 data-testid="inspector-start-focus-btn"
                 title={t.actionFocusTimerMinutes(focusMinutes)}
-                onClick={() =>
+                onClick={() => {
+                  flushDraftsIfNeeded();
                   onStartFocusTimer(
                     selectedTask.id,
-                    selectedTask.title,
+                    titleDraft || selectedTask.title,
                     selectedTask.durationMinutes
-                  )
-                }
+                  );
+                }}
               >
                 <Timer size={14} />
                 <span>{t.actionFocusTimerMinutes(focusMinutes)}</span>
@@ -1080,17 +2135,52 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             className="inspector-bento-card"
             data-testid="inspector-task-checklist-card"
           >
-            <div className="inspector-card-label">
-              <CheckSquare size={12.5} />
-              <span>
-                {t.actionChecklist} ({doneChecklistsCount}/{activeChecklists.length})
-              </span>
+            <div className="inspector-card-header-between">
+              <div className="inspector-card-label">
+                <CheckSquare size={12.5} />
+                <span>
+                  {t.actionChecklist} ({doneChecklistsCount}/{activeChecklists.length})
+                </span>
+              </div>
+
+              <button
+                type="button"
+                className="chip-btn gemini checklist-magic-inline-btn"
+                data-testid="inspector-magic-breakdown-btn"
+                disabled={loadingAi}
+                title={t.geminiMagicBreakdown}
+                onClick={() => void runMagicBreakdown()}
+              >
+                <Sparkles size={12} />
+                <span>{loadingAi ? t.geminiGenerating : t.geminiMagicBreakdown}</span>
+              </button>
             </div>
 
             {activeChecklists.length > 0 && (
               <div className="inspector-checklist-list">
-                {activeChecklists.map((item) => (
-                  <InspectorChecklistRow key={item.id} item={item} t={t} />
+                {activeChecklists.map((item, idx) => (
+                  <InspectorChecklistRow
+                    key={item.id}
+                    item={item}
+                    idx={idx}
+                    totalCount={activeChecklists.length}
+                    taskId={selectedTask.id}
+                    t={t}
+                    registerRef={(el) => {
+                      subtaskRefs.current[item.id] = el;
+                    }}
+                    onFocusAddBottom={() => addChecklistInputRef.current?.focus()}
+                    onFocusNewSubtask={(newId) => setFocusSubtaskId(newId)}
+                    onSwapWith={(dir) => {
+                      const other =
+                        dir === 'up'
+                          ? activeChecklists[idx - 1]
+                          : activeChecklists[idx + 1];
+                      if (other) {
+                        void localDb.swapChecklistOrder(item.id, other.id);
+                      }
+                    }}
+                  />
                 ))}
               </div>
             )}
@@ -1101,12 +2191,27 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 style={{ color: 'var(--things-blue)', flexShrink: 0 }}
               />
               <input
+                ref={addChecklistInputRef}
                 type="text"
                 className="checklist-input"
                 data-testid="inspector-checklist-add-input"
                 value={newChecklistTitle}
                 placeholder={t.placeholderAddChecklist}
                 onChange={(e) => setNewChecklistTitle(e.target.value)}
+                onPaste={(e) => {
+                  const pasted = e.clipboardData.getData('text');
+                  if (pasted && /\r?\n/.test(pasted)) {
+                    e.preventDefault();
+                    const lines = pasted
+                      .split(/\r?\n/)
+                      .map((line) => line.replace(/^[-*•[\]xX\s]+/, '').trim())
+                      .filter(Boolean);
+                    if (lines.length > 0) {
+                      setNewChecklistTitle('');
+                      void localDb.addChecklistItems(selectedTask.id, lines);
+                    }
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && newChecklistTitle.trim()) {
                     e.preventDefault();
@@ -1139,29 +2244,73 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <span>{t.placeholderNotes}</span>
             </div>
 
-            <textarea
-              ref={notesTextareaRef}
-              className="inspector-notes-textarea"
-              data-testid="inspector-task-notes-input"
-              rows={3}
+            <MarkdownNotesField
               value={notesDraft}
+              rows={3}
+              t={t}
+              onChange={(nextNotes) => {
+                setNotesDraft(nextNotes);
+                void localDb.upsertTask({ id: selectedTask.id, notes: nextNotes });
+              }}
+              onFocusChange={setIsNotesFocused}
               placeholder={t.placeholderNotes}
-              onFocus={() => setIsNotesFocused(true)}
-              onBlur={() => {
-                setIsNotesFocused(false);
-                if (notesDraft !== selectedTask.notes) {
-                  void localDb.upsertTask({ id: selectedTask.id, notes: notesDraft });
-                }
-              }}
-              onChange={(e) => {
-                const next = e.target.value;
-                setNotesDraft(next);
-                void localDb.upsertTask({ id: selectedTask.id, notes: next });
-              }}
+              className="inspector-notes-textarea"
+            />
+          </section>
+
+          {/* 5. Attachments Soft Bento Card */}
+          <section
+            className="inspector-bento-card"
+            data-testid="inspector-task-attachments-card"
+          >
+            <div className="inspector-card-header-between">
+              <div className="inspector-card-label">
+                <Paperclip size={12.5} />
+                <span>
+                  {t.attachmentsTitle}
+                  {taskAttachments.length > 0 ? ` (${taskAttachments.length})` : ''}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                className="icon-btn inspector-mini-icon-btn"
+                data-testid="inspector-camera-capture-btn"
+                title={t.actionTakePhoto}
+                aria-label={t.actionTakePhoto}
+                onClick={() => cameraCaptureInputRef.current?.click()}
+              >
+                <Camera size={13} />
+              </button>
+            </div>
+
+            <AttachmentsStrip
+              taskId={selectedTask.id}
+              attachments={taskAttachments}
+              t={t}
+              onToast={onToast}
+              showAddButton
+              fileInputRef={attachmentFileInputRef}
             />
 
-            <DetectedNotesLinksRow
-              links={extractDetectedLinksFromNotes(notesDraft)}
+            <input
+              ref={cameraCaptureInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = '';
+                for (const f of files) {
+                  await processAndAddAttachmentFile(
+                    f,
+                    { taskId: selectedTask.id },
+                    t,
+                    onToast
+                  );
+                }
+              }}
             />
           </section>
         </div>

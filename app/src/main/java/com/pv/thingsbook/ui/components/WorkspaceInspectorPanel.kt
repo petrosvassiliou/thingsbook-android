@@ -1,10 +1,15 @@
 package com.pv.thingsbook.ui.components
 
+import android.app.Activity
+import android.content.Intent
 import android.os.SystemClock
+import android.speech.RecognizerIntent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -24,7 +29,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,23 +36,33 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.VerticalSplit
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -61,23 +75,37 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,22 +115,30 @@ import com.pv.thingsbook.domain.model.Area
 import com.pv.thingsbook.domain.model.CalendarEventItem
 import com.pv.thingsbook.domain.model.ChecklistItem
 import com.pv.thingsbook.domain.model.EffortLevel
+import com.pv.thingsbook.domain.model.Heading
 import com.pv.thingsbook.domain.model.Project
+import com.pv.thingsbook.domain.model.RecurrenceRule
 import com.pv.thingsbook.domain.model.STANDALONE_DURATION_PRESETS
 import com.pv.thingsbook.domain.model.ScheduleState
+import com.pv.thingsbook.domain.model.Tag
 import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
 import com.pv.thingsbook.domain.model.TimeblockScheduleUtils
 import com.pv.thingsbook.domain.model.TodayTimelineEntry
 import com.pv.thingsbook.domain.model.formatDurationCompact
+import com.pv.thingsbook.domain.model.isTaskActivelyBlocked
+import com.pv.thingsbook.domain.parser.ParsedSmartSyntax
+import com.pv.thingsbook.domain.parser.SmartSyntaxParser
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+import java.util.UUID
 
 const val WORKSPACE_INSPECTOR_PANEL_WIDTH_DP = 352
 
@@ -171,9 +207,15 @@ fun WorkspaceInspectorPanel(
     sevenDayWorkload: List<com.pv.thingsbook.domain.model.DayWorkloadSummary> = emptyList(),
     areas: List<Area>,
     projects: List<Project>,
+    allHeadings: List<Heading> = emptyList(),
+    allTags: List<Tag> = emptyList(),
+    tagSortMode: String = "alpha",
+    tagUsageCounts: Map<String, Int> = emptyMap(),
+    openTaskIds: Set<String> = emptySet(),
     todayDate: LocalDate,
     locale: Locale,
     activeFocusTaskId: String?,
+    isGeneratingMagicBreakdown: Boolean = false,
     onCloseInspector: () -> Unit,
     onClearSelection: () -> Unit,
     onSelectTask: (String) -> Unit,
@@ -182,16 +224,35 @@ fun WorkspaceInspectorPanel(
     onUpdateTaskTitle: (TaskItem, String) -> Unit,
     onUpdateTaskNotes: (TaskItem, String) -> Unit,
     onUpdateTaskSchedule: (TaskItem, ScheduleState, Long?) -> Unit,
+    onUpdateTaskScheduleWithReminder: ((TaskItem, ScheduleState, Long?, Long?) -> Unit)? = null,
+    onUpdateTaskDeadline: (TaskItem, Long?) -> Unit = { _, _ -> },
+    onUpdateTaskRecurrence: (String, RecurrenceRule?) -> Unit = { _, _ -> },
+    onUpdateTimeblock: (String, Int?, Int?) -> Unit = { _, _, _ -> },
     onTogglePin: (String) -> Unit,
     onToggleMilestone: (String, Boolean) -> Unit,
     onToggleInProgress: (String) -> Unit = {},
     onUpdateDuration: (String, Int?) -> Unit,
     onUpdateEffort: (String, String?) -> Unit,
+    onUpdateBlockedBy: (String, List<String>) -> Unit = { _, _ -> },
+    onMoveTaskToContainer: (String, String?, String?, String?) -> Unit = { _, _, _, _ -> },
+    onUpdateTaskTags: (TaskItem, List<String>) -> Unit = { _, _ -> },
+    onCreateAndAssignTag: (TaskItem, String) -> Unit = { _, _ -> },
+    onOpenFullTagManager: () -> Unit = {},
     onStartFocusTimer: (TaskItem) -> Unit,
     onResetActualMinutes: ((String) -> Unit)? = null,
     onAddChecklistItem: (String, String) -> Unit,
+    onInsertChecklistItemAfter: ((taskId: String, afterItemId: String?, newItemId: String, title: String) -> Unit)? = null,
     onToggleChecklistItem: (String, Boolean) -> Unit,
+    onRenameChecklistItem: (String, String) -> Unit = { _, _ -> },
+    onMoveChecklistItem: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onDeleteChecklistItem: (String) -> Unit,
+    onTriggerGeminiMagicBreakdown: (TaskItem) -> Unit = {},
+    onApplySmartSyntax: ((taskId: String, parsed: ParsedSmartSyntax, latestNotes: String?) -> Unit)? = null,
+    onAddTaskAttachment: ((taskId: String, fileName: String, mimeType: String, bytes: ByteArray) -> Unit)? = null,
+    onDeleteAttachment: (String) -> Unit = {},
+    onDuplicateTask: (String) -> Unit = {},
+    onDeleteTask: (String) -> Unit = {},
+    onShowMessage: ((String) -> Unit)? = null,
     onNavigateToProject: ((String) -> Unit)? = null,
     onNavigateToArea: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -213,27 +274,53 @@ fun WorkspaceInspectorPanel(
         if (selectedTask != null) {
             SelectedTaskInspectorContent(
                 selectedTask = selectedTask,
+                allOpenTasks = allOpenTasks,
+                openTaskIds = openTaskIds,
                 areas = areas,
                 projects = projects,
+                allHeadings = allHeadings,
+                allTags = allTags,
+                tagSortMode = tagSortMode,
+                tagUsageCounts = tagUsageCounts,
                 todayDate = todayDate,
                 locale = locale,
                 activeFocusTaskId = activeFocusTaskId,
+                isGeneratingMagicBreakdown = isGeneratingMagicBreakdown,
                 onExpandTask = onExpandTask,
                 onClearSelection = onClearSelection,
                 onUpdateTaskStatus = onUpdateTaskStatus,
                 onUpdateTaskTitle = onUpdateTaskTitle,
                 onUpdateTaskNotes = onUpdateTaskNotes,
                 onUpdateTaskSchedule = onUpdateTaskSchedule,
+                onUpdateTaskScheduleWithReminder = onUpdateTaskScheduleWithReminder,
+                onUpdateTaskDeadline = onUpdateTaskDeadline,
+                onUpdateTaskRecurrence = onUpdateTaskRecurrence,
+                onUpdateTimeblock = onUpdateTimeblock,
                 onTogglePin = onTogglePin,
                 onToggleMilestone = onToggleMilestone,
                 onToggleInProgress = onToggleInProgress,
                 onUpdateDuration = onUpdateDuration,
                 onUpdateEffort = onUpdateEffort,
+                onUpdateBlockedBy = onUpdateBlockedBy,
+                onMoveTaskToContainer = onMoveTaskToContainer,
+                onUpdateTaskTags = onUpdateTaskTags,
+                onCreateAndAssignTag = onCreateAndAssignTag,
+                onOpenFullTagManager = onOpenFullTagManager,
                 onStartFocusTimer = onStartFocusTimer,
                 onResetActualMinutes = onResetActualMinutes,
                 onAddChecklistItem = onAddChecklistItem,
+                onInsertChecklistItemAfter = onInsertChecklistItemAfter,
                 onToggleChecklistItem = onToggleChecklistItem,
+                onRenameChecklistItem = onRenameChecklistItem,
+                onMoveChecklistItem = onMoveChecklistItem,
                 onDeleteChecklistItem = onDeleteChecklistItem,
+                onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
+                onApplySmartSyntax = onApplySmartSyntax,
+                onAddTaskAttachment = onAddTaskAttachment,
+                onDeleteAttachment = onDeleteAttachment,
+                onDuplicateTask = onDuplicateTask,
+                onDeleteTask = onDeleteTask,
+                onShowMessage = onShowMessage,
                 onNavigateToProject = onNavigateToProject,
                 onNavigateToArea = onNavigateToArea
             )
@@ -285,51 +372,188 @@ private fun InspectorSoftBentoCard(
 @Composable
 private fun SelectedTaskInspectorContent(
     selectedTask: TaskItem,
+    allOpenTasks: List<TaskItem>,
+    openTaskIds: Set<String>,
     areas: List<Area>,
     projects: List<Project>,
+    allHeadings: List<Heading>,
+    allTags: List<Tag>,
+    tagSortMode: String,
+    tagUsageCounts: Map<String, Int>,
     todayDate: LocalDate,
     locale: Locale,
     activeFocusTaskId: String?,
+    isGeneratingMagicBreakdown: Boolean,
     onExpandTask: (String) -> Unit,
     onClearSelection: () -> Unit,
     onUpdateTaskStatus: (String, TaskStatus) -> Unit,
     onUpdateTaskTitle: (TaskItem, String) -> Unit,
     onUpdateTaskNotes: (TaskItem, String) -> Unit,
     onUpdateTaskSchedule: (TaskItem, ScheduleState, Long?) -> Unit,
+    onUpdateTaskScheduleWithReminder: ((TaskItem, ScheduleState, Long?, Long?) -> Unit)?,
+    onUpdateTaskDeadline: (TaskItem, Long?) -> Unit,
+    onUpdateTaskRecurrence: (String, RecurrenceRule?) -> Unit,
+    onUpdateTimeblock: (String, Int?, Int?) -> Unit,
     onTogglePin: (String) -> Unit,
     onToggleMilestone: (String, Boolean) -> Unit,
     onToggleInProgress: (String) -> Unit = {},
     onUpdateDuration: (String, Int?) -> Unit,
     onUpdateEffort: (String, String?) -> Unit,
+    onUpdateBlockedBy: (String, List<String>) -> Unit,
+    onMoveTaskToContainer: (String, String?, String?, String?) -> Unit,
+    onUpdateTaskTags: (TaskItem, List<String>) -> Unit,
+    onCreateAndAssignTag: (TaskItem, String) -> Unit,
+    onOpenFullTagManager: () -> Unit,
     onStartFocusTimer: (TaskItem) -> Unit,
     onResetActualMinutes: ((String) -> Unit)? = null,
     onAddChecklistItem: (String, String) -> Unit,
+    onInsertChecklistItemAfter: ((taskId: String, afterItemId: String?, newItemId: String, title: String) -> Unit)?,
     onToggleChecklistItem: (String, Boolean) -> Unit,
+    onRenameChecklistItem: (String, String) -> Unit,
+    onMoveChecklistItem: (String, String, Boolean) -> Unit,
     onDeleteChecklistItem: (String) -> Unit,
+    onTriggerGeminiMagicBreakdown: (TaskItem) -> Unit,
+    onApplySmartSyntax: ((taskId: String, parsed: ParsedSmartSyntax, latestNotes: String?) -> Unit)?,
+    onAddTaskAttachment: ((taskId: String, fileName: String, mimeType: String, bytes: ByteArray) -> Unit)?,
+    onDeleteAttachment: (String) -> Unit,
+    onDuplicateTask: (String) -> Unit,
+    onDeleteTask: (String) -> Unit,
+    onShowMessage: ((String) -> Unit)?,
     onNavigateToProject: ((String) -> Unit)?,
     onNavigateToArea: ((String) -> Unit)?
 ) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
     val colors = ThingsTheme.colors
     val haptics = LocalHapticFeedback.current
     val zone = ZoneId.systemDefault()
 
     var titleDraft by remember(selectedTask.id) { mutableStateOf(selectedTask.title) }
+    var lastAppliedSmartTitle by remember(selectedTask.id) { mutableStateOf<String?>(null) }
     var isTitleFocused by remember(selectedTask.id) { mutableStateOf(false) }
     var notesDraft by remember(selectedTask.id) { mutableStateOf(selectedTask.notes) }
     var isNotesFocused by remember(selectedTask.id) { mutableStateOf(false) }
-    var newChecklistDraft by remember(selectedTask.id) { mutableStateOf("") }
+    var newChecklistField by remember(selectedTask.id) {
+        mutableStateOf(TextFieldValue(text = "", selection = TextRange(0)))
+    }
+    val newChecklistFocusRequester = remember(selectedTask.id) { FocusRequester() }
+    var pendingAutoFocusSubtaskId by remember(selectedTask.id) { mutableStateOf<String?>(null) }
+
+    var showMoreActionsMenu by remember(selectedTask.id) { mutableStateOf(false) }
     var showDurationMenu by remember(selectedTask.id) { mutableStateOf(false) }
+    var showCustomDurationDialog by remember(selectedTask.id) { mutableStateOf(false) }
     var showEffortMenu by remember(selectedTask.id) { mutableStateOf(false) }
+    var showWhenDialog by remember(selectedTask.id) { mutableStateOf(false) }
+    var showDeadlineDialog by remember(selectedTask.id) { mutableStateOf(false) }
+    var showRepeatDialog by remember(selectedTask.id) { mutableStateOf(false) }
+    var showTimeblockDialog by remember(selectedTask.id) { mutableStateOf(false) }
+    var showDependenciesDialog by remember(selectedTask.id) { mutableStateOf(false) }
+    var showMoveDialog by remember(selectedTask.id) { mutableStateOf(false) }
+    var showTagPickerDialog by remember(selectedTask.id) { mutableStateOf(false) }
 
     val latestTask by rememberUpdatedState(selectedTask)
     val latestTitleDraft by rememberUpdatedState(titleDraft)
+    val latestAppliedSmartTitle by rememberUpdatedState(lastAppliedSmartTitle)
     val latestNotesDraft by rememberUpdatedState(notesDraft)
     val latestUpdateTitle by rememberUpdatedState(onUpdateTaskTitle)
     val latestUpdateNotes by rememberUpdatedState(onUpdateTaskNotes)
 
+    val notifyInspectorMessage: (String) -> Unit = { msg ->
+        if (onShowMessage != null) {
+            onShowMessage(msg)
+        } else {
+            runCatching { Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
+        }
+    }
+
+    val tooLargeMsg = stringResource(R.string.attachment_too_large)
+    val importErrorMsg = stringResource(R.string.attachment_import_error)
+    val voicePromptMsg = stringResource(R.string.voice_capture_prompt)
+    val voiceUnavailableMsg = stringResource(R.string.voice_not_available)
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val taskIdSnapshot = latestTask.id
+        if (uri != null && onAddTaskAttachment != null) {
+            scope.launch {
+                when (val outcome = processPickedAttachmentUri(context, uri)) {
+                    is AttachmentImportOutcome.Success -> {
+                        onAddTaskAttachment(
+                            taskIdSnapshot,
+                            outcome.result.fileName,
+                            outcome.result.mimeType,
+                            outcome.result.bytes
+                        )
+                    }
+                    AttachmentImportOutcome.TooLarge -> notifyInspectorMessage(tooLargeMsg)
+                    AttachmentImportOutcome.Error -> notifyInspectorMessage(importErrorMsg)
+                }
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        val taskIdSnapshot = latestTask.id
+        if (bitmap != null && onAddTaskAttachment != null) {
+            val processed = processCapturedPhotoBitmap(bitmap)
+            onAddTaskAttachment(taskIdSnapshot, processed.fileName, processed.mimeType, processed.bytes)
+        }
+    }
+
+    val speechLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            val spoken = res.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+                .orEmpty()
+            if (spoken.isNotEmpty()) {
+                if (latestTitleDraft.isBlank()) {
+                    val sanitizedSpoken = spoken.replace("\r", "").replace("\n", " ").trim()
+                    titleDraft = sanitizedSpoken
+                    latestUpdateTitle(latestTask.copy(notes = latestNotesDraft), sanitizedSpoken)
+                } else {
+                    val updatedNotes = if (latestNotesDraft.isBlank()) {
+                        spoken
+                    } else {
+                        "${latestNotesDraft.trimEnd()}\n$spoken"
+                    }
+                    notesDraft = updatedNotes
+                    latestUpdateNotes(latestTask.copy(title = latestTitleDraft), updatedNotes)
+                }
+            }
+        }
+    }
+
+    val launchVoiceDictation = {
+        val launched = runCatching {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_PROMPT, voicePromptMsg)
+            }
+            speechLauncher.launch(intent)
+            true
+        }.getOrDefault(false)
+        if (!launched) {
+            notifyInspectorMessage(voiceUnavailableMsg)
+        }
+    }
+
     LaunchedEffect(selectedTask.id, selectedTask.title, isTitleFocused) {
         if (!isTitleFocused && titleDraft != selectedTask.title) {
             titleDraft = selectedTask.title
+        }
+        if (lastAppliedSmartTitle != null && selectedTask.title == lastAppliedSmartTitle) {
+            lastAppliedSmartTitle = null
         }
     }
 
@@ -340,9 +564,9 @@ private fun SelectedTaskInspectorContent(
     }
 
     LaunchedEffect(selectedTask.id, titleDraft) {
-        if (titleDraft != selectedTask.title) {
+        if (titleDraft != selectedTask.title && titleDraft != lastAppliedSmartTitle) {
             delay(320L)
-            if (titleDraft != latestTask.title) {
+            if (titleDraft != latestTask.title && titleDraft != latestAppliedSmartTitle) {
                 latestUpdateTitle(latestTask.copy(notes = latestNotesDraft), titleDraft)
             }
         }
@@ -360,7 +584,7 @@ private fun SelectedTaskInspectorContent(
     DisposableEffect(selectedTask.id) {
         val taskSnapshot = selectedTask
         onDispose {
-            if (latestTitleDraft != taskSnapshot.title) {
+            if (latestTitleDraft != taskSnapshot.title && latestTitleDraft != latestAppliedSmartTitle) {
                 latestUpdateTitle(latestTask.copy(notes = latestNotesDraft), latestTitleDraft)
             } else if (latestNotesDraft != taskSnapshot.notes) {
                 latestUpdateNotes(latestTask.copy(title = latestTitleDraft), latestNotesDraft)
@@ -383,6 +607,59 @@ private fun SelectedTaskInspectorContent(
         val targetAreaId = selectedTask.areaId ?: resolvedProject?.areaId
         targetAreaId?.let { aId -> areas.firstOrNull { it.id == aId && !it.isDeleted } }
     }
+    val resolvedHeading = remember(selectedTask.headingId, selectedTask.projectId, allHeadings) {
+        selectedTask.headingId?.let { hId ->
+            allHeadings.firstOrNull { h ->
+                h.id == hId && !h.isDeleted && (selectedTask.projectId == null || h.projectId == selectedTask.projectId)
+            }
+        }
+    }
+
+    val parsedInspectorSmartSyntax = remember(titleDraft, allTags, projects, areas, locale) {
+        SmartSyntaxParser.parse(
+            rawTitle = titleDraft,
+            tags = allTags,
+            projects = projects,
+            areas = areas,
+            locale = locale
+        )
+    }
+
+    val applyInspectorSmartSyntaxNow: (ParsedSmartSyntax) -> Unit = { parsed ->
+        val nextTitle = parsed.cleanTitle.ifBlank { titleDraft.trim() }
+        lastAppliedSmartTitle = nextTitle
+        titleDraft = nextTitle
+        if (onApplySmartSyntax != null) {
+            onApplySmartSyntax(selectedTask.id, parsed, notesDraft)
+        } else {
+            onUpdateTaskTitle(selectedTask.copy(notes = notesDraft), nextTitle)
+            if (parsed.scheduleState != null) {
+                onUpdateTaskSchedule(selectedTask, parsed.scheduleState, parsed.whenDate)
+            }
+            if (parsed.deadline != null) {
+                onUpdateTaskDeadline(selectedTask, parsed.deadline)
+            }
+            if (parsed.durationMinutes != null) {
+                onUpdateDuration(selectedTask.id, parsed.durationMinutes)
+            }
+            if (parsed.isMilestone && !selectedTask.isMilestone) {
+                onToggleMilestone(selectedTask.id, true)
+            }
+            if (parsed.isInProgress && !selectedTask.isInProgress) {
+                onToggleInProgress(selectedTask.id)
+            }
+            if (parsed.matchedProject != null || parsed.matchedArea != null) {
+                val pId = parsed.matchedProject?.id ?: selectedTask.projectId
+                val hId = if (pId == selectedTask.projectId) selectedTask.headingId else null
+                val aId = parsed.matchedArea?.id ?: parsed.matchedProject?.areaId ?: selectedTask.areaId
+                onMoveTaskToContainer(selectedTask.id, pId, hId, aId)
+            }
+            if (parsed.matchedTagIds.isNotEmpty()) {
+                val mergedTagIds = (selectedTask.tags.map { it.id } + parsed.matchedTagIds).distinct()
+                onUpdateTaskTags(selectedTask, mergedTagIds)
+            }
+        }
+    }
 
     // Mode A Header Bar
     Row(
@@ -394,7 +671,8 @@ private fun SelectedTaskInspectorContent(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp)
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = Modifier.weight(1f)
         ) {
             if (selectedTask.isMilestone) {
                 ThingsMilestoneDiamondIcon(
@@ -417,7 +695,8 @@ private fun SelectedTaskInspectorContent(
                     fontWeight = FontWeight.Bold
                 ),
                 color = colors.primaryText,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
@@ -425,6 +704,24 @@ private fun SelectedTaskInspectorContent(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
+            val voiceLabel = stringResource(R.string.voice_capture_btn)
+            ThingsHoverTooltip(text = voiceLabel) {
+                IconButton(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        launchVoiceDictation()
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Mic,
+                        contentDescription = voiceLabel,
+                        tint = colors.thingsBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
             val openDetailsLabel = stringResource(R.string.v30_open_details_action)
             ThingsHoverTooltip(text = openDetailsLabel) {
                 IconButton(
@@ -439,6 +736,143 @@ private fun SelectedTaskInspectorContent(
                         contentDescription = openDetailsLabel,
                         tint = colors.thingsBlue,
                         modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Box {
+                val moreLabel = stringResource(R.string.action_more_options)
+                ThingsHoverTooltip(text = moreLabel) {
+                    IconButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showMoreActionsMenu = true
+                        },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.MoreHoriz,
+                            contentDescription = moreLabel,
+                            tint = colors.secondaryText,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = showMoreActionsMenu,
+                    onDismissRequest = { showMoreActionsMenu = false },
+                    modifier = Modifier.background(colors.cardElevatedSurface)
+                ) {
+                    val fallbackCopyTitle = stringResource(R.string.placeholder_todo_title)
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(R.string.action_copy_todo),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.primaryText
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        },
+                        onClick = {
+                            showMoreActionsMenu = false
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            val latestSnapshot = selectedTask.copy(
+                                title = titleDraft,
+                                notes = notesDraft
+                            )
+                            clipboardManager.setText(
+                                AnnotatedString(
+                                    formatTaskMarkdownForClipboard(latestSnapshot, fallbackCopyTitle)
+                                )
+                            )
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(R.string.action_duplicate_todo),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.primaryText
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = null,
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        },
+                        onClick = {
+                            showMoreActionsMenu = false
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onDuplicateTask(selectedTask.id)
+                        }
+                    )
+
+                    HorizontalDivider(color = colors.hairlineDivider)
+
+                    val isAlreadyCanceled = selectedTask.status == TaskStatus.CANCELED
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(
+                                    if (isAlreadyCanceled) R.string.action_reopen_todo else R.string.action_cancel_todo
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.secondaryText
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (isAlreadyCanceled) Icons.Outlined.Check else Icons.Outlined.Close,
+                                contentDescription = null,
+                                tint = colors.secondaryText,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        },
+                        onClick = {
+                            showMoreActionsMenu = false
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onUpdateTaskStatus(
+                                selectedTask.id,
+                                if (isAlreadyCanceled) TaskStatus.OPEN else TaskStatus.CANCELED
+                            )
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(R.string.action_delete),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.deadlineUrgentRed
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = null,
+                                tint = colors.deadlineUrgentRed,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        },
+                        onClick = {
+                            showMoreActionsMenu = false
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val taskIdToDelete = selectedTask.id
+                            onClearSelection()
+                            onDeleteTask(taskIdToDelete)
+                        }
                     )
                 }
             }
@@ -497,7 +931,10 @@ private fun SelectedTaskInspectorContent(
 
                 BasicTextField(
                     value = titleDraft,
-                    onValueChange = { titleDraft = it },
+                    onValueChange = { incoming ->
+                        lastAppliedSmartTitle = null
+                        titleDraft = incoming.replace("\r", "").replace("\n", " ")
+                    },
                     textStyle = MaterialTheme.typography.titleMedium.copy(
                         fontSize = 15.5.sp,
                         lineHeight = 21.sp,
@@ -520,7 +957,7 @@ private fun SelectedTaskInspectorContent(
                         .onFocusChanged { focusState ->
                             val wasFocused = isTitleFocused
                             isTitleFocused = focusState.isFocused
-                            if (wasFocused && !focusState.isFocused && titleDraft != selectedTask.title) {
+                            if (wasFocused && !focusState.isFocused && titleDraft != selectedTask.title && titleDraft != lastAppliedSmartTitle) {
                                 onUpdateTaskTitle(selectedTask.copy(notes = notesDraft), titleDraft)
                             }
                         },
@@ -539,6 +976,17 @@ private fun SelectedTaskInspectorContent(
                             }
                             innerTextField()
                         }
+                    }
+                )
+            }
+
+            if (parsedInspectorSmartSyntax.hasAnyMatch) {
+                SmartSyntaxPreviewChipsRow(
+                    parsed = parsedInspectorSmartSyntax,
+                    showDetectedPrefix = true,
+                    onApply = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        applyInspectorSmartSyntaxNow(parsedInspectorSmartSyntax)
                     }
                 )
             }
@@ -717,6 +1165,18 @@ private fun SelectedTaskInspectorContent(
                 )
 
                 InspectorWhenQuickPill(
+                    label = stringResource(R.string.view_anytime),
+                    icon = Icons.Outlined.Explore,
+                    isSelected = selectedTask.scheduleState == ScheduleState.ANYTIME,
+                    activeTint = colors.anytimeTeal,
+                    activeBg = colors.thingsBlueSoft,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onUpdateTaskSchedule(selectedTask, ScheduleState.ANYTIME, null)
+                    }
+                )
+
+                InspectorWhenQuickPill(
                     label = stringResource(R.string.view_someday),
                     icon = Icons.Outlined.Cloud,
                     isSelected = selectedTask.scheduleState == ScheduleState.SOMEDAY,
@@ -729,40 +1189,105 @@ private fun SelectedTaskInspectorContent(
                 )
             }
 
-            // Active Deadline, Custom Future Date, Timeblock, Duration, Effort, Container, and Tag Pills
+            // Calendar / Custom Date, Reminder, Deadline, Timeblock, Repeat, Duration, Effort & Dependencies Pills
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (selectedTask.scheduleState == ScheduleState.UPCOMING && !isScheduledTomorrow && selectedTask.whenDate != null) {
+                if (selectedTask.scheduleState == ScheduleState.UPCOMING) {
                     ThingsWhenBadge(
                         scheduleState = selectedTask.scheduleState,
                         whenDateEpochMillis = selectedTask.whenDate,
                         locale = locale,
-                        onClick = { onExpandTask(selectedTask.id) }
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showWhenDialog = true
+                        }
                     )
-                }
-
-                selectedTask.deadline?.let { deadlineMs ->
-                    ThingsDeadlineBadge(
-                        deadlineEpochMillis = deadlineMs,
-                        locale = locale,
-                        onClick = { onExpandTask(selectedTask.id) }
-                    )
-                }
-
-                selectedTask.scheduledStartMinutes?.let { startMins ->
+                } else {
                     ThingsTagPill(
-                        title = TimeblockScheduleUtils.formatTimeblockBadge(startMins, selectedTask.durationMinutes),
+                        title = "📅 ${stringResource(R.string.when_pick_calendar_tab)}",
+                        tooltipText = stringResource(R.string.context_when_date_reminder),
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showWhenDialog = true
+                        }
+                    )
+                }
+
+                selectedTask.reminderTime?.let { rt ->
+                    ThingsReminderBadge(
+                        reminderEpochMillis = rt,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showWhenDialog = true
+                        }
+                    )
+                }
+
+                if (selectedTask.deadline != null) {
+                    ThingsDeadlineBadge(
+                        deadlineEpochMillis = selectedTask.deadline,
+                        locale = locale,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showDeadlineDialog = true
+                        }
+                    )
+                } else {
+                    ThingsTagPill(
+                        title = "🏁 ${stringResource(R.string.action_deadline)}",
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showDeadlineDialog = true
+                        }
+                    )
+                }
+
+                if (selectedTask.scheduledStartMinutes != null) {
+                    ThingsTagPill(
+                        title = TimeblockScheduleUtils.formatTimeblockBadge(
+                            selectedTask.scheduledStartMinutes,
+                            selectedTask.durationMinutes
+                        ),
                         containerColor = colors.thingsBlueSoft,
                         contentColor = colors.thingsBlue,
                         borderColor = colors.thingsBlue.copy(alpha = 0.35f),
-                        onClick = { onExpandTask(selectedTask.id) }
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showTimeblockDialog = true
+                        }
+                    )
+                } else {
+                    ThingsTagPill(
+                        title = "⏱️ ${stringResource(R.string.v2_timeblock_title)}",
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showTimeblockDialog = true
+                        }
                     )
                 }
 
-                // Duration Pill + Preset Dropdown
+                if (selectedTask.recurrenceRule != null) {
+                    ThingsRepeatBadge(
+                        rule = selectedTask.recurrenceRule,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showRepeatDialog = true
+                        }
+                    )
+                } else {
+                    ThingsTagPill(
+                        title = "🔁 ${stringResource(R.string.action_repeat)}",
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showRepeatDialog = true
+                        }
+                    )
+                }
+
+                // Duration Pill + Preset Dropdown + Custom Duration Dialog
                 Box {
                     val formattedDur = formatDurationCompact(selectedTask.durationMinutes)
                     val durLabel = if (formattedDur != null) {
@@ -775,17 +1300,30 @@ private fun SelectedTaskInspectorContent(
                         containerColor = if (formattedDur != null) colors.thingsBlueSoft else colors.tagPillBg,
                         contentColor = if (formattedDur != null) colors.thingsBlue else colors.secondaryText,
                         borderColor = if (formattedDur != null) colors.thingsBlue.copy(alpha = 0.32f) else colors.hairlineDivider,
-                        onClick = { showDurationMenu = true }
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showDurationMenu = true
+                        }
                     )
 
                     DropdownMenu(
                         expanded = showDurationMenu,
-                        onDismissRequest = { showDurationMenu = false }
+                        onDismissRequest = { showDurationMenu = false },
+                        modifier = Modifier.background(colors.cardElevatedSurface)
                     ) {
                         STANDALONE_DURATION_PRESETS.forEach { presetMins ->
                             val label = formatDurationCompact(presetMins)
+                            val isSelectedDur = selectedTask.durationMinutes == presetMins
                             DropdownMenuItem(
-                                text = { Text("⏱ $label") },
+                                text = {
+                                    Text(
+                                        text = "⏱ $label",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (isSelectedDur) FontWeight.Bold else FontWeight.Normal
+                                        ),
+                                        color = if (isSelectedDur) colors.thingsBlue else colors.primaryText
+                                    )
+                                },
                                 onClick = {
                                     showDurationMenu = false
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -793,9 +1331,30 @@ private fun SelectedTaskInspectorContent(
                                 }
                             )
                         }
+                        HorizontalDivider(color = colors.hairlineDivider)
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = stringResource(R.string.v30_duration_custom),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.primaryText
+                                )
+                            },
+                            onClick = {
+                                showDurationMenu = false
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showCustomDurationDialog = true
+                            }
+                        )
                         if (selectedTask.durationMinutes != null) {
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.v30_duration_clear)) },
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.v30_duration_clear),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.secondaryText
+                                    )
+                                },
                                 onClick = {
                                     showDurationMenu = false
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -808,13 +1367,13 @@ private fun SelectedTaskInspectorContent(
 
                 val inspectorActualMins = selectedTask.actualMinutes ?: 0
                 if (inspectorActualMins > 0) {
-                    val actualFmt = formatDurationCompact(inspectorActualMins) ?: "${inspectorActualMins}m"
+                    val actualFmt = formatDurationCompact(inspectorActualMins)
                     val estMins = selectedTask.durationMinutes?.takeIf { it > 0 }
                     val focusedLabel = if (estMins != null) {
                         stringResource(
                             R.string.v32_actual_vs_estimated,
                             actualFmt,
-                            formatDurationCompact(estMins) ?: "${estMins}m"
+                            formatDurationCompact(estMins)
                         )
                     } else {
                         stringResource(R.string.v32_actual_focused_short, actualFmt)
@@ -853,12 +1412,16 @@ private fun SelectedTaskInspectorContent(
                         containerColor = if (normalizedEffort != null) colors.thingsBlueSoft else colors.tagPillBg,
                         contentColor = if (normalizedEffort != null) colors.thingsBlue else colors.secondaryText,
                         borderColor = if (normalizedEffort != null) colors.thingsBlue.copy(alpha = 0.32f) else colors.hairlineDivider,
-                        onClick = { showEffortMenu = true }
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showEffortMenu = true
+                        }
                     )
 
                     DropdownMenu(
                         expanded = showEffortMenu,
-                        onDismissRequest = { showEffortMenu = false }
+                        onDismissRequest = { showEffortMenu = false },
+                        modifier = Modifier.background(colors.cardElevatedSurface)
                     ) {
                         val effortOptions = listOf(
                             null to stringResource(R.string.v30_effort_none),
@@ -867,8 +1430,17 @@ private fun SelectedTaskInspectorContent(
                             EffortLevel.DEEP_FOCUS to "🧠 ${stringResource(R.string.v30_effort_deep_focus)}"
                         )
                         effortOptions.forEach { (effKey, effText) ->
+                            val isSelectedEff = normalizedEffort == effKey
                             DropdownMenuItem(
-                                text = { Text(effText) },
+                                text = {
+                                    Text(
+                                        text = effText,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (isSelectedEff) FontWeight.Bold else FontWeight.Normal
+                                        ),
+                                        color = if (isSelectedEff) colors.thingsBlue else colors.primaryText
+                                    )
+                                },
                                 onClick = {
                                     showEffortMenu = false
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -878,71 +1450,158 @@ private fun SelectedTaskInspectorContent(
                         }
                     }
                 }
+
+                // Dependencies / Waiting On Pill
+                val activelyBlocked = remember(selectedTask, openTaskIds) {
+                    isTaskActivelyBlocked(selectedTask, openTaskIds)
+                }
+                val activeBlockerCount = remember(selectedTask.blockedByTaskIds, openTaskIds) {
+                    selectedTask.blockedByTaskIds.count { it in openTaskIds }
+                }
+                val dependencyCount = if (activeBlockerCount > 0) {
+                    activeBlockerCount
+                } else {
+                    selectedTask.blockedByTaskIds.size
+                }
+                val dependencyLabel = if (selectedTask.blockedByTaskIds.isEmpty()) {
+                    "⏳ ${stringResource(R.string.v30_blocked_by_action)}"
+                } else {
+                    "⏳ ${stringResource(R.string.v30_blocked_by_count_badge, dependencyCount)}"
+                }
+                ThingsTagPill(
+                    title = dependencyLabel,
+                    containerColor = if (activelyBlocked) colors.somedayWarmAmber.copy(alpha = 0.16f) else null,
+                    contentColor = if (activelyBlocked) colors.somedayWarmAmber else null,
+                    borderColor = if (activelyBlocked) colors.somedayWarmAmber.copy(alpha = 0.45f) else null,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        showDependenciesDialog = true
+                    }
+                )
             }
 
-            // Area › Project Container Badge
+            // Area › Project › Heading (Phase) Container Breadcrumb + Move Dialog + Jump Button (↗)
             if (resolvedArea != null || resolvedProject != null) {
-                val containerLabel = when {
-                    resolvedArea != null && resolvedProject != null -> "${resolvedArea.title} › ${resolvedProject.title}"
-                    resolvedProject != null -> resolvedProject.title
-                    else -> resolvedArea?.title.orEmpty()
-                }
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            when {
-                                resolvedProject != null && onNavigateToProject != null ->
-                                    onNavigateToProject(resolvedProject.id)
-                                resolvedArea != null && onNavigateToArea != null ->
-                                    onNavigateToArea(resolvedArea.id)
-                                else -> onExpandTask(selectedTask.id)
-                            }
-                        },
-                    shape = RoundedCornerShape(8.dp),
-                    color = colors.tagPillBg.copy(alpha = 0.85f),
-                    border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                val headingTitle = resolvedHeading?.title?.trim()?.takeIf { it.isNotEmpty() }
+                val containerLabel = buildList {
+                    if (resolvedArea != null) add(resolvedArea.title)
+                    if (resolvedProject != null) add(resolvedProject.title)
+                    if (resolvedProject != null && headingTitle != null) add(headingTitle)
+                }.joinToString(" › ")
+
+                val canJumpToContainer = (resolvedProject != null && onNavigateToProject != null) ||
+                    (resolvedArea != null && onNavigateToArea != null)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showMoveDialog = true
+                            },
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.tagPillBg.copy(alpha = 0.85f),
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Folder,
-                            contentDescription = null,
-                            tint = colors.thingsBlue,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = containerLabel,
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.primaryText,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Folder,
+                                contentDescription = stringResource(R.string.move_dialog_title),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = containerLabel,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.primaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (canJumpToContainer) {
+                        val jumpTooltip = if (resolvedProject != null) {
+                            stringResource(R.string.v31_area_open_project)
+                        } else {
+                            resolvedArea?.title ?: stringResource(R.string.entity_area)
+                        }
+                        ThingsHoverTooltip(text = jumpTooltip) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        when {
+                                            resolvedProject != null && onNavigateToProject != null ->
+                                                onNavigateToProject(resolvedProject.id)
+                                            resolvedArea != null && onNavigateToArea != null ->
+                                                onNavigateToArea(resolvedArea.id)
+                                        }
+                                    },
+                                shape = RoundedCornerShape(7.dp),
+                                color = colors.thingsBlueSoft,
+                                border = BorderStroke(0.75.dp, colors.thingsBlue.copy(alpha = 0.35f))
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "↗",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = colors.thingsBlue
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
+            } else {
+                ThingsTagPill(
+                    title = "📁 ${stringResource(R.string.move_dialog_title)}",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        showMoveDialog = true
+                    }
+                )
             }
 
-            // Assigned Category / Tag Pills
+            // Assigned Category / Tag Pills + Always-Visible "+ Categories" Pill
             val visibleTags = remember(selectedTask.tags) {
                 selectedTask.tags.filter { !it.isDeleted }
             }
-            if (visibleTags.isNotEmpty()) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    visibleTags.forEach { tag ->
-                        ThingsTagPill(
-                            title = tag.title,
-                            onClick = { onExpandTask(selectedTask.id) }
-                        )
-                    }
+            val categoriesLabel = stringResource(R.string.entity_tags)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                visibleTags.forEach { tag ->
+                    ThingsTagPill(
+                        title = tag.title,
+                        tooltipText = "$categoriesLabel: ${tag.title}",
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showTagPickerDialog = true
+                        }
+                    )
                 }
+                ThingsTagPill(
+                    title = "+ $categoriesLabel",
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        showTagPickerDialog = true
+                    }
+                )
             }
 
             // 1-Click Start Focus Timer Button
@@ -997,14 +1656,16 @@ private fun SelectedTaskInspectorContent(
                 .sortedWith(compareBy<ChecklistItem> { it.sortOrder }.thenBy { it.createdAt })
         }
         InspectorSoftBentoCard {
-            Row(
+            val doneCount = activeChecklistItems.count { it.isCompleted }
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 2.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Checklist,
@@ -1013,90 +1674,123 @@ private fun SelectedTaskInspectorContent(
                         modifier = Modifier.size(15.dp)
                     )
                     Text(
-                        text = stringResource(R.string.action_checklist),
+                        text = if (activeChecklistItems.isNotEmpty()) {
+                            "${stringResource(R.string.action_checklist)} ($doneCount/${activeChecklistItems.size})"
+                        } else {
+                            stringResource(R.string.action_checklist)
+                        },
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = colors.secondaryText
-                    )
-                }
-                if (activeChecklistItems.isNotEmpty()) {
-                    val doneCount = activeChecklistItems.count { it.isCompleted }
-                    Text(
-                        text = "$doneCount/${activeChecklistItems.size}",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = if (doneCount == activeChecklistItems.size) colors.logbookGreen else colors.secondaryText
-                    )
-                }
-            }
-
-            activeChecklistItems.forEach { item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(7.dp))
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onToggleChecklistItem(item.id, !item.isCompleted)
+                        color = if (activeChecklistItems.isNotEmpty() && doneCount == activeChecklistItems.size) {
+                            colors.logbookGreen
+                        } else {
+                            colors.secondaryText
                         }
-                        .padding(vertical = 3.dp, horizontal = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
+                    )
+                }
+
+                ThingsHoverTooltip(text = stringResource(R.string.gemini_magic_breakdown_desc)) {
+                    Row(
                         modifier = Modifier
-                            .size(17.dp)
-                            .clip(CircleShape)
-                            .background(if (item.isCompleted) colors.thingsBlue else Color.Transparent)
-                            .border(
-                                width = 1.5.dp,
-                                color = if (item.isCompleted) colors.thingsBlue else colors.checkboxBorder,
-                                shape = CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(colors.thingsBlueSoft)
+                            .clickable(enabled = !isGeneratingMagicBreakdown) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onTriggerGeminiMagicBreakdown(selectedTask)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 3.5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.5.dp)
                     ) {
-                        if (item.isCompleted) {
+                        if (isGeneratingMagicBreakdown) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 1.8.dp,
+                                color = colors.thingsBlue
+                            )
+                        } else {
                             Icon(
-                                imageVector = Icons.Outlined.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(11.dp)
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = stringResource(R.string.gemini_magic_breakdown),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(12.5.dp)
                             )
                         }
-                    }
-
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 13.5.sp,
-                            textDecoration = if (item.isCompleted) TextDecoration.LineThrough else TextDecoration.None
-                        ),
-                        color = if (item.isCompleted) colors.secondaryText else colors.primaryText,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    IconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onDeleteChecklistItem(item.id)
-                        },
-                        modifier = Modifier.size(22.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = stringResource(R.string.subtask_delete),
-                            tint = colors.tertiaryText,
-                            modifier = Modifier.size(14.dp)
+                        Text(
+                            text = stringResource(R.string.gemini_magic_breakdown),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.thingsBlue,
+                            maxLines = 1
                         )
                     }
                 }
             }
 
+            if (activeChecklistItems.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    activeChecklistItems.forEachIndexed { idx, item ->
+                        key(item.id) {
+                            InspectorEditableChecklistRow(
+                                item = item,
+                                canMoveUp = idx > 0,
+                                canMoveDown = idx < activeChecklistItems.lastIndex,
+                                shouldAutoFocus = pendingAutoFocusSubtaskId == item.id,
+                                onAutoFocusConsumed = {
+                                    if (pendingAutoFocusSubtaskId == item.id) {
+                                        pendingAutoFocusSubtaskId = null
+                                    }
+                                },
+                                onToggle = { checked ->
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onToggleChecklistItem(item.id, checked)
+                                },
+                                onRename = { newSubtaskTitle ->
+                                    onRenameChecklistItem(item.id, newSubtaskTitle)
+                                },
+                                onReturnCreateSubtask = { remainingCurrentTitle, nextInitialTitle ->
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    if (remainingCurrentTitle != item.title) {
+                                        onRenameChecklistItem(item.id, remainingCurrentTitle)
+                                    }
+                                    val nextSubtaskId = UUID.randomUUID().toString()
+                                    pendingAutoFocusSubtaskId = nextSubtaskId
+                                    if (onInsertChecklistItemAfter != null) {
+                                        onInsertChecklistItemAfter(selectedTask.id, item.id, nextSubtaskId, nextInitialTitle)
+                                    } else {
+                                        onAddChecklistItem(selectedTask.id, nextInitialTitle)
+                                    }
+                                },
+                                onReturnOnEmptySubtask = {
+                                    onDeleteChecklistItem(item.id)
+                                    runCatching { newChecklistFocusRequester.requestFocus() }
+                                },
+                                onMoveUp = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onMoveChecklistItem(selectedTask.id, item.id, true)
+                                },
+                                onMoveDown = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onMoveChecklistItem(selectedTask.id, item.id, false)
+                                },
+                                onDelete = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onDeleteChecklistItem(item.id)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
             val submitNewChecklistItem = {
-                val trimmed = newChecklistDraft.trim()
+                val trimmed = newChecklistField.text.replace("\r", "").replace("\n", " ").trim()
                 if (trimmed.isNotEmpty()) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onAddChecklistItem(selectedTask.id, trimmed)
-                    newChecklistDraft = ""
+                    newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
+                    runCatching { newChecklistFocusRequester.requestFocus() }
                 }
             }
 
@@ -1118,16 +1812,24 @@ private fun SelectedTaskInspectorContent(
                         .clickable { submitNewChecklistItem() }
                 )
                 BasicTextField(
-                    value = newChecklistDraft,
-                    onValueChange = { next ->
-                        if ('\n' in next) {
-                            val clean = next.replace("\n", "").trim()
-                            if (clean.isNotEmpty()) {
-                                onAddChecklistItem(selectedTask.id, clean)
+                    value = newChecklistField,
+                    onValueChange = { incoming ->
+                        if ('\n' in incoming.text || '\r' in incoming.text) {
+                            val parts = incoming.text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+                            var addedAny = false
+                            parts.forEach { rawLine ->
+                                val line = rawLine.trim()
+                                if (line.isNotEmpty()) {
+                                    onAddChecklistItem(selectedTask.id, line)
+                                    addedAny = true
+                                }
                             }
-                            newChecklistDraft = ""
+                            if (addedAny) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            newChecklistField = TextFieldValue(text = "", selection = TextRange(0))
                         } else {
-                            newChecklistDraft = next
+                            newChecklistField = incoming
                         }
                     },
                     singleLine = true,
@@ -1135,13 +1837,28 @@ private fun SelectedTaskInspectorContent(
                         fontSize = 13.sp,
                         color = colors.primaryText
                     ),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { submitNewChecklistItem() }),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(
+                        onNext = { submitNewChecklistItem() },
+                        onDone = { submitNewChecklistItem() }
+                    ),
                     cursorBrush = SolidColor(colors.thingsBlue),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(newChecklistFocusRequester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) {
+                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                    submitNewChecklistItem()
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        },
                     decorationBox = { innerField ->
                         Box(modifier = Modifier.fillMaxWidth()) {
-                            if (newChecklistDraft.isEmpty()) {
+                            if (newChecklistField.text.isEmpty()) {
                                 Text(
                                     text = stringResource(R.string.placeholder_add_checklist_item),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
@@ -1157,7 +1874,7 @@ private fun SelectedTaskInspectorContent(
             }
         }
 
-        // 4. Notes Soft Bento Card
+        // 4. Notes Soft Bento Card (with Live Markdown Styling + Detected Link Chips)
         InspectorSoftBentoCard {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1184,6 +1901,7 @@ private fun SelectedTaskInspectorContent(
                     lineHeight = 19.sp,
                     color = colors.primaryText
                 ),
+                visualTransformation = rememberThingsMarkdownVisualTransformation(),
                 cursorBrush = SolidColor(colors.thingsBlue),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1215,7 +1933,400 @@ private fun SelectedTaskInspectorContent(
             DetectedNotesLinksRow(notes = notesDraft)
         }
 
+        // 5. Attachments Soft Bento Card (Preview, Share, Delete, Attach File & Take Photo)
+        if (selectedTask.attachments.isNotEmpty()) {
+            InspectorSoftBentoCard {
+                TaskAttachmentsStrip(
+                    attachments = selectedTask.attachments,
+                    onDeleteAttachment = onDeleteAttachment,
+                    onAttachFileClick = if (onAddTaskAttachment != null) {
+                        { filePickerLauncher.launch(arrayOf("*/*")) }
+                    } else null,
+                    onTakePhotoClick = if (onAddTaskAttachment != null) {
+                        { cameraLauncher.launch(null) }
+                    } else null
+                )
+            }
+        } else if (onAddTaskAttachment != null) {
+            InspectorSoftBentoCard {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AttachFile,
+                        contentDescription = null,
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.attachments_section_title),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = colors.secondaryText
+                    )
+                }
+
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                filePickerLauncher.launch(arrayOf("*/*"))
+                            },
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.tagPillBg,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AttachFile,
+                                contentDescription = stringResource(R.string.action_attach_file),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.action_attach_file),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.thingsBlue
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                cameraLauncher.launch(null)
+                            },
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.tagPillBg,
+                        border = BorderStroke(0.75.dp, colors.hairlineDivider)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.CameraAlt,
+                                contentDescription = stringResource(R.string.action_take_photo),
+                                tint = colors.thingsBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.action_take_photo),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.thingsBlue
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
+    }
+
+    // Reusable 1:1 Task Inspector Dialogs
+    if (showWhenDialog) {
+        WhenNaturalDateDialog(
+            currentScheduleState = selectedTask.scheduleState,
+            currentWhenDate = selectedTask.whenDate,
+            currentReminderTime = selectedTask.reminderTime,
+            locale = locale,
+            onApplySchedule = { newState, newWhen ->
+                onUpdateTaskSchedule(selectedTask, newState, newWhen)
+            },
+            onApplyScheduleWithReminder = { newState, newWhen, newReminder ->
+                if (onUpdateTaskScheduleWithReminder != null) {
+                    onUpdateTaskScheduleWithReminder(selectedTask, newState, newWhen, newReminder)
+                } else {
+                    onUpdateTaskSchedule(selectedTask, newState, newWhen)
+                }
+            },
+            onDismiss = { showWhenDialog = false }
+        )
+    }
+
+    if (showDeadlineDialog) {
+        DeadlineDatePickerDialog(
+            currentDeadline = selectedTask.deadline,
+            locale = locale,
+            onApplyDeadline = { newDl -> onUpdateTaskDeadline(selectedTask, newDl) },
+            onDismiss = { showDeadlineDialog = false }
+        )
+    }
+
+    if (showRepeatDialog) {
+        ThingsRepeatDialog(
+            currentRule = selectedTask.recurrenceRule,
+            locale = locale,
+            onApplyRecurrence = { newRule -> onUpdateTaskRecurrence(selectedTask.id, newRule) },
+            onDismiss = { showRepeatDialog = false }
+        )
+    }
+
+    if (showTimeblockDialog) {
+        ThingsTimeblockPickerDialog(
+            initialStartMinutes = selectedTask.scheduledStartMinutes,
+            initialDurationMinutes = selectedTask.durationMinutes,
+            onSaveTimeblock = { startMins, durMins ->
+                onUpdateTimeblock(selectedTask.id, startMins, durMins)
+            },
+            onDismiss = { showTimeblockDialog = false }
+        )
+    }
+
+    if (showCustomDurationDialog) {
+        ThingsCustomDurationDialog(
+            currentDurationMinutes = selectedTask.durationMinutes,
+            onApply = { customMins ->
+                showCustomDurationDialog = false
+                onUpdateDuration(selectedTask.id, customMins)
+            },
+            onDismiss = { showCustomDurationDialog = false }
+        )
+    }
+
+    if (showDependenciesDialog) {
+        TaskDependenciesPickerDialog(
+            task = selectedTask,
+            allOpenTasks = allOpenTasks,
+            onUpdateBlockedBy = { blockerIds -> onUpdateBlockedBy(selectedTask.id, blockerIds) },
+            onDismiss = { showDependenciesDialog = false }
+        )
+    }
+
+    if (showMoveDialog) {
+        MoveTaskToProjectOrAreaDialog(
+            currentProjectId = selectedTask.projectId,
+            currentHeadingId = selectedTask.headingId,
+            currentAreaId = selectedTask.areaId,
+            areas = areas,
+            projects = projects,
+            headings = allHeadings,
+            onMoveTask = { pId, hId, aId ->
+                onMoveTaskToContainer(selectedTask.id, pId, hId, aId)
+            },
+            onDismiss = { showMoveDialog = false }
+        )
+    }
+
+    if (showTagPickerDialog) {
+        TaskTagPickerDialog(
+            allTags = allTags,
+            selectedTagIds = selectedTask.tags.map { it.id },
+            tagSortMode = tagSortMode,
+            tagUsageCounts = tagUsageCounts,
+            onUpdateSelectedTags = { updatedIds ->
+                onUpdateTaskTags(selectedTask, updatedIds)
+            },
+            onCreateAndAssignTag = { newTagTitle ->
+                onCreateAndAssignTag(selectedTask, newTagTitle)
+            },
+            onOpenFullTagManager = onOpenFullTagManager,
+            onDismiss = { showTagPickerDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun InspectorEditableChecklistRow(
+    item: ChecklistItem,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    shouldAutoFocus: Boolean = false,
+    onAutoFocusConsumed: () -> Unit = {},
+    onToggle: (Boolean) -> Unit,
+    onRename: (String) -> Unit,
+    onReturnCreateSubtask: (remainingCurrentTitle: String, nextInitialTitle: String) -> Unit,
+    onReturnOnEmptySubtask: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val colors = ThingsTheme.colors
+    val subtaskFocusRequester = remember(item.id) { FocusRequester() }
+    var isSubtaskFocused by remember(item.id) { mutableStateOf(false) }
+    var editedSubtaskField by remember(item.id) {
+        val cleanTitle = item.title.replace("\r", "").replace("\n", " ")
+        mutableStateOf(
+            TextFieldValue(
+                text = cleanTitle,
+                selection = TextRange(cleanTitle.length)
+            )
+        )
+    }
+
+    LaunchedEffect(item.id, shouldAutoFocus) {
+        if (shouldAutoFocus) {
+            editedSubtaskField = editedSubtaskField.copy(
+                selection = TextRange(editedSubtaskField.text.length)
+            )
+            runCatching { subtaskFocusRequester.requestFocus() }
+            onAutoFocusConsumed()
+        }
+    }
+
+    LaunchedEffect(item.id, item.title) {
+        val sanitizedTitle = item.title.replace("\r", "").replace("\n", " ")
+        if (!isSubtaskFocused && editedSubtaskField.text != sanitizedTitle) {
+            editedSubtaskField = TextFieldValue(
+                text = sanitizedTitle,
+                selection = TextRange(sanitizedTitle.length)
+            )
+        }
+    }
+
+    val handleSubtaskReturnKey: () -> Unit = {
+        val currentText = editedSubtaskField.text.replace("\r", "").replace("\n", " ")
+        if (currentText.isBlank()) {
+            onReturnOnEmptySubtask()
+        } else {
+            val sel = editedSubtaskField.selection
+            val splitAtMiddle = sel.collapsed && sel.start in 1 until currentText.length
+            val remainingCurrent = if (splitAtMiddle) {
+                currentText.substring(0, sel.start).trimEnd()
+            } else {
+                currentText.trim()
+            }
+            val nextInitial = if (splitAtMiddle && remainingCurrent.isNotBlank()) {
+                currentText.substring(sel.start).trimStart()
+            } else {
+                ""
+            }
+            val finalCurrent = if (remainingCurrent.isBlank()) currentText.trim() else remainingCurrent
+            editedSubtaskField = TextFieldValue(
+                text = finalCurrent,
+                selection = TextRange(finalCurrent.length)
+            )
+            if (finalCurrent != item.title) {
+                onRename(finalCurrent)
+            }
+            onReturnCreateSubtask(finalCurrent, nextInitial)
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ThingsCheckbox(
+            status = if (item.isCompleted) TaskStatus.COMPLETED else TaskStatus.OPEN,
+            onStatusChange = { status -> onToggle(status == TaskStatus.COMPLETED) },
+            shape = ThingsCheckboxShape.CIRCLE,
+            size = 16.dp
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        BasicTextField(
+            value = editedSubtaskField,
+            onValueChange = { incoming ->
+                if ('\n' in incoming.text || '\r' in incoming.text) {
+                    val normalized = incoming.text.replace("\r\n", "\n").replace('\r', '\n')
+                    val newlineIdx = normalized.indexOf('\n')
+                    val before = normalized.substring(0, newlineIdx).trim()
+                    val after = normalized.substring(newlineIdx + 1).replace("\n", " ").trim()
+                    if (before.isEmpty() && after.isEmpty()) {
+                        onReturnOnEmptySubtask()
+                    } else {
+                        val finalCurrent = if (before.isNotEmpty()) before else after
+                        val nextInitial = if (before.isNotEmpty()) after else ""
+                        editedSubtaskField = TextFieldValue(
+                            text = finalCurrent,
+                            selection = TextRange(finalCurrent.length)
+                        )
+                        onRename(finalCurrent)
+                        onReturnCreateSubtask(finalCurrent, nextInitial)
+                    }
+                } else {
+                    editedSubtaskField = incoming
+                    onRename(incoming.text)
+                }
+            },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 13.5.sp,
+                color = if (item.isCompleted) colors.tertiaryText else colors.primaryText,
+                textDecoration = if (item.isCompleted) TextDecoration.LineThrough else TextDecoration.None
+            ),
+            cursorBrush = SolidColor(colors.thingsBlue),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(
+                onNext = { handleSubtaskReturnKey() },
+                onDone = { handleSubtaskReturnKey() }
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(subtaskFocusRequester)
+                .onPreviewKeyEvent { keyEvent ->
+                    if (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) {
+                        if (keyEvent.type == KeyEventType.KeyDown) {
+                            handleSubtaskReturnKey()
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .onFocusChanged { focusState ->
+                    isSubtaskFocused = focusState.isFocused
+                }
+        )
+        if (canMoveUp) {
+            ThingsHoverTooltip(text = stringResource(R.string.subtask_move_up)) {
+                IconButton(
+                    onClick = onMoveUp,
+                    modifier = Modifier.size(21.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ArrowUpward,
+                        contentDescription = stringResource(R.string.subtask_move_up),
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+        }
+        if (canMoveDown) {
+            ThingsHoverTooltip(text = stringResource(R.string.subtask_move_down)) {
+                IconButton(
+                    onClick = onMoveDown,
+                    modifier = Modifier.size(21.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ArrowDownward,
+                        contentDescription = stringResource(R.string.subtask_move_down),
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+        }
+        ThingsHoverTooltip(text = stringResource(R.string.subtask_delete)) {
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(21.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.DeleteOutline,
+                    contentDescription = stringResource(R.string.subtask_delete),
+                    tint = colors.tertiaryText,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
     }
 }
 

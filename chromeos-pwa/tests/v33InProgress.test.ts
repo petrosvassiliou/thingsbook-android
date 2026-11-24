@@ -671,3 +671,57 @@ test('v3.3 sorting, perspectives, Quick Find, Roadmap counts, and stalled-projec
   assert.equal(portfolio.projectLanes[0].inProgressCount, 1);
   assert.equal(portfolio.projectLanes[0].totalCount, 3);
 });
+
+test('v3.3.0-beta.2 Task Inspector Panel achieves 1:1 parity with Expanded Bento Modal', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const inspectorSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/WorkspaceInspectorPanel.tsx'),
+    'utf8'
+  );
+  const appSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/App.tsx'),
+    'utf8'
+  );
+
+  // Core parity integrations required in WorkspaceInspectorPanel.tsx
+  assert.ok(inspectorSrc.includes('onOpenDependenciesModal'));
+  assert.ok(inspectorSrc.includes('onOpenRepeatModal'));
+  assert.ok(inspectorSrc.includes('AttachmentsStrip'));
+  assert.ok(inspectorSrc.includes('MarkdownNotesField'));
+  assert.ok(inspectorSrc.includes('generateMagicChecklist'));
+  assert.ok(inspectorSrc.includes('parseSmartTaskSyntax'));
+
+  // Additional 1:1 Inspector controls (Smart Syntax strip, Repeat, Waiting On, Timeblock durations, Custom Duration, Phase selector, Checklist reorder/split, Voice & Copy Markdown)
+  assert.ok(inspectorSrc.includes('v32-smart-syntax-strip'));
+  assert.ok(inspectorSrc.includes('task-waiting-on-chip'));
+  assert.ok(inspectorSrc.includes('TIMEBLOCK_DURATION_PRESETS'));
+  assert.ok(inspectorSrc.includes('parseCustomDurationMinutes'));
+  assert.ok(inspectorSrc.includes('swapChecklistOrder'));
+  assert.ok(inspectorSrc.includes('insertChecklistItemAfter'));
+  assert.ok(inspectorSrc.includes('processAndAddAttachmentFile'));
+  assert.ok(inspectorSrc.includes('SpeechRecognition'));
+  assert.ok(inspectorSrc.includes('navigator.clipboard.writeText'));
+  assert.ok(inspectorSrc.includes('inspector-heading-select'));
+  assert.ok(inspectorSrc.includes('inspector-when-anytime'));
+
+  // App.tsx call site passes full snapshot & modal callbacks to WorkspaceInspectorPanel
+  const inspectorCallMatch = appSrc.match(/<WorkspaceInspectorPanel[\s\S]*?\/>/);
+  assert.ok(inspectorCallMatch, 'Expected <WorkspaceInspectorPanel /> in App.tsx');
+  const callBlock = inspectorCallMatch[0];
+  assert.ok(callBlock.includes('headings={snapshot.headings}'));
+  assert.ok(callBlock.includes('attachments={snapshot.attachments}'));
+  assert.ok(callBlock.includes('openTaskIdSet={openTaskIdSet}'));
+  assert.ok(callBlock.includes('tasksByIdMap={tasksByIdMap}'));
+  assert.ok(callBlock.includes('geminiApiKey={prefs.geminiApiKey}'));
+  assert.ok(callBlock.includes('onToast={showToast}'));
+  assert.ok(callBlock.includes('onOpenRepeatModal='));
+  assert.ok(callBlock.includes('onOpenDependenciesModal='));
+  assert.ok(callBlock.includes('onDuplicateTask={handleDuplicateTask}'));
+
+  // Localized Copy as Markdown across all 5 supported languages
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    assert.ok(TRANSLATIONS[lang].actionCopyMarkdown.trim().length > 0);
+    assert.ok(TRANSLATIONS[lang].copiedMarkdownToast.trim().length > 0);
+  }
+});

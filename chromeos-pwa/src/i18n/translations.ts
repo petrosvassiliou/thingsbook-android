@@ -584,6 +584,8 @@ export interface TranslationStrings {
   v33FilterInProgressOnly: string;
   v33ProjectInProgressCount: (n: number) => string;
   v33CmdToggleInProgress: string;
+  actionCopyMarkdown: string;
+  copiedMarkdownToast: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -1177,7 +1179,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v33ClearInProgress: 'Clear In Progress',
     v33FilterInProgressOnly: 'In Progress Only',
     v33ProjectInProgressCount: (n) => `${n} in progress`,
-    v33CmdToggleInProgress: 'Toggle In Progress on Selected Task'
+    v33CmdToggleInProgress: 'Toggle In Progress on Selected Task',
+    actionCopyMarkdown: 'Copy as Markdown',
+    copiedMarkdownToast: 'Copied as Markdown'
   },
   de: {
     appName: 'Thingsbook',
@@ -1773,7 +1777,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v33ClearInProgress: '„In Arbeit“ aufheben',
     v33FilterInProgressOnly: 'Nur „In Arbeit“',
     v33ProjectInProgressCount: (n) => `${n} in Arbeit`,
-    v33CmdToggleInProgress: '„In Arbeit“ für gewählte Aufgabe umschalten'
+    v33CmdToggleInProgress: '„In Arbeit“ für gewählte Aufgabe umschalten',
+    actionCopyMarkdown: 'Als Markdown kopieren',
+    copiedMarkdownToast: 'Als Markdown kopiert'
   },
   fr: {
     appName: 'Thingsbook',
@@ -2369,7 +2375,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v33ClearInProgress: 'Retirer « En cours »',
     v33FilterInProgressOnly: 'En cours uniquement',
     v33ProjectInProgressCount: (n) => `${n} en cours`,
-    v33CmdToggleInProgress: 'Basculer « En cours » sur la tâche sélectionnée'
+    v33CmdToggleInProgress: 'Basculer « En cours » sur la tâche sélectionnée',
+    actionCopyMarkdown: 'Copier en Markdown',
+    copiedMarkdownToast: 'Copié en Markdown'
   },
   it: {
     appName: 'Thingsbook',
@@ -2964,7 +2972,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v33ClearInProgress: 'Rimuovi «In corso»',
     v33FilterInProgressOnly: 'Solo in corso',
     v33ProjectInProgressCount: (n) => `${n} in corso`,
-    v33CmdToggleInProgress: 'Attiva/disattiva «In corso» sull’attività selezionata'
+    v33CmdToggleInProgress: 'Attiva/disattiva «In corso» sull’attività selezionata',
+    actionCopyMarkdown: 'Copia come Markdown',
+    copiedMarkdownToast: 'Copiato come Markdown'
   },
   es: {
     appName: 'Thingsbook',
@@ -3560,7 +3570,9 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     v33ClearInProgress: 'Quitar «En curso»',
     v33FilterInProgressOnly: 'Solo en curso',
     v33ProjectInProgressCount: (n) => `${n} en curso`,
-    v33CmdToggleInProgress: 'Alternar «En curso» en la tarea seleccionada'
+    v33CmdToggleInProgress: 'Alternar «En curso» en la tarea seleccionada',
+    actionCopyMarkdown: 'Copiar como Markdown',
+    copiedMarkdownToast: 'Copiado como Markdown'
   }
 };
 

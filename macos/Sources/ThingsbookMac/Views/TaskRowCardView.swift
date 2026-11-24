@@ -60,6 +60,7 @@ public struct TaskRowCardView: View {
                 status: task.status,
                 isSomeday: task.scheduleState == .someday,
                 isMilestone: task.isMilestone,
+                isInProgress: task.isInProgress,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     if isInlineQuickEditing {
@@ -72,6 +73,12 @@ public struct TaskRowCardView: View {
                         commitInlineQuickEdit()
                     }
                     store.cancelTask(latestTask)
+                },
+                onToggleInProgress: {
+                    if isInlineQuickEditing {
+                        commitInlineQuickEdit()
+                    }
+                    store.toggleTaskInProgress(latestTask)
                 }
             )
 
@@ -165,6 +172,30 @@ public struct TaskRowCardView: View {
 
             // Trailing metadata badges + permanently reserved hover Quick Edit / When / Open Details slot (zero layout shift on hover)
             HStack(spacing: 6) {
+                if task.status == .open && task.isInProgress {
+                    Button {
+                        store.toggleTaskInProgress(latestTask)
+                    } label: {
+                        Text("◐ \(store.tr("v33_in_progress_badge"))")
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                            .padding(.horizontal, 7.5)
+                            .padding(.vertical, 2.5)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.somedayAmber.opacity(0.14))
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(ThingsMacPalette.somedayAmber.opacity(0.30), lineWidth: 0.75)
+                            )
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr("v33_clear_in_progress"))
+                }
                 if task.isMilestone {
                     Text("◆ \(store.tr("v30_milestone_label"))")
                         .font(.system(size: 11, weight: .semibold))
@@ -612,6 +643,9 @@ public struct TaskRowCardView: View {
             if parsed.isMilestone {
                 copy.isMilestone = true
             }
+            if parsed.isInProgress && copy.status == .open {
+                copy.isInProgress = true
+            }
             if let proj = parsed.matchedProject {
                 copy.projectId = proj.id
                 copy.headingId = nil
@@ -685,6 +719,18 @@ public struct TaskRowCardView: View {
                 store.toggleMilestoneForSelectedTasks()
             } label: {
                 Label(store.tr("v30_mark_as_milestone"), systemImage: "diamond")
+            }
+            let openSelected = store.allOpenTasks.filter { store.selectedTaskIds.contains($0.id) && $0.status == .open }
+            if !openSelected.isEmpty {
+                let allInProg = openSelected.allSatisfy(\.isInProgress)
+                Button {
+                    store.toggleInProgressForSelectedTasks()
+                } label: {
+                    Label(
+                        store.tr(allInProg ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled"
+                    )
+                }
             }
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
@@ -803,6 +849,16 @@ public struct TaskRowCardView: View {
                     store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
                     systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
                 )
+            }
+            if latestTask.status == .open {
+                Button {
+                    store.toggleTaskInProgress(latestTask)
+                } label: {
+                    Label(
+                        store.tr(latestTask.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled"
+                    )
+                }
             }
             Button {
                 _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))

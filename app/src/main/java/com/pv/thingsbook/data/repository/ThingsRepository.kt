@@ -69,6 +69,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -376,35 +377,43 @@ class ThingsRepository @Inject constructor(
             return flowOf(emptyList())
         }
         val sql = ThingsDatabase.buildProjectsFts5SqlQuery(rawQuery, filter.hideCompleted)
-        return database.taskDao().searchProjectsFts5(sql)
-            .map { list ->
-                list.mapNotNull { entity ->
-                    runCatching {
-                        Project(
-                            id = entity.id,
-                            areaId = entity.areaId,
-                            title = entity.title,
-                            notes = entity.notes,
-                            status = entity.status,
-                            scheduleState = entity.scheduleState,
-                            whenDate = entity.whenDate,
-                            deadline = entity.deadline,
-                            completedAt = entity.completedAt,
-                            lastReviewedAt = entity.lastReviewedAt,
-                            sortOrder = entity.sortOrder,
-                            tagIds = decodeStringList(entity.tagIdsJson),
-                            workspaceId = entity.workspaceId,
-                            viewMode = entity.viewMode,
-                            createdAt = entity.createdAt,
-                            updatedAt = entity.updatedAt,
-                            isDeleted = entity.isDeleted
-                        )
-                    }.getOrNull()
-                }
-                    .distinctBy { it.id }
-                    .filter { filter.matchesProject(it) }
-                    .take(25)
+        return combine(
+            database.taskDao().searchProjectsFts5(sql),
+            database.projectDao().observeActiveProjectsWithProgress()
+        ) { list, activeTuples ->
+            val progressById = activeTuples.associateBy { it.project.id }
+            list.mapNotNull { entity ->
+                val tuple = progressById[entity.id]
+                runCatching {
+                    Project(
+                        id = entity.id,
+                        areaId = entity.areaId,
+                        title = entity.title,
+                        notes = entity.notes,
+                        status = entity.status,
+                        scheduleState = entity.scheduleState,
+                        whenDate = entity.whenDate,
+                        deadline = entity.deadline,
+                        completedAt = entity.completedAt,
+                        lastReviewedAt = entity.lastReviewedAt,
+                        sortOrder = entity.sortOrder,
+                        tagIds = decodeStringList(entity.tagIdsJson),
+                        workspaceId = entity.workspaceId,
+                        viewMode = entity.viewMode,
+                        totalTaskCount = tuple?.totalTaskCount ?: 0,
+                        completedTaskCount = tuple?.completedTaskCount ?: 0,
+                        inProgressTaskCount = tuple?.inProgressTaskCount ?: 0,
+                        lastTaskActivityAt = tuple?.lastTaskActivityAt,
+                        createdAt = entity.createdAt,
+                        updatedAt = entity.updatedAt,
+                        isDeleted = entity.isDeleted
+                    )
+                }.getOrNull()
             }
+                .distinctBy { it.id }
+                .filter { filter.matchesProject(it) }
+                .take(25)
+        }
             .catch { emit(emptyList()) }
     }
 
@@ -440,6 +449,7 @@ class ThingsRepository @Inject constructor(
         sortOrder: Double = 1000.0,
         isPinned: Boolean? = null,
         isMilestone: Boolean? = null,
+        isInProgress: Boolean? = null,
         effortLevel: String? = null,
         blockedByTaskIds: List<String>? = null,
         workspaceId: String? = null,
@@ -469,6 +479,11 @@ class ThingsRepository @Inject constructor(
         val resolvedActualMins = actualMinutes ?: existing?.actualMinutes
         val resolvedIsPinned = isPinned ?: existing?.isPinned ?: false
         val resolvedIsMilestone = isMilestone ?: existing?.isMilestone ?: false
+        val resolvedIsInProgress = if (status != TaskStatus.OPEN) {
+            false
+        } else {
+            isInProgress ?: existing?.isInProgress ?: false
+        }
         val resolvedEffortLevel = if (effortLevel != null) {
             EffortLevel.normalize(effortLevel)
         } else {
@@ -503,6 +518,7 @@ class ThingsRepository @Inject constructor(
             sortOrder = if (sortOrder.isFinite()) sortOrder else 1000.0,
             isPinned = resolvedIsPinned,
             isMilestone = resolvedIsMilestone,
+            isInProgress = resolvedIsInProgress,
             effortLevel = resolvedEffortLevel,
             blockedByJson = resolvedBlockedByJson,
             workspaceId = resolvedWorkspaceId,
@@ -552,6 +568,30 @@ class ThingsRepository @Inject constructor(
         val next = !existing.isMilestone
         val updatedAt = maxOf(System.currentTimeMillis(), existing.updatedAt + 1L)
         database.taskDao().updateTaskMilestone(cleanId, next, updatedAt)
+        syncRepository.triggerBackgroundSync()
+        return next
+    }
+
+    suspend fun setTaskInProgress(taskId: String, isInProgress: Boolean) {
+        val cleanId = taskId.trim()
+        if (cleanId.isEmpty()) return
+        val existing = database.taskDao().getById(cleanId) ?: return
+        if (existing.isDeleted) return
+        val target = if (existing.status == TaskStatus.OPEN) isInProgress else false
+        if (existing.isInProgress == target) return
+        val updatedAt = maxOf(System.currentTimeMillis(), existing.updatedAt + 1L)
+        database.taskDao().updateTaskInProgress(cleanId, target, updatedAt)
+        syncRepository.triggerBackgroundSync()
+    }
+
+    suspend fun toggleTaskInProgress(taskId: String): Boolean {
+        val cleanId = taskId.trim()
+        if (cleanId.isEmpty()) return false
+        val existing = database.taskDao().getById(cleanId) ?: return false
+        if (existing.isDeleted || existing.status != TaskStatus.OPEN) return false
+        val next = !existing.isInProgress
+        val updatedAt = maxOf(System.currentTimeMillis(), existing.updatedAt + 1L)
+        database.taskDao().updateTaskInProgress(cleanId, next, updatedAt)
         syncRepository.triggerBackgroundSync()
         return next
     }
@@ -617,11 +657,13 @@ class ThingsRepository @Inject constructor(
         val existing = database.taskDao().getById(cleanId) ?: return
         if (existing.isDeleted) return
         val next = ((existing.actualMinutes ?: 0) + deltaMinutes).coerceIn(1, MAX_TASK_DURATION_MINUTES)
-        if (next == existing.actualMinutes) return
+        val nextInProgress = if (existing.status == TaskStatus.OPEN) true else false
+        if (next == existing.actualMinutes && nextInProgress == existing.isInProgress) return
         val now = System.currentTimeMillis()
         database.taskDao().upsert(
             existing.copy(
                 actualMinutes = next,
+                isInProgress = nextInProgress,
                 updatedAt = maxOf(now, existing.updatedAt + 1L),
                 isDirty = true
             )
@@ -722,6 +764,7 @@ class ThingsRepository @Inject constructor(
                         actualMinutes = null,
                         isPinned = false,
                         isMilestone = false,
+                        isInProgress = false,
                         effortLevel = null,
                         blockedByJson = "[]",
                         workspaceId = null,
@@ -879,6 +922,7 @@ class ThingsRepository @Inject constructor(
             actualMinutes = null,
             completedAt = null,
             isPinned = false,
+            isInProgress = false,
             blockedByJson = "[]",
             createdAt = existingById?.createdAt ?: now,
             updatedAt = if (existingById != null) maxOf(now, existingById.updatedAt + 1L) else now,
@@ -925,6 +969,7 @@ class ThingsRepository @Inject constructor(
                         scheduleState = if (needsAdvance) nextScheduleState else primary.scheduleState,
                         deadline = if (needsAdvance) nextDeadlineEpoch else (primary.deadline ?: nextDeadlineEpoch),
                         reminderTime = effectiveReminder,
+                        isInProgress = if (needsAdvance) false else primary.isInProgress,
                         areaId = enrichedArea,
                         headingId = enrichedHeading,
                         notes = enrichedNotes,
@@ -1054,6 +1099,11 @@ class ThingsRepository @Inject constructor(
             val nextDuration = parsed.durationMinutes?.coerceIn(1, MAX_TASK_DURATION_MINUTES)
                 ?: existing.durationMinutes
             val nextMilestone = if (parsed.isMilestone) true else existing.isMilestone
+            val nextInProgress = when {
+                existing.status != TaskStatus.OPEN -> false
+                parsed.isInProgress -> true
+                else -> existing.isInProgress
+            }
             val mergedTagIds = (decodeStringList(existing.tagIdsJson) + parsed.matchedTagIds)
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
@@ -1070,6 +1120,7 @@ class ThingsRepository @Inject constructor(
                 headingId = nextHeadingId,
                 areaId = nextAreaId,
                 isMilestone = nextMilestone,
+                isInProgress = nextInProgress,
                 tagIdsJson = json.encodeToString(mergedTagIds),
                 updatedAt = maxOf(now, existing.updatedAt + 1L),
                 isDirty = true
@@ -1195,6 +1246,7 @@ class ThingsRepository @Inject constructor(
             val updated = existing.copy(
                 status = newStatus,
                 completedAt = if (newStatus == TaskStatus.OPEN) null else now,
+                isInProgress = false,
                 updatedAt = maxOf(now, existing.updatedAt + 1L),
                 isDirty = true
             )
@@ -1593,6 +1645,7 @@ class ThingsRepository @Inject constructor(
                                 val updated = base.copy(
                                     status = TaskStatus.COMPLETED,
                                     completedAt = now,
+                                    isInProgress = false,
                                     isDeleted = false,
                                     updatedAt = stamp,
                                     isDirty = true
@@ -1611,8 +1664,8 @@ class ThingsRepository @Inject constructor(
                                     }
                                 }
                                 mutated = true
-                            } else if (rawTask.isDeleted) {
-                                database.taskDao().upsert(base)
+                            } else if (rawTask.isDeleted || base.isInProgress) {
+                                database.taskDao().upsert(base.copy(isInProgress = false))
                                 mutated = true
                             }
                         }
@@ -2307,6 +2360,7 @@ class ThingsRepository @Inject constructor(
                             task.copy(
                                 status = TaskStatus.COMPLETED,
                                 completedAt = now,
+                                isInProgress = false,
                                 updatedAt = maxOf(now, task.updatedAt + 1L),
                                 isDirty = true
                             )
@@ -2808,13 +2862,27 @@ class ThingsRepository @Inject constructor(
     suspend fun toggleChecklistItem(itemId: String, isCompleted: Boolean) {
         val existing = database.checklistDao().getById(itemId) ?: return
         val now = System.currentTimeMillis()
-        database.checklistDao().upsert(
-            existing.copy(
-                isCompleted = isCompleted,
-                updatedAt = now,
-                isDirty = true
+        database.withTransaction {
+            database.checklistDao().upsert(
+                existing.copy(
+                    isCompleted = isCompleted,
+                    updatedAt = now,
+                    isDirty = true
+                )
             )
-        )
+            if (isCompleted) {
+                val parent = database.taskDao().getById(existing.taskId)
+                if (parent != null && !parent.isDeleted && parent.status == TaskStatus.OPEN && !parent.isInProgress) {
+                    database.taskDao().upsert(
+                        parent.copy(
+                            isInProgress = true,
+                            updatedAt = maxOf(now, parent.updatedAt + 1L),
+                            isDirty = true
+                        )
+                    )
+                }
+            }
+        }
         syncRepository.triggerBackgroundSync()
     }
 
@@ -3124,6 +3192,7 @@ class ThingsRepository @Inject constructor(
                     actualMinutes = null,
                     isPinned = false,
                     isMilestone = false,
+                    isInProgress = false,
                     effortLevel = null,
                     blockedByJson = "[]",
                     workspaceId = null,
@@ -3252,6 +3321,7 @@ class ThingsRepository @Inject constructor(
             reminderTime = existing.reminderTime?.takeIf { it > now },
             isPinned = false,
             isMilestone = existing.isMilestone,
+            isInProgress = false,
             blockedByJson = "[]",
             sortOrder = existing.sortOrder + 10.0,
             createdAt = now,
@@ -3349,6 +3419,7 @@ class ThingsRepository @Inject constructor(
                     completedAt = null,
                     reminderTime = null,
                     isPinned = false,
+                    isInProgress = false,
                     blockedByJson = json.encodeToString(remappedBlockers),
                     createdAt = now,
                     updatedAt = now,
@@ -4455,6 +4526,7 @@ class ThingsRepository @Inject constructor(
             database.projectDao().upsertProjectWithTags(projectEntity, projectTagIds)
 
             var completedInsertedCount = 0
+            var inProgressInsertedCount = 0
 
             suspend fun insertExternalTask(
                 extTask: ExternalImportedTask,
@@ -4475,6 +4547,7 @@ class ThingsRepository @Inject constructor(
                     TaskStatus.COMPLETED, TaskStatus.CANCELED -> extTask.completedAt ?: now
                     TaskStatus.OPEN -> null
                 }
+                val resolvedInProgress = taskStatus == TaskStatus.OPEN && extTask.isInProgress
                 val taskTagIds = resolveOrCreateTagIds(extTask.tagNames)
 
                 val taskEntity = TaskEntity(
@@ -4494,6 +4567,7 @@ class ThingsRepository @Inject constructor(
                     sortOrder = sortOrder,
                     isPinned = extTask.isPinned,
                     isMilestone = extTask.isMilestone,
+                    isInProgress = resolvedInProgress,
                     effortLevel = EffortLevel.normalize(extTask.effortLevel),
                     assigneeId = extTask.assigneeId?.trim()?.takeIf { it.isNotEmpty() },
                     tagIdsJson = json.encodeToString(taskTagIds),
@@ -4528,6 +4602,9 @@ class ThingsRepository @Inject constructor(
                 insertedCount++
                 if (taskStatus == TaskStatus.COMPLETED) {
                     completedInsertedCount++
+                }
+                if (resolvedInProgress) {
+                    inProgressInsertedCount++
                 }
             }
 
@@ -4585,6 +4662,7 @@ class ThingsRepository @Inject constructor(
                 tagIds = projectTagIds,
                 totalTaskCount = insertedCount,
                 completedTaskCount = completedInsertedCount,
+                inProgressTaskCount = inProgressInsertedCount,
                 createdAt = now,
                 updatedAt = now,
                 isDeleted = false
@@ -4640,6 +4718,7 @@ class ThingsRepository @Inject constructor(
             viewMode = projectEntity.viewMode,
             totalTaskCount = domainTasks.count { it.status != TaskStatus.CANCELED },
             completedTaskCount = domainTasks.count { it.status == TaskStatus.COMPLETED },
+            inProgressTaskCount = domainTasks.count { it.status == TaskStatus.OPEN && it.isInProgress },
             createdAt = projectEntity.createdAt,
             updatedAt = projectEntity.updatedAt,
             isDeleted = projectEntity.isDeleted
@@ -5281,6 +5360,7 @@ class ThingsRepository @Inject constructor(
                         actualMinutes = t.actualMinutes,
                         isPinned = t.isPinned,
                         isMilestone = t.isMilestone,
+                        isInProgress = t.status == TaskStatus.OPEN && t.isInProgress,
                         effortLevel = t.effortLevel,
                         blockedByJson = t.blockedByJson,
                         workspaceId = t.workspaceId,
@@ -5533,6 +5613,7 @@ class ThingsRepository @Inject constructor(
                     actualMinutes = t.actualMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES },
                     isPinned = t.isPinned,
                     isMilestone = t.isMilestone,
+                    isInProgress = taskStatus == TaskStatus.OPEN && t.isInProgress,
                     effortLevel = EffortLevel.normalize(t.effortLevel),
                     blockedByJson = json.encodeToString(cleanBlockedByIds),
                     workspaceId = t.workspaceId?.trim()?.takeIf { it.isNotEmpty() },
@@ -5698,6 +5779,7 @@ class ThingsRepository @Inject constructor(
         actualMinutes = task.actualMinutes,
         isPinned = task.isPinned,
         isMilestone = task.isMilestone,
+        isInProgress = task.status == TaskStatus.OPEN && !task.isDeleted && task.isInProgress,
         effortLevel = task.effortLevel,
         blockedByTaskIds = decodeStringList(task.blockedByJson),
         workspaceId = task.workspaceId,
@@ -5789,6 +5871,7 @@ class ThingsRepository @Inject constructor(
         viewMode = project.viewMode,
         totalTaskCount = totalTaskCount,
         completedTaskCount = completedTaskCount,
+        inProgressTaskCount = inProgressTaskCount,
         lastTaskActivityAt = lastTaskActivityAt,
         createdAt = project.createdAt,
         updatedAt = project.updatedAt,

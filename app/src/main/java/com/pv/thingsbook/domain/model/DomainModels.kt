@@ -35,6 +35,7 @@ data class SavedPerspective(
     val dueWindow: String = "ANY",
     val areaId: String? = null,
     val actionableOnly: Boolean = false,
+    val inProgressOnly: Boolean = false,
     val sortOrder: Double = 0.0
 )
 
@@ -65,6 +66,7 @@ data class Project(
     val viewMode: String? = null,
     val totalTaskCount: Int = 0,
     val completedTaskCount: Int = 0,
+    val inProgressTaskCount: Int = 0,
     val lastTaskActivityAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
@@ -73,6 +75,9 @@ data class Project(
     /** Live progress fraction [0.0f .. 1.0f] for the Things 3 Pie-Chart Progress Ring */
     val progress: Float
         get() = if (totalTaskCount <= 0) 0f else (completedTaskCount.toFloat() / totalTaskCount.toFloat()).coerceIn(0f, 1f)
+
+    val inProgressProgress: Float
+        get() = if (totalTaskCount <= 0) 0f else (inProgressTaskCount.toFloat() / totalTaskCount.toFloat()).coerceIn(0f, (1f - progress).coerceAtLeast(0f))
 
     val openTaskCount: Int
         get() = (totalTaskCount - completedTaskCount).coerceAtLeast(0)
@@ -157,6 +162,7 @@ data class TaskItem(
     val sortOrder: Double,
     val isPinned: Boolean = false,
     val isMilestone: Boolean = false,
+    val isInProgress: Boolean = false,
     val effortLevel: String? = null,
     val blockedByTaskIds: List<String> = emptyList(),
     val workspaceId: String? = null,
@@ -303,6 +309,11 @@ fun sortTasksForView(
         if (a.isPinned != b.isPinned) {
             return@sortedWith if (a.isPinned) -1 else 1
         }
+        val aWip = a.status == TaskStatus.OPEN && a.isInProgress
+        val bWip = b.status == TaskStatus.OPEN && b.isInProgress
+        if (aWip != bWip) {
+            return@sortedWith if (aWip) -1 else 1
+        }
         val modeCmp = when (normalizedMode) {
             "deadline" -> {
                 val aDl = a.deadline
@@ -415,6 +426,7 @@ fun filterTasksForPerspective(
 
     return tasks.filter { task ->
         if (task.isDeleted || task.status != TaskStatus.OPEN) return@filter false
+        if (perspective.inProgressOnly && !task.isInProgress) return@filter false
         if (perspective.actionableOnly && isTaskActivelyBlocked(task, openTaskIds)) return@filter false
         if (requiredAreaId != null && task.areaId != requiredAreaId) return@filter false
         if (requiredEffort != null && EffortLevel.normalize(task.effortLevel) != requiredEffort) return@filter false

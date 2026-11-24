@@ -13,6 +13,7 @@ public struct ParsedSmartSyntax: Equatable, Sendable {
     public let matchedProject: Project?
     public let matchedArea: Area?
     public let isMilestone: Bool
+    public let isInProgress: Bool
     public let hasAnyMatch: Bool
 
     public init(
@@ -28,6 +29,7 @@ public struct ParsedSmartSyntax: Equatable, Sendable {
         matchedProject: Project? = nil,
         matchedArea: Area? = nil,
         isMilestone: Bool = false,
+        isInProgress: Bool = false,
         hasAnyMatch: Bool = false
     ) {
         self.cleanTitle = cleanTitle
@@ -42,13 +44,43 @@ public struct ParsedSmartSyntax: Equatable, Sendable {
         self.matchedProject = matchedProject
         self.matchedArea = matchedArea
         self.isMilestone = isMilestone
+        self.isInProgress = isInProgress
         self.hasAnyMatch = hasAnyMatch
+            || scheduleState != nil
+            || whenDate != nil
+            || deadline != nil
+            || durationMinutes != nil
+            || !matchedTagIds.isEmpty
+            || matchedProject != nil
+            || matchedArea != nil
+            || isMilestone
+            || isInProgress
     }
 }
 
-/// Inline GTD Smart-Syntax Parser supporting `@when`, `!deadline` / `!milestone` / `◆`, `~duration`, `#tag`, and `/project` or `/area`
+/// Inline GTD Smart-Syntax Parser supporting `@when`, `!deadline` / `!milestone` / `◆` / `!wip` / `◐`, `~duration`, `#tag`, and `/project` or `/area`
 /// across EN, DE, FR, IT, ES without touching URLs (`https://a.com/b`), fractions (`3/4`), or emails (`a@b.com`).
 public enum SmartSyntaxParser {
+    private static let inProgressBangTokens: Set<String> = [
+        "wip",
+        "inprogress",
+        "in-progress",
+        "in progress",
+        "doing",
+        "inarbeit",
+        "in-arbeit",
+        "in arbeit",
+        "encours",
+        "en-cours",
+        "en cours",
+        "incorso",
+        "in-corso",
+        "in corso",
+        "encurso",
+        "en-curso",
+        "en curso"
+    ]
+
     private struct CandidateSpan {
         let range: Range<String.Index>
         let prefix: Character
@@ -91,12 +123,17 @@ public enum SmartSyntaxParser {
         var resolvedProject: Project? = nil
         var resolvedArea: Area? = nil
         var resolvedIsMilestone = false
+        var resolvedIsInProgress = false
         var matchedRanges: [Range<String.Index>] = []
 
         for span in candidates {
             switch span.prefix {
             case "◆":
                 resolvedIsMilestone = true
+                matchedRanges.append(span.range)
+
+            case "◐":
+                resolvedIsInProgress = true
                 matchedRanges.append(span.range)
 
             case "@":
@@ -115,8 +152,15 @@ public enum SmartSyntaxParser {
 
             case "!":
                 let cleanVal = span.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedBang = cleanVal
+                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
                 if cleanVal.caseInsensitiveCompare("milestone") == .orderedSame {
                     resolvedIsMilestone = true
+                    matchedRanges.append(span.range)
+                } else if inProgressBangTokens.contains(normalizedBang) {
+                    resolvedIsInProgress = true
                     matchedRanges.append(span.range)
                 } else if let parsedDl = parseNaturalDateToken(
                     cleanVal,
@@ -182,6 +226,7 @@ public enum SmartSyntaxParser {
             matchedProject: resolvedProject,
             matchedArea: resolvedArea,
             isMilestone: resolvedIsMilestone,
+            isInProgress: resolvedIsInProgress,
             hasAnyMatch: true
         )
     }
@@ -205,10 +250,10 @@ public enum SmartSyntaxParser {
             }
 
             let ch = text[idx]
-            if ch == "◆" {
+            if ch == "◆" || ch == "◐" {
                 let nextIdx = text.index(after: idx)
                 if nextIdx == text.endIndex || text[nextIdx].isWhitespace {
-                    spans.append(CandidateSpan(range: idx..<nextIdx, prefix: "◆", value: "◆", isQuoted: false))
+                    spans.append(CandidateSpan(range: idx..<nextIdx, prefix: ch, value: String(ch), isQuoted: false))
                     idx = nextIdx
                     continue
                 }

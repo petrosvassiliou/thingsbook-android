@@ -193,8 +193,8 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                   <button
                     type="button"
                     className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''} ${
-                      tk.status === 'COMPLETED' ? 'completed checked' : ''
-                    }`}
+                      tk.status === 'OPEN' && tk.isInProgress ? 'in-progress' : ''
+                    } ${tk.status === 'COMPLETED' ? 'completed checked' : ''}`}
                     disabled={isFullScreen}
                     aria-disabled={isFullScreen || undefined}
                     style={
@@ -204,8 +204,12 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                     }
                     title={isFullScreen ? undefined : t.actionComplete}
                     aria-label={t.actionComplete}
-                    onClick={() => {
+                    onClick={(e) => {
                       if (isFullScreen) return;
+                      if (e.shiftKey && tk.status === 'OPEN') {
+                        void localDb.toggleTaskInProgress(tk.id);
+                        return;
+                      }
                       void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
                     }}
                   >
@@ -221,6 +225,14 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                       <span style={{ fontWeight: 620, fontSize: 14 }}>
                         {tk.title || t.placeholderTodoTitle}
                       </span>
+                      {tk.status === 'OPEN' && tk.isInProgress && (
+                        <span
+                          className="meta-badge in-progress-badge"
+                          data-testid="timeline-task-in-progress-pill"
+                        >
+                          ◐ {t.v33InProgressBadge}
+                        </span>
+                      )}
                       {tk.isMilestone && (
                         <span
                           className="meta-badge milestone-badge"
@@ -374,10 +386,18 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                 >
                   <button
                     type="button"
-                    className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''}`}
+                    className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''} ${
+                      tk.status === 'OPEN' && tk.isInProgress ? 'in-progress' : ''
+                    }`}
                     aria-label={t.actionComplete}
                     title={t.actionComplete}
-                    onClick={() => void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })}
+                    onClick={(e) => {
+                      if (e.shiftKey && tk.status === 'OPEN') {
+                        void localDb.toggleTaskInProgress(tk.id);
+                        return;
+                      }
+                      void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
+                    }}
                   />
                   <div
                     style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
@@ -387,6 +407,14 @@ export const TodayTimelineView: React.FC<TodayTimelineViewProps> = ({
                       <span style={{ fontWeight: 560, fontSize: 13.6 }}>
                         {tk.title || t.placeholderTodoTitle}
                       </span>
+                      {tk.status === 'OPEN' && tk.isInProgress && (
+                        <span
+                          className="meta-badge in-progress-badge"
+                          data-testid="timeline-task-in-progress-pill"
+                        >
+                          ◐ {t.v33InProgressBadge}
+                        </span>
+                      )}
                       {tk.isMilestone && (
                         <span
                           className="meta-badge milestone-badge"

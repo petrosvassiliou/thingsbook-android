@@ -763,6 +763,7 @@ public actor FirebaseCloudSyncService {
         var omittedMilestoneTaskIds = Set<String>()
         var omittedV30TaskIds = Set<String>()
         var omittedActualMinutesIds = Set<String>()
+        var omittedInProgressIds = Set<String>()
         let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(m) else { return nil }
             taskTags[parsed.task.id] = parsed.tagIds
@@ -780,6 +781,9 @@ public actor FirebaseCloudSyncService {
             }
             if parsed.omittedActualMinutes {
                 omittedActualMinutesIds.insert(parsed.task.id)
+            }
+            if parsed.omittedInProgress {
+                omittedInProgressIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -804,6 +808,7 @@ public actor FirebaseCloudSyncService {
                 taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                 taskOmittedV30TaskIds: omittedV30TaskIds,
                 taskOmittedActualMinutesIds: omittedActualMinutesIds,
+                taskOmittedInProgressIds: omittedInProgressIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -1245,6 +1250,7 @@ public actor FirebaseCloudSyncService {
                 "sortOrder": Self.fsDouble(task.sortOrder),
                 "isPinned": Self.fsBool(!task.isDeleted && task.isPinned),
                 "isMilestone": Self.fsBool(!task.isDeleted && task.isMilestone),
+                "isInProgress": Self.fsBool(!task.isDeleted && task.status == .open && task.isInProgress),
                 "effortLevel": Self.fsNullableString(task.isDeleted ? nil : task.effortLevel),
                 "blockedByTaskIds": Self.fsStringArray(task.isDeleted ? [] : task.blockedByTaskIds),
                 "workspaceId": Self.fsNullableString(task.isDeleted ? nil : task.workspaceId),
@@ -1564,6 +1570,7 @@ public actor FirebaseCloudSyncService {
                 "sortOrder": task.sortOrder,
                 "isPinned": !task.isDeleted && task.isPinned,
                 "isMilestone": !task.isDeleted && task.isMilestone,
+                "isInProgress": !task.isDeleted && task.status == .open && task.isInProgress,
                 "effortLevel": (task.isDeleted ? nil : task.effortLevel) as Any,
                 "blockedByTaskIds": task.isDeleted ? [] : task.blockedByTaskIds,
                 "workspaceId": (task.isDeleted ? nil : task.workspaceId) as Any,
@@ -1766,6 +1773,7 @@ public actor FirebaseCloudSyncService {
         var omittedMilestoneTaskIds = Set<String>()
         var omittedV30TaskIds = Set<String>()
         var omittedActualMinutesIds = Set<String>()
+        var omittedInProgressIds = Set<String>()
         let tasks: [TaskItem] = taskMaps.compactMap { map -> TaskItem? in
             guard let parsed = Self.parseTaskWithHints(map) else { return nil }
             taskTagIds[parsed.task.id] = parsed.tagIds
@@ -1783,6 +1791,9 @@ public actor FirebaseCloudSyncService {
             }
             if parsed.omittedActualMinutes {
                 omittedActualMinutesIds.insert(parsed.task.id)
+            }
+            if parsed.omittedInProgress {
+                omittedInProgressIds.insert(parsed.task.id)
             }
             return parsed.task
         }
@@ -1824,6 +1835,7 @@ public actor FirebaseCloudSyncService {
                 taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                 taskOmittedV30TaskIds: omittedV30TaskIds,
                 taskOmittedActualMinutesIds: omittedActualMinutesIds,
+                taskOmittedInProgressIds: omittedInProgressIds,
                 checklistItems: checklists,
                 attachments: attachments,
                 projectTemplates: projectTemplates
@@ -2007,6 +2019,7 @@ public actor FirebaseCloudSyncService {
             var omittedMilestoneTaskIds = Set<String>()
             var omittedV30TaskIds = Set<String>()
             var omittedActualMinutesIds = Set<String>()
+            var omittedInProgressIds = Set<String>()
             let tasks = (batch["tasks"] as? [[String: Any]] ?? []).compactMap { m -> TaskItem? in
                 guard let parsed = Self.parseTaskWithHints(m) else { return nil }
                 taskTags[parsed.task.id] = parsed.tagIds
@@ -2024,6 +2037,9 @@ public actor FirebaseCloudSyncService {
                 }
                 if parsed.omittedActualMinutes {
                     omittedActualMinutesIds.insert(parsed.task.id)
+                }
+                if parsed.omittedInProgress {
+                    omittedInProgressIds.insert(parsed.task.id)
                 }
                 return parsed.task
             }
@@ -2047,6 +2063,7 @@ public actor FirebaseCloudSyncService {
                     taskOmittedMilestoneTaskIds: omittedMilestoneTaskIds,
                     taskOmittedV30TaskIds: omittedV30TaskIds,
                     taskOmittedActualMinutesIds: omittedActualMinutesIds,
+                    taskOmittedInProgressIds: omittedInProgressIds,
                     checklistItems: checklists,
                     attachments: attachments,
                     projectTemplates: projectTemplates
@@ -2570,7 +2587,7 @@ public actor FirebaseCloudSyncService {
 
     public static func parseTaskWithHints(
         _ map: [String: Any]
-    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool, omittedMilestone: Bool, omittedV30Fields: Bool, omittedActualMinutes: Bool)? {
+    ) -> (task: TaskItem, tagIds: [String], omittedTimeblock: Bool, omittedPin: Bool, omittedMilestone: Bool, omittedV30Fields: Bool, omittedActualMinutes: Bool, omittedInProgress: Bool)? {
         guard let id = asString(map["id"]) else { return nil }
         var rule: RecurrenceRule? = nil
         if let recStr = asString(map["recurrenceRule"]), let data = recStr.data(using: .utf8) {
@@ -2578,6 +2595,7 @@ public actor FirebaseCloudSyncService {
         }
         let tids = asStringList(map["tagIds"])
         let isDeleted = asBool(map["isDeleted"])
+        let normalizedStatus = TaskStatus.normalized(map["status"] as? String)
         let purged = isDeleted && asBool(map["purgedFromTrash"])
         let omittedTimeblock = !map.keys.contains("scheduledStartMinutes") && !map.keys.contains("durationMinutes")
         let omittedPin = !map.keys.contains("isPinned")
@@ -2588,6 +2606,7 @@ public actor FirebaseCloudSyncService {
             && !map.keys.contains("workspaceId")
             && !map.keys.contains("assigneeId")
         let omittedActualMinutes = !map.keys.contains("actualMinutes")
+        let omittedInProgress = !map.keys.contains("isInProgress")
 
         var blockedIds = asStringList(map["blockedByTaskIds"])
         if blockedIds.isEmpty,
@@ -2606,7 +2625,7 @@ public actor FirebaseCloudSyncService {
             id: id,
             title: purged ? "" : ((map["title"] as? String) ?? ""),
             notes: purged ? "" : ((map["notes"] as? String) ?? ""),
-            status: TaskStatus.normalized(map["status"] as? String),
+            status: normalizedStatus,
             scheduleState: ScheduleState.normalized(map["scheduleState"] as? String, fallback: .inbox),
             whenDate: asInt64(map["whenDate"]),
             deadline: asInt64(map["deadline"]),
@@ -2628,9 +2647,10 @@ public actor FirebaseCloudSyncService {
             assigneeId: isDeleted ? nil : asString(map["assigneeId"]),
             createdAt: asInt64(map["createdAt"]) ?? 0,
             updatedAt: asInt64(map["updatedAt"]) ?? 0,
-            isDeleted: isDeleted
+            isDeleted: isDeleted,
+            isInProgress: !isDeleted && normalizedStatus == .open && asBool(map["isInProgress"])
         )
-        return (task, tids, omittedTimeblock, omittedPin, omittedMilestone, omittedV30Fields, omittedActualMinutes)
+        return (task, tids, omittedTimeblock, omittedPin, omittedMilestone, omittedV30Fields, omittedActualMinutes, omittedInProgress)
     }
 
     public static func parseTask(_ map: [String: Any]) -> (TaskItem, [String])? {

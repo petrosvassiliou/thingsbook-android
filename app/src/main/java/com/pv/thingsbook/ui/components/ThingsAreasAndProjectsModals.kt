@@ -608,7 +608,11 @@ fun CreateOrEditProjectDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        ProjectProgressRing(progress = existingProject?.progress ?: 0f, size = 20.dp)
+                        ProjectProgressRing(
+                            progress = existingProject?.progress ?: 0f,
+                            inProgressFraction = existingProject?.inProgressProgress ?: 0f,
+                            size = 20.dp
+                        )
                         Text(
                             text = if (existingProject == null) {
                                 stringResource(R.string.entity_new_project)
@@ -1158,7 +1162,11 @@ private fun ProjectMoveRowItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                ProjectProgressRing(progress = project.progress, size = 14.dp)
+                ProjectProgressRing(
+                    progress = project.progress,
+                    inProgressFraction = project.inProgressProgress,
+                    size = 14.dp
+                )
                 Text(
                     text = project.title,
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),

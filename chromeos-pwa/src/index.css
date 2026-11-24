@@ -42,6 +42,10 @@
   --milestone-violet: #7c3aed;
   --milestone-violet-soft: rgba(124, 58, 237, 0.12);
   --milestone-violet-border: rgba(124, 58, 237, 0.36);
+  --in-progress-amber: #d97706;
+  --in-progress-amber-ring: #f59e0b;
+  --in-progress-amber-soft: rgba(245, 158, 11, 0.14);
+  --in-progress-amber-border: rgba(245, 158, 11, 0.38);
 
   --shadow-xs: 0 1px 2px rgba(18, 26, 38, 0.05);
   --shadow-sm: 0 2px 8px rgba(18, 26, 38, 0.08), 0 1px 2px rgba(18, 26, 38, 0.04);
@@ -95,6 +99,10 @@
   --milestone-violet: #a78bfa;
   --milestone-violet-soft: rgba(167, 139, 250, 0.16);
   --milestone-violet-border: rgba(167, 139, 250, 0.42);
+  --in-progress-amber: #fbbf24;
+  --in-progress-amber-ring: #f59e0b;
+  --in-progress-amber-soft: rgba(245, 158, 11, 0.18);
+  --in-progress-amber-border: rgba(245, 158, 11, 0.44);
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
   --shadow-sm: 0 3px 10px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.24);
@@ -469,7 +477,19 @@ button {
   position: relative;
 }
 
+.project-linear-fill-in-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.72);
+  transition: width 0.22s ease;
+}
+
 .project-linear-fill {
+  position: relative;
+  z-index: 1;
   display: block;
   height: 100%;
   border-radius: 999px;
@@ -1618,6 +1638,35 @@ button {
 
 .things-checkbox.milestone > svg {
   transform: rotate(-45deg);
+}
+
+.things-checkbox.in-progress:not(.completed):not(.canceled) {
+  position: relative;
+  border-color: var(--in-progress-amber-ring);
+  border-style: solid;
+  background: rgba(245, 158, 11, 0.10);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+}
+
+.things-checkbox.in-progress:not(.completed):not(.canceled)::after {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--in-progress-amber-ring);
+  box-shadow: 0 0 5px rgba(245, 158, 11, 0.55);
+  display: block;
+}
+
+.things-checkbox.milestone.in-progress:not(.completed):not(.canceled)::after {
+  width: 6.5px;
+  height: 6.5px;
+  border-radius: 1.5px;
+}
+
+.things-checkbox.in-progress:not(.completed):not(.canceled):hover {
+  border-color: var(--in-progress-amber-ring);
+  background: rgba(245, 158, 11, 0.18);
 }
 
 .task-row-body {
@@ -6260,6 +6309,42 @@ button.v2-stalled-pill:hover {
   background: var(--milestone-violet-soft);
   border-color: var(--milestone-violet);
   color: var(--milestone-violet);
+  filter: brightness(0.98);
+}
+
+.meta-badge.in-progress-badge {
+  background: var(--in-progress-amber-soft);
+  color: var(--in-progress-amber);
+  box-shadow: inset 0 0 0 1px var(--in-progress-amber-border);
+  font-weight: 650;
+}
+
+.icon-btn.in-progress-active {
+  background: var(--in-progress-amber-soft);
+  color: var(--in-progress-amber);
+  box-shadow: inset 0 0 0 1px var(--in-progress-amber-border);
+}
+
+.icon-btn.in-progress-active:hover {
+  background: var(--in-progress-amber-soft);
+  color: var(--in-progress-amber);
+  filter: brightness(0.97);
+}
+
+.chip-btn.in-progress-active,
+.task-bento-prop-pills .chip-btn.in-progress-active {
+  background: var(--in-progress-amber-soft);
+  border-color: var(--in-progress-amber-border);
+  color: var(--in-progress-amber);
+  font-weight: 630;
+}
+
+.chip-btn.in-progress-active:hover,
+.task-bento-prop-pills .chip-btn.in-progress-active:hover,
+.task-bento-prop-pills .chip-btn.in-progress-active:hover:not(.active):not(.urgent):not(.evening-quick) {
+  background: var(--in-progress-amber-soft);
+  border-color: var(--in-progress-amber-ring);
+  color: var(--in-progress-amber);
   filter: brightness(0.98);
 }
 

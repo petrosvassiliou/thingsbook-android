@@ -202,6 +202,7 @@ public struct WorkspaceInspectorPanelView: View {
                     status: task.status,
                     isSomeday: task.scheduleState == .someday,
                     isMilestone: task.isMilestone,
+                    isInProgress: task.isInProgress,
                     helpText: store.tr("macos_checkbox_help"),
                     onToggleComplete: {
                         draftSaveTask?.cancel()
@@ -214,6 +215,12 @@ public struct WorkspaceInspectorPanelView: View {
                         commitDraftEditsIfNeeded(commitPendingChecklist: true)
                         let fresh = store.task(byId: task.id) ?? task
                         store.cancelTask(fresh)
+                    },
+                    onToggleInProgress: {
+                        draftSaveTask?.cancel()
+                        commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                        let fresh = store.task(byId: task.id) ?? task
+                        store.toggleTaskInProgress(fresh)
                     }
                 )
                 .padding(.top, 2)
@@ -232,7 +239,40 @@ public struct WorkspaceInspectorPanelView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HStack(spacing: 7) {
+            ThingsFlowLayout(horizontalSpacing: 7, verticalSpacing: 6) {
+                // In Progress toggle
+                if task.status == .open {
+                    Button {
+                        draftSaveTask?.cancel()
+                        commitDraftEditsIfNeeded()
+                        store.toggleTaskInProgress(task)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "circle.lefthalf.filled")
+                                .font(.system(size: 10.5, weight: .semibold))
+                            Text(store.tr(task.isInProgress ? "v33_in_progress_badge" : "v33_mark_in_progress"))
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(task.isInProgress ? ThingsMacPalette.somedayAmber : .secondary)
+                        .padding(.horizontal, 9.5)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(task.isInProgress ? ThingsMacPalette.somedayAmber.opacity(0.15) : ThingsMacPalette.subtleContainer)
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(
+                                    task.isInProgress ? ThingsMacPalette.somedayAmber.opacity(0.38) : Color.primary.opacity(0.08),
+                                    lineWidth: 0.75
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .thingsTooltip(store.tr(task.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"))
+                }
+
                 // Pin toggle
                 Button {
                     draftSaveTask?.cancel()
@@ -294,8 +334,6 @@ public struct WorkspaceInspectorPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .thingsTooltip(store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"))
-
-                Spacer(minLength: 0)
             }
         }
         .padding(12)
@@ -1352,9 +1390,11 @@ public struct WorkspaceInspectorPanelView: View {
                             status: task.status,
                             isSomeday: task.scheduleState == .someday,
                             isMilestone: task.isMilestone,
+                            isInProgress: task.isInProgress,
                             helpText: store.tr("macos_checkbox_help"),
                             onToggleComplete: { store.toggleTaskCompletion(task) },
-                            onCancelTask: { store.cancelTask(task) }
+                            onCancelTask: { store.cancelTask(task) },
+                            onToggleInProgress: { store.toggleTaskInProgress(task) }
                         )
 
                         Image(systemName: "pin.fill")

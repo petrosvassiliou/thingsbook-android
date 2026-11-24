@@ -753,6 +753,7 @@ public struct SidebarView: View {
 
                 ProjectProgressRing(
                     progress: proj.progress,
+                    inProgressProgress: proj.inProgressProgress,
                     size: 15,
                     tint: ThingsMacPalette.accentBlue,
                     isCompleted: proj.status == .completed

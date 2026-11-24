@@ -419,14 +419,21 @@ public struct QuickEntrySheetView: View {
             ThingsCheckboxButton(
                 status: task.status,
                 isMilestone: task.isMilestone,
+                isInProgress: task.isInProgress,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: { store.toggleTaskCompletion(task) },
-                onCancelTask: { store.cancelTask(task) }
+                onCancelTask: { store.cancelTask(task) },
+                onToggleInProgress: { store.toggleTaskInProgress(task) }
             )
             Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
                 .font(.system(size: 12.5, weight: .medium))
                 .lineLimit(1)
             Spacer()
+            if task.status == .open && task.isInProgress {
+                Text("◐")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.somedayAmber)
+            }
             if let firstTag = task.tags.first {
                 Text(firstTag.title)
                     .font(.system(size: 10, weight: .semibold))
@@ -524,7 +531,8 @@ public struct QuickEntrySheetView: View {
             deadline: finalDl,
             durationMinutes: parsed.durationMinutes,
             tagIds: parsed.matchedTagIds,
-            isMilestone: parsed.isMilestone
+            isMilestone: parsed.isMilestone,
+            isInProgress: parsed.isInProgress
         )
         title = ""
         notes = ""

@@ -681,8 +681,19 @@ public struct SmartViewCanvas: View {
                 Spacer()
 
                 if milestone.totalCount > 0 {
+                    let phaseInProgCount = store.allOpenTasks.filter {
+                        $0.projectId == milestone.project.id
+                            && $0.headingId == milestone.heading.id
+                            && $0.status == .open
+                            && $0.isInProgress
+                    }.count
+                    let phaseInProgRatio = min(
+                        max(0.0, 1.0 - milestone.progress),
+                        Double(phaseInProgCount) / Double(milestone.totalCount)
+                    )
                     ProjectProgressRing(
                         progress: milestone.progress,
+                        inProgressProgress: phaseInProgRatio,
                         size: 15,
                         tint: ThingsMacPalette.accentBlue,
                         isCompleted: milestone.completedCount == milestone.totalCount,
@@ -798,6 +809,7 @@ public struct SmartViewCanvas: View {
                 HStack(alignment: .center, spacing: 12) {
                     ProjectProgressRing(
                         progress: project.progress,
+                        inProgressProgress: project.inProgressProgress,
                         size: 22,
                         tint: ThingsMacPalette.accentBlue,
                         isCompleted: project.status == .completed,
@@ -947,6 +959,24 @@ public struct SmartViewCanvas: View {
                     ProjectModeSegmentedSwitcher(store: store, project: project)
 
                     viewSortMenu
+
+                    if project.status == .active && project.inProgressTaskCount > 0 {
+                        Text("◐ \(store.trf("v33_project_in_progress_count", project.inProgressTaskCount))")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.somedayAmber.opacity(0.14))
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(ThingsMacPalette.somedayAmber.opacity(0.28), lineWidth: 0.75)
+                            )
+                    }
 
                     let stalledInfo = store.projectStalledInfo(project)
                     if stalledInfo.isStalled {
@@ -1322,10 +1352,13 @@ public struct SmartViewCanvas: View {
     ) -> some View {
         let isCollapsed = store.collapsedHeadingIds.contains(heading.id)
         let isRenaming = renamingHeadingId == heading.id
-        let rawOpenCount = store.allOpenTasks.filter { $0.projectId == project.id && $0.headingId == heading.id }.count
+        let rawOpenTasks = store.allOpenTasks.filter { $0.projectId == project.id && $0.headingId == heading.id }
+        let rawOpenCount = rawOpenTasks.count
+        let inProgCount = rawOpenTasks.filter { $0.status == .open && $0.isInProgress }.count
         let doneCount = store.completedTasksForProject(project.id).filter { $0.headingId == heading.id }.count
         let totalPhaseCount = rawOpenCount + doneCount
         let phaseProgress = totalPhaseCount > 0 ? Double(doneCount) / Double(totalPhaseCount) : 0.0
+        let phaseInProgress = totalPhaseCount > 0 ? min(max(0.0, 1.0 - phaseProgress), Double(inProgCount) / Double(totalPhaseCount)) : 0.0
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
@@ -1382,6 +1415,7 @@ public struct SmartViewCanvas: View {
                     if totalPhaseCount > 0 {
                         ProjectProgressRing(
                             progress: phaseProgress,
+                            inProgressProgress: phaseInProgress,
                             size: 13.5,
                             tint: ThingsMacPalette.accentBlue,
                             isCompleted: rawOpenCount == 0 && doneCount > 0,
@@ -1595,6 +1629,7 @@ public struct SmartViewCanvas: View {
                                     HStack(spacing: 12) {
                                         ProjectProgressRing(
                                             progress: proj.progress,
+                                            inProgressProgress: proj.inProgressProgress,
                                             size: 18,
                                             showFraction: proj.totalTaskCount > 0,
                                             completedCount: proj.completedTaskCount,
@@ -1603,6 +1638,17 @@ public struct SmartViewCanvas: View {
                                         Text(proj.title)
                                             .font(.system(size: 14.5, weight: .semibold))
                                         Spacer()
+                                        if proj.inProgressTaskCount > 0 {
+                                            Text("◐ \(store.trf("v33_project_in_progress_count", proj.inProgressTaskCount))")
+                                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(ThingsMacPalette.somedayAmber)
+                                                .padding(.horizontal, 7.5)
+                                                .padding(.vertical, 2.5)
+                                                .background(
+                                                    Capsule(style: .continuous)
+                                                        .fill(ThingsMacPalette.somedayAmber.opacity(0.13))
+                                                )
+                                        }
                                         if proj.deadline != nil {
                                             Image(systemName: "flag")
                                                 .font(.system(size: 11, weight: .semibold))
@@ -1770,6 +1816,9 @@ public struct SmartViewCanvas: View {
         }
         if perspective.actionableOnly {
             badges.append(store.tr("v30_perspective_actionable_only"))
+        }
+        if perspective.inProgressOnly {
+            badges.append("◐ \(store.tr("v33_filter_in_progress_only"))")
         }
         return badges
     }
@@ -2608,6 +2657,16 @@ private struct TodayDailyTimelineView: View {
                             systemImage: task.isMilestone ? "diamond.fill" : "diamond"
                         )
                     }
+                    if task.status == .open {
+                        Button {
+                            store.toggleTaskInProgress(task)
+                        } label: {
+                            Label(
+                                store.tr(task.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                                systemImage: "circle.lefthalf.filled"
+                            )
+                        }
+                    }
                     Button {
                         store.copyTaskToPasteboard(task)
                     } label: {
@@ -2669,6 +2728,7 @@ private struct TodayDailyTimelineView: View {
                 status: task.status,
                 isSomeday: false,
                 isMilestone: task.isMilestone,
+                isInProgress: task.isInProgress,
                 helpText: isFullScreen ? "" : store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     guard !store.isTimelineFullScreen else { return }
@@ -2677,6 +2737,10 @@ private struct TodayDailyTimelineView: View {
                 onCancelTask: {
                     guard !store.isTimelineFullScreen else { return }
                     store.cancelTask(task)
+                },
+                onToggleInProgress: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.toggleTaskInProgress(task)
                 }
             )
             .disabled(isFullScreen)
@@ -2687,6 +2751,15 @@ private struct TodayDailyTimelineView: View {
                     Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
                         .font(.system(size: 14, weight: task.isMilestone ? .semibold : .medium))
                         .lineLimit(1)
+
+                    if task.status == .open && task.isInProgress {
+                        Text("◐ \(store.tr("v33_in_progress_badge"))")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                    }
 
                     if task.isMilestone {
                         milestoneTimelinePill
@@ -2790,14 +2863,25 @@ private struct TodayDailyTimelineView: View {
                 status: task.status,
                 isSomeday: false,
                 isMilestone: task.isMilestone,
+                isInProgress: task.isInProgress,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: { store.toggleTaskCompletion(task) },
-                onCancelTask: { store.cancelTask(task) }
+                onCancelTask: { store.cancelTask(task) },
+                onToggleInProgress: { store.toggleTaskInProgress(task) }
             )
 
             Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
                 .font(.system(size: 13.5, weight: task.isMilestone ? .semibold : .medium))
                 .lineLimit(1)
+
+            if task.status == .open && task.isInProgress {
+                Text("◐ \(store.tr("v33_in_progress_badge"))")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(ThingsMacPalette.somedayAmber)
+                    .padding(.horizontal, 6.5)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+            }
 
             if task.isMilestone {
                 milestoneTimelinePill
@@ -2887,6 +2971,16 @@ private struct TodayDailyTimelineView: View {
                     store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
                     systemImage: task.isMilestone ? "diamond.fill" : "diamond"
                 )
+            }
+            if task.status == .open {
+                Button {
+                    store.toggleTaskInProgress(task)
+                } label: {
+                    Label(
+                        store.tr(task.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled"
+                    )
+                }
             }
             Divider()
             Button(role: .destructive) {

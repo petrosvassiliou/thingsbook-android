@@ -23,6 +23,7 @@ data class QuickFindFilter(
     val dateFilter: QuickFindDateFilter = QuickFindDateFilter.ALL,
     val hasDeadlineOnly: Boolean = false,
     val hasChecklistOnly: Boolean = false,
+    val inProgressOnly: Boolean = false,
     val tagId: String? = null,
     val scope: QuickFindEntityScope = QuickFindEntityScope.ALL
 ) {
@@ -31,6 +32,7 @@ data class QuickFindFilter(
             dateFilter != QuickFindDateFilter.ALL ||
             hasDeadlineOnly ||
             hasChecklistOnly ||
+            inProgressOnly ||
             tagId != null ||
             scope != QuickFindEntityScope.ALL
 
@@ -40,6 +42,7 @@ data class QuickFindFilter(
             dateFilter != QuickFindDateFilter.ALL ||
             hasDeadlineOnly ||
             hasChecklistOnly ||
+            inProgressOnly ||
             tagId != null
         ) {
             return false
@@ -57,6 +60,7 @@ data class QuickFindFilter(
     ): Boolean {
         if (task.isDeleted) return false
         if (scope == QuickFindEntityScope.PROJECTS) return false
+        if (inProgressOnly && !(task.status == TaskStatus.OPEN && task.isInProgress)) return false
         if (hideCompleted && task.status != TaskStatus.OPEN) return false
         if (hasDeadlineOnly && task.deadline == null) return false
         if (hasChecklistOnly && task.checklistItems.isEmpty()) return false
@@ -81,6 +85,7 @@ data class QuickFindFilter(
         if (project.isDeleted) return false
         if (scope == QuickFindEntityScope.TASKS) return false
         if (hasChecklistOnly) return false
+        if (inProgressOnly && (project.status != ProjectStatus.ACTIVE || project.inProgressTaskCount <= 0)) return false
         if (hideCompleted && project.status != ProjectStatus.ACTIVE) return false
         if (hasDeadlineOnly && project.deadline == null) return false
         if (tagId != null && tagId !in project.tagIds) return false

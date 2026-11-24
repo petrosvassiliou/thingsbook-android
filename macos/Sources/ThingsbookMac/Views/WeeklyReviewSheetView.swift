@@ -209,12 +209,14 @@ public struct WeeklyReviewSheetView: View {
                             status: task.status,
                             isSomeday: false,
                             isMilestone: task.isMilestone,
+                            isInProgress: task.isInProgress,
                             helpText: store.tr("macos_checkbox_help"),
                             onToggleComplete: {
                                 store.toggleTaskCompletion(task)
                                 showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
                             },
-                            onCancelTask: { store.cancelTask(task) }
+                            onCancelTask: { store.cancelTask(task) },
+                            onToggleInProgress: { store.toggleTaskInProgress(task) }
                         )
 
                         Button {
@@ -299,12 +301,14 @@ public struct WeeklyReviewSheetView: View {
                         status: task.status,
                         isSomeday: task.scheduleState == .someday,
                         isMilestone: task.isMilestone,
+                        isInProgress: task.isInProgress,
                         helpText: store.tr("macos_checkbox_help"),
                         onToggleComplete: {
                             store.toggleTaskCompletion(task)
                             showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
                         },
-                        onCancelTask: { store.cancelTask(task) }
+                        onCancelTask: { store.cancelTask(task) },
+                        onToggleInProgress: { store.toggleTaskInProgress(task) }
                     )
 
                     Button {
@@ -389,7 +393,11 @@ public struct WeeklyReviewSheetView: View {
                 let info = store.projectStalledInfo(project)
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
-                        ProjectProgressRing(progress: project.progress, size: 17)
+                        ProjectProgressRing(
+                            progress: project.progress,
+                            inProgressProgress: project.inProgressProgress,
+                            size: 17
+                        )
 
                         Button {
                             store.selectedDestination = .project(project.id)
@@ -496,12 +504,14 @@ public struct WeeklyReviewSheetView: View {
                         status: task.status,
                         isSomeday: true,
                         isMilestone: task.isMilestone,
+                        isInProgress: task.isInProgress,
                         helpText: store.tr("macos_checkbox_help"),
                         onToggleComplete: {
                             store.toggleTaskCompletion(task)
                             showReviewFeedback("\(displayTitle) → \(store.tr("action_complete"))")
                         },
-                        onCancelTask: { store.cancelTask(task) }
+                        onCancelTask: { store.cancelTask(task) },
+                        onToggleInProgress: { store.toggleTaskInProgress(task) }
                     )
 
                     Button {

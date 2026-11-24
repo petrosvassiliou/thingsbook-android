@@ -31,6 +31,7 @@ public struct TaskBentoModalView: View {
     @State private var isGeneratingChecklist = false
     @State private var isEditingNotes = false
     @State private var isFileDropTargeted = false
+    @State private var isHoveringInProgress = false
     @State private var isHoveringMilestone = false
     @State private var isHoveringPin = false
     @State private var isHoveringMic = false
@@ -208,6 +209,7 @@ public struct TaskBentoModalView: View {
                 status: current.status,
                 isSomeday: current.scheduleState == .someday,
                 isMilestone: current.isMilestone,
+                isInProgress: current.isInProgress,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     commitDraftEditsIfNeeded(commitPendingChecklist: true)
@@ -218,6 +220,11 @@ public struct TaskBentoModalView: View {
                     commitDraftEditsIfNeeded(commitPendingChecklist: true)
                     let fresh = latestTask
                     store.cancelTask(fresh)
+                },
+                onToggleInProgress: {
+                    commitDraftEditsIfNeeded(commitPendingChecklist: true)
+                    let fresh = latestTask
+                    store.toggleTaskInProgress(fresh)
                 }
             )
 
@@ -233,6 +240,48 @@ public struct TaskBentoModalView: View {
                 }
 
             Spacer(minLength: 8)
+
+            // In Progress Button
+            if current.status == .open {
+                Button {
+                    commitDraftEditsIfNeeded()
+                    let fresh = latestTask
+                    store.toggleTaskInProgress(fresh)
+                } label: {
+                    Image(systemName: "circle.lefthalf.filled")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(
+                            current.isInProgress
+                                ? ThingsMacPalette.somedayAmber
+                                : (isHoveringInProgress ? ThingsMacPalette.somedayAmber : .secondary)
+                        )
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .fill(
+                                    current.isInProgress
+                                        ? ThingsMacPalette.somedayAmber.opacity(isHoveringInProgress ? 0.22 : 0.14)
+                                        : (isHoveringInProgress ? ThingsMacPalette.somedayAmber.opacity(0.09) : ThingsMacPalette.subtleContainer)
+                                )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .strokeBorder(
+                                    current.isInProgress
+                                        ? ThingsMacPalette.somedayAmber.opacity(isHoveringInProgress ? 0.50 : 0.34)
+                                        : (isHoveringInProgress ? ThingsMacPalette.somedayAmber.opacity(0.38) : Color.primary.opacity(0.08)),
+                                    lineWidth: 0.8
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringInProgress = hovering
+                    }
+                }
+                .thingsTooltip(store.tr(current.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"))
+            }
 
             // Milestone Diamond Button
             Button {
@@ -909,6 +958,20 @@ public struct TaskBentoModalView: View {
                     let fresh = latestTask
                     store.setTasksMilestone([fresh.id], isMilestone: !fresh.isMilestone)
                 }
+
+                if current.status == .open {
+                    ThingsActionChipButton(
+                        title: store.tr(current.isInProgress ? "v33_in_progress_badge" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled",
+                        isActive: current.isInProgress,
+                        activeTint: ThingsMacPalette.somedayAmber,
+                        helpText: store.tr(current.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")
+                    ) {
+                        commitDraftEditsIfNeeded()
+                        let fresh = latestTask
+                        store.toggleTaskInProgress(fresh)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1418,6 +1481,9 @@ public struct TaskBentoModalView: View {
         }
         if parsed.isMilestone {
             copy.isMilestone = true
+        }
+        if parsed.isInProgress && copy.status == .open {
+            copy.isInProgress = true
         }
         if let proj = parsed.matchedProject {
             copy.projectId = proj.id

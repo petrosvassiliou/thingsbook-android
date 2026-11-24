@@ -1846,10 +1846,19 @@ export const App: React.FC = () => {
   );
 
   // Android v1.7.0 + v2.0 + v3.2 Zen Focus & actualMinutes Timer Callbacks
+  const tasksByIdRef = useRef(tasksByIdMap);
+  tasksByIdRef.current = tasksByIdMap;
+
   const handleStartFocusTimer = useCallback(
     (taskId: string, taskTitle: string, durationMinutes?: number | null) => {
       if (focusTimerRef.current) {
         flushFocusMinutes(focusTimerRef.current, true);
+      }
+      if (taskId) {
+        const live = tasksByIdRef.current.get(taskId);
+        if (live && !live.isDeleted && live.status === 'OPEN' && !live.isInProgress) {
+          void localDb.upsertTask({ id: taskId, isInProgress: true });
+        }
       }
       const mins =
         durationMinutes != null && Number.isFinite(durationMinutes) && durationMinutes > 0
@@ -2007,6 +2016,7 @@ export const App: React.FC = () => {
         durationMinutes: parsed.durationMinutes,
         tagIds: mergedTags,
         isMilestone: parsed.isMilestone,
+        isInProgress: parsed.isInProgress,
         projectId,
         areaId,
         sortOrder: computeMidpointSortOrder(
@@ -2155,6 +2165,7 @@ export const App: React.FC = () => {
       let areaId: string | null = null;
       let extraTagIds: string[] = [];
       let initialEffortLevel: EffortLevel | null = null;
+      let initialInProgress = false;
       const isLogbookRedirect =
         activeNav.kind === 'smart' &&
         (activeNav.view === 'LOGBOOK' || activeNav.view === 'TRASH');
@@ -2199,6 +2210,7 @@ export const App: React.FC = () => {
           areaId = persp.areaId;
           extraTagIds = persp.categoryIds;
           initialEffortLevel = persp.effortLevel;
+          initialInProgress = Boolean(persp.inProgressOnly);
           if (
             persp.dueWindow === 'TODAY' ||
             persp.dueWindow === 'OVERDUE' ||
@@ -2253,6 +2265,7 @@ export const App: React.FC = () => {
         areaId,
         tagIds: mergedTags,
         effortLevel: initialEffortLevel,
+        ...(initialInProgress ? { isInProgress: true } : {}),
         sortOrder: topSortOrder
       });
 
@@ -2326,6 +2339,7 @@ export const App: React.FC = () => {
       let areaId: string | null = null;
       let extraTagIds: string[] = [];
       let initialEffortLevel: EffortLevel | null = null;
+      let initialInProgress = false;
 
       if (activeNav.kind === 'smart') {
         if (activeNav.view === 'TODAY') {
@@ -2372,6 +2386,7 @@ export const App: React.FC = () => {
           areaId = persp.areaId;
           extraTagIds = persp.categoryIds;
           initialEffortLevel = persp.effortLevel;
+          initialInProgress = Boolean(persp.inProgressOnly);
           if (
             persp.dueWindow === 'TODAY' ||
             persp.dueWindow === 'OVERDUE' ||
@@ -2401,6 +2416,7 @@ export const App: React.FC = () => {
           new Set([...extraTagIds, ...(selectedFilterTagId ? [selectedFilterTagId] : [])])
         ),
         effortLevel: initialEffortLevel,
+        ...(initialInProgress ? { isInProgress: true } : {}),
         sortOrder
       });
 
@@ -3245,6 +3261,7 @@ export const App: React.FC = () => {
           heading: HeadingRecord;
           project: ProjectRecord;
           done: number;
+          inProgress: number;
           total: number;
         }>;
       }
@@ -3285,10 +3302,14 @@ export const App: React.FC = () => {
           tk.status !== 'CANCELED'
       );
       const done = phaseTasks.filter((tk) => tk.status === 'COMPLETED').length;
+      const inProgress = phaseTasks.filter(
+        (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+      ).length;
       ensureBucket(phaseDay).phases.push({
         heading: hd,
         project: proj,
         done,
+        inProgress,
         total: phaseTasks.length
       });
     }
@@ -3664,11 +3685,22 @@ export const App: React.FC = () => {
             tags={snapshot.tags}
             activeProject={activeProjectRecord}
             activeArea={activeAreaRecord}
+            selectedTask={
+              expandedTaskId
+                ? (tasksByIdMap.get(expandedTaskId) ?? null)
+                : selectedInspectorTask
+            }
             focusTimer={focusTimer}
             lang={lang}
             t={t}
             onNavigate={(nav, highlightId) => handleSelectNav(nav, highlightId)}
             onCreateSmartTask={(parsed) => void handleCreateSmartTaskFromPalette(parsed)}
+            onToggleSelectedTaskInProgress={() => {
+              const targetId = expandedTaskId ?? selectedInspectorTask?.id ?? null;
+              if (targetId) {
+                void localDb.toggleTaskInProgress(targetId);
+              }
+            }}
             onPlanMyDay={() => {
               setGeminiModalTab('planday');
               setGeminiModalOpen(true);
@@ -4447,6 +4479,7 @@ export const App: React.FC = () => {
                                 </div>
                                 <ProjectProgressRing
                                   completed={ph.done}
+                                  inProgress={ph.inProgress}
                                   total={ph.total}
                                   size={16}
                                   showCount
@@ -4787,6 +4820,9 @@ export const App: React.FC = () => {
                               const pDone = pTasks.filter(
                                 (tk) => tk.status === 'COMPLETED'
                               ).length;
+                              const pInProgress = pTasks.filter(
+                                (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+                              ).length;
                               const dlDiff =
                                 proj.deadline != null ? daysBetweenToday(proj.deadline) : null;
 
@@ -4808,6 +4844,7 @@ export const App: React.FC = () => {
                                   >
                                     <ProjectProgressRing
                                       completed={pDone}
+                                      inProgress={pInProgress}
                                       total={pTasks.length}
                                       size={20}
                                     />
@@ -4825,6 +4862,9 @@ export const App: React.FC = () => {
                                       </div>
                                       <div style={{ fontSize: 11.8, color: 'var(--text-muted)' }}>
                                         {pDone}/{pTasks.length} • {t.entityTodos}
+                                        {pInProgress > 0
+                                          ? ` • ◐ ${t.v33ProjectInProgressCount(pInProgress)}`
+                                          : ''}
                                       </div>
                                     </div>
                                   </button>
@@ -4936,6 +4976,9 @@ export const App: React.FC = () => {
               const doneProjTasks = allProjTasks.filter(
                 (tk) => tk.status === 'COMPLETED'
               ).length;
+              const inProgressProjTasks = allProjTasks.filter(
+                (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+              ).length;
 
               const projHeadings = snapshot.headings.filter(
                 (h) => !h.isDeleted && !h.isArchived && h.projectId === project.id
@@ -4964,6 +5007,7 @@ export const App: React.FC = () => {
                         <div className="view-title-left project-title-left">
                           <ProjectProgressRing
                             completed={doneProjTasks}
+                            inProgress={inProgressProjTasks}
                             total={allProjTasks.length}
                             size={26}
                             isProjectCompleted={project.status === 'COMPLETED'}
@@ -4974,6 +5018,14 @@ export const App: React.FC = () => {
                           >
                             {project.title}
                           </h1>
+                          {project.status === 'ACTIVE' && inProgressProjTasks > 0 && (
+                            <span
+                              className="meta-badge in-progress-badge"
+                              data-testid="project-header-in-progress-count"
+                            >
+                              <span>◐ {t.v33ProjectInProgressCount(inProgressProjTasks)}</span>
+                            </span>
+                          )}
                           {stalledStatus.isStalled && (
                             <button
                               type="button"
@@ -5697,6 +5749,9 @@ export const App: React.FC = () => {
                         const doneHdTasks = allHdTasks.filter(
                           (tk) => tk.status === 'COMPLETED'
                         ).length;
+                        const inProgressHdTasks = allHdTasks.filter(
+                          (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+                        ).length;
                         const hdEndDiff =
                           hd.endDate != null ? daysBetweenToday(hd.endDate) : null;
                         const isPhaseOverdue =
@@ -5837,6 +5892,7 @@ export const App: React.FC = () => {
                                   {allHdTasks.length > 0 && (
                                     <ProjectProgressRing
                                       completed={doneHdTasks}
+                                      inProgress={inProgressHdTasks}
                                       total={allHdTasks.length}
                                       size={14}
                                       showCount
@@ -6107,6 +6163,11 @@ export const App: React.FC = () => {
                           <span>{tg.title}</span>
                         </span>
                       ))}
+                      {persp.inProgressOnly && (
+                        <span className="meta-badge in-progress-badge">
+                          <span>◐ {t.v33FilterInProgressOnly}</span>
+                        </span>
+                      )}
                       {persp.actionableOnly && (
                         <span className="meta-badge">
                           <span>✓ {t.perspectiveActionableOnlyLabel}</span>
@@ -6205,6 +6266,12 @@ export const App: React.FC = () => {
           const allSelectedPinned =
             selectedTaskIds.length > 0 &&
             selectedTaskIds.every((id) => Boolean(tasksByIdMap.get(id)?.isPinned));
+          const openSelectedIds = selectedTaskIds.filter(
+            (id) => tasksByIdMap.get(id)?.status === 'OPEN'
+          );
+          const allSelectedInProgress =
+            openSelectedIds.length > 0 &&
+            openSelectedIds.every((id) => Boolean(tasksByIdMap.get(id)?.isInProgress));
           return (
             <div className="multi-select-bar" onClick={(e) => e.stopPropagation()}>
               <span className="multi-count-pill">
@@ -6299,6 +6366,25 @@ export const App: React.FC = () => {
                 {allSelectedPinned ? <PinOff size={12} /> : <Pin size={12} />}
                 <span>{allSelectedPinned ? t.unpinTask : t.batchPin}</span>
               </button>
+
+              {openSelectedIds.length > 0 && (
+                <button
+                  type="button"
+                  className={`chip-btn ${allSelectedInProgress ? 'in-progress-active' : ''}`}
+                  data-testid="multi-select-in-progress-btn"
+                  title={allSelectedInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                  onClick={() => {
+                    void localDb.batchUpdateTasks(openSelectedIds, {
+                      isInProgress: !allSelectedInProgress
+                    });
+                  }}
+                >
+                  <span aria-hidden="true">◐</span>
+                  <span>
+                    {allSelectedInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                  </span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -7003,6 +7089,7 @@ export const App: React.FC = () => {
               durationMinutes: payload.durationMinutes ?? null,
               tagIds: payload.tagIds ?? [],
               isMilestone: payload.isMilestone,
+              isInProgress: payload.isInProgress,
               projectId: payload.projectId,
               areaId: payload.projectId ? null : payload.areaId,
               sortOrder: computeMidpointSortOrder(

@@ -287,7 +287,8 @@ export function normalizeTask(raw: TaskRecord): TaskRecord {
   return {
     ...raw,
     isPinned: Boolean(raw.isPinned),
-    isMilestone: Boolean(raw.isMilestone)
+    isMilestone: Boolean(raw.isMilestone),
+    isInProgress: raw.status === 'OPEN' && !raw.isDeleted && Boolean(raw.isInProgress)
   };
 }
 
@@ -502,6 +503,7 @@ export class ThingsLocalDb {
         actualMinutes: null,
         isPinned: false,
         isMilestone: false,
+        isInProgress: false,
         effortLevel: null,
         blockedByTaskIds: [],
         workspaceId: null,
@@ -557,6 +559,8 @@ export class ThingsLocalDb {
           isPinned: enrich.isPinned !== undefined ? enrich.isPinned : winner.isPinned,
           isMilestone:
             enrich.isMilestone !== undefined ? enrich.isMilestone : Boolean(winner.isMilestone),
+          isInProgress:
+            enrich.isInProgress !== undefined ? enrich.isInProgress : Boolean(winner.isInProgress),
           effortLevel:
             enrich.effortLevel !== undefined ? enrich.effortLevel : winner.effortLevel,
           updatedAt: Math.max(now, winner.updatedAt + 1, enrich.minUpdatedAt),
@@ -774,6 +778,7 @@ export class ThingsLocalDb {
     actualMinutes?: number | null;
     isPinned?: boolean;
     isMilestone?: boolean;
+    isInProgress?: boolean;
     effortLevel?: EffortLevel | null;
     blockedByTaskIds?: string[];
     workspaceId?: string | null;
@@ -974,6 +979,12 @@ export class ThingsLocalDb {
         params.isMilestone !== undefined
           ? Boolean(params.isMilestone)
           : (existing?.isMilestone ?? false),
+      isInProgress:
+        status === 'OPEN'
+          ? params.isInProgress !== undefined
+            ? Boolean(params.isInProgress)
+            : Boolean(existing?.isInProgress)
+          : false,
       effortLevel: resolvedEffort,
       blockedByTaskIds: resolvedBlockedBy,
       workspaceId: resolvedWorkspaceId,
@@ -1064,6 +1075,7 @@ export class ThingsLocalDb {
     actualMinutes?: number | null;
     isPinned?: boolean;
     isMilestone?: boolean;
+    isInProgress?: boolean;
     effortLevel?: EffortLevel | null;
     blockedByTaskIds?: string[];
     workspaceId?: string | null;
@@ -1082,6 +1094,26 @@ export class ThingsLocalDb {
       await this.refreshSnapshot();
       this.triggerSync();
       return record;
+    });
+  }
+
+  async toggleTaskInProgress(taskId: string): Promise<boolean> {
+    if (!taskId) return false;
+    return this.enqueueWrite(async () => {
+      const db = await this.getDb();
+      const existing = (await db.get('tasks', taskId)) as TaskRecord | undefined;
+      if (!existing || existing.isDeleted || existing.status !== 'OPEN') {
+        return false;
+      }
+      const next = !existing.isInProgress;
+      await this.upsertTaskUnlocked({
+        id: taskId,
+        isInProgress: next,
+        suppressUndo: true
+      });
+      await this.refreshSnapshot();
+      this.triggerSync();
+      return next;
     });
   }
 
@@ -1107,6 +1139,7 @@ export class ThingsLocalDb {
       await tx.store.put({
         ...existing,
         actualMinutes: nextActual,
+        isInProgress: existing.status === 'OPEN',
         updatedAt: Math.max(now, existing.updatedAt + 1),
         isDirty: true
       } satisfies TaskRecord);
@@ -1127,6 +1160,7 @@ export class ThingsLocalDb {
       actualMinutes?: number | null;
       isPinned?: boolean;
       isMilestone?: boolean;
+      isInProgress?: boolean;
       effortLevel?: EffortLevel | null;
       blockedByTaskIds?: string[];
       workspaceId?: string | null;
@@ -1442,6 +1476,7 @@ export class ThingsLocalDb {
       deadline: nextDeadline,
       reminderTime: nextReminder,
       isPinned: false,
+      isInProgress: false,
       blockedByTaskIds: [],
       sortOrder: completedTask.sortOrder + 0.01,
       createdAt: existingById?.createdAt ?? now,
@@ -1488,7 +1523,8 @@ export class ThingsLocalDb {
         (primary.whenDate ?? 0) < nextWhen ||
         primary.areaId !== nextArea ||
         primary.scheduledStartMinutes !== nextStartMin ||
-        primary.durationMinutes !== nextDurMin;
+        primary.durationMinutes !== nextDurMin ||
+        Boolean(primary.isInProgress);
 
       if (needsTaskUpdate) {
         await db.put('tasks', {
@@ -1502,6 +1538,7 @@ export class ThingsLocalDb {
           scheduledStartMinutes: nextStartMin,
           durationMinutes: nextDurMin,
           actualMinutes: (primary.whenDate ?? 0) < nextWhen ? null : (primary.actualMinutes ?? null),
+          isInProgress: false,
           updatedAt: Math.max(now, primary.updatedAt + 1),
           isDirty: true
         });
@@ -1848,6 +1885,7 @@ export class ThingsLocalDb {
           scheduledStartMinutes: null,
           durationMinutes: null,
           actualMinutes: null,
+          isInProgress: false,
           recurrenceRule: null,
           tagIds: [],
           projectId: null,
@@ -1912,6 +1950,7 @@ export class ThingsLocalDb {
               scheduledStartMinutes: null,
               durationMinutes: null,
               actualMinutes: null,
+              isInProgress: false,
               recurrenceRule: null,
               tagIds: [],
               projectId: null,
@@ -2037,6 +2076,7 @@ export class ThingsLocalDb {
             scheduledStartMinutes: null,
             durationMinutes: null,
             actualMinutes: null,
+            isInProgress: false,
             recurrenceRule: null,
             tagIds: [],
             isDeleted: true,
@@ -2202,6 +2242,7 @@ export class ThingsLocalDb {
           reminderTime: src.reminderTime != null && src.reminderTime > now ? src.reminderTime : null,
           isPinned: Boolean(src.isPinned),
           isMilestone: Boolean(src.isMilestone),
+          isInProgress: false,
           effortLevel: src.effortLevel ?? null,
           blockedByTaskIds: safeParseBlockedByTaskIds(src.blockedByTaskIds, newId),
           workspaceId: src.workspaceId ?? null,
@@ -2347,18 +2388,32 @@ export class ThingsLocalDb {
   ): Promise<void> {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
-      const tx = db.transaction('checklist_items', 'readwrite');
-      const existing = (await tx.store.get(itemId)) as ChecklistItemRecord | undefined;
+      const now = Date.now();
+      const tx = db.transaction(['checklist_items', 'tasks'], 'readwrite');
+      const chkStore = tx.objectStore('checklist_items');
+      const existing = (await chkStore.get(itemId)) as ChecklistItemRecord | undefined;
       if (!existing) {
         await tx.done;
         return;
       }
-      await tx.store.put({
+      await chkStore.put({
         ...existing,
         ...patch,
-        updatedAt: Date.now(),
+        updatedAt: now,
         isDirty: true
       });
+      if (!existing.isCompleted && patch.isCompleted === true) {
+        const taskStore = tx.objectStore('tasks');
+        const task = (await taskStore.get(existing.taskId)) as TaskRecord | undefined;
+        if (task && !task.isDeleted && task.status === 'OPEN' && !task.isInProgress) {
+          await taskStore.put({
+            ...task,
+            isInProgress: true,
+            updatedAt: Math.max(now, task.updatedAt + 1),
+            isDirty: true
+          });
+        }
+      }
       await tx.done;
       await this.refreshSnapshot();
       this.triggerSync();
@@ -3477,6 +3532,7 @@ export class ThingsLocalDb {
               ...t,
               status: 'COMPLETED',
               completedAt: now,
+              isInProgress: false,
               updatedAt: Math.max(now, t.updatedAt + 1),
               isDirty: true
             } satisfies TaskRecord);
@@ -3582,6 +3638,7 @@ export class ThingsLocalDb {
             actualMinutes: null,
             reminderTime: null,
             isMilestone: Boolean(t.isMilestone),
+            isInProgress: false,
             createdAt: now,
             updatedAt: now,
             isDeleted: false,
@@ -4346,6 +4403,7 @@ export class ThingsLocalDb {
             reminderTime: null,
             scheduledStartMinutes: null,
             durationMinutes: null,
+            isInProgress: false,
             recurrenceRule: null,
             tagIds: [],
             isDeleted: true,
@@ -4855,6 +4913,7 @@ export class ThingsLocalDb {
             omittedActualMinutesField,
             omittedPinnedField,
             omittedMilestoneField,
+            omittedInProgressField,
             omittedV30TaskFields,
             omittedEffortField,
             omittedBlockedByField,
@@ -4916,6 +4975,12 @@ export class ThingsLocalDb {
               : omittedMilestoneField
                 ? (local?.isMilestone ?? false)
                 : Boolean(remote.isMilestone);
+            const resolvedInProgress =
+              remote.isDeleted || remote.status !== 'OPEN'
+                ? false
+                : omittedInProgressField && local !== undefined
+                  ? Boolean(local.isInProgress)
+                  : Boolean(remote.isInProgress);
 
             const resolvedEffort = remote.isDeleted
               ? null
@@ -4975,6 +5040,7 @@ export class ThingsLocalDb {
               actualMinutes: resolvedActualMinutes,
               isPinned: resolvedPinned,
               isMilestone: resolvedMilestone,
+              isInProgress: resolvedInProgress,
               effortLevel: resolvedEffort,
               blockedByTaskIds: resolvedBlockedBy,
               workspaceId: resolvedWorkspaceId,

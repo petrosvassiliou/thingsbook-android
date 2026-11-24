@@ -662,4 +662,10 @@
     <string name="v32_actual_vs_estimated">Enfoque %1$s / %2$s</string>
     <string name="v32_logbook_focused_7d">Enfoque (7d): %1$s</string>
     <string name="v32_reset_actual_time">Restablecer tiempo registrado</string>
+    <string name="v33_in_progress_badge">En curso</string>
+    <string name="v33_mark_in_progress">Marcar en curso</string>
+    <string name="v33_clear_in_progress">Quitar «En curso»</string>
+    <string name="v33_filter_in_progress_only">Solo en curso</string>
+    <string name="v33_project_in_progress_count">%1$d en curso</string>
+    <string name="v33_cmd_toggle_in_progress">Alternar «En curso» en la tarea seleccionada</string>
 </resources>

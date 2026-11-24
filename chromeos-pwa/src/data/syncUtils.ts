@@ -128,6 +128,7 @@ export type RecurringDedupCandidate = Pick<
 > & {
   isPinned?: boolean;
   isMilestone?: boolean;
+  isInProgress?: boolean;
   effortLevel?: EffortLevel | null;
   deadline?: number | null;
   reminderTime?: number | null;
@@ -146,6 +147,7 @@ export interface RecurringWinnerEnrichment {
   reminderTime?: number | null;
   isPinned?: boolean;
   isMilestone?: boolean;
+  isInProgress?: boolean;
   effortLevel?: EffortLevel | null;
   minUpdatedAt: number;
 }
@@ -372,6 +374,10 @@ export function planRecurringDeduplication(
     }
     if (!winner.isMilestone && losers.some((l) => Boolean(l.isMilestone))) {
       patch.isMilestone = true;
+      changed = true;
+    }
+    if (!winner.isInProgress && losers.some((l) => Boolean(l.isInProgress))) {
+      patch.isInProgress = true;
       changed = true;
     }
     if (winner.effortLevel == null) {
@@ -955,6 +961,7 @@ export function taskToFirestoreMap(task: TaskRecord): Record<string, unknown> {
         : null,
     isPinned: !task.isDeleted && Boolean(task.isPinned),
     isMilestone: Boolean(task.isMilestone),
+    isInProgress: !task.isDeleted && task.status === 'OPEN' && Boolean(task.isInProgress),
     effortLevel: task.isDeleted ? null : (task.effortLevel ?? null),
     blockedByTaskIds: task.isDeleted
       ? []
@@ -980,6 +987,7 @@ export type RemoteTaskWithHints = TaskRecord & {
   omittedActualMinutesField?: boolean;
   omittedPinnedField?: boolean;
   omittedMilestoneField?: boolean;
+  omittedInProgressField?: boolean;
   omittedV30TaskFields?: boolean;
   omittedEffortField?: boolean;
   omittedBlockedByField?: boolean;
@@ -1025,6 +1033,7 @@ export function taskFromFirestoreMap(
       : null;
   const omittedPinnedField = !Object.prototype.hasOwnProperty.call(map, 'isPinned');
   const omittedMilestoneField = typeof map.isMilestone !== 'boolean';
+  const omittedInProgressField = !Object.prototype.hasOwnProperty.call(map, 'isInProgress');
   const omittedEffortField = !Object.prototype.hasOwnProperty.call(map, 'effortLevel');
   const omittedBlockedByField = !Object.prototype.hasOwnProperty.call(map, 'blockedByTaskIds');
   const omittedWorkspaceField = !Object.prototype.hasOwnProperty.call(map, 'workspaceId');
@@ -1035,12 +1044,13 @@ export function taskFromFirestoreMap(
     typeof map.isMilestone === 'boolean'
       ? map.isMilestone
       : (existingLocal?.isMilestone ?? false);
+  const resolvedStatus = normalizeTaskStatus(typeof map.status === 'string' ? map.status : 'OPEN');
 
   return {
     id,
     title,
     notes,
-    status: normalizeTaskStatus(typeof map.status === 'string' ? map.status : 'OPEN'),
+    status: resolvedStatus,
     scheduleState: normalizeScheduleState(
       typeof map.scheduleState === 'string' ? map.scheduleState : 'INBOX',
       'INBOX'
@@ -1053,6 +1063,7 @@ export function taskFromFirestoreMap(
     actualMinutes: isDeleted ? null : actualMinutes,
     isPinned: Boolean(map.isPinned),
     isMilestone: resolvedIsMilestone,
+    isInProgress: !isDeleted && resolvedStatus === 'OPEN' && Boolean(map.isInProgress),
     effortLevel: normalizeEffortLevel(map.effortLevel),
     blockedByTaskIds: safeParseBlockedByTaskIds(map.blockedByTaskIds, id),
     workspaceId: syncNullableString(map.workspaceId),
@@ -1073,6 +1084,7 @@ export function taskFromFirestoreMap(
     ...(omittedActualMinutesField ? { omittedActualMinutesField: true } : {}),
     ...(omittedPinnedField ? { omittedPinnedField: true } : {}),
     ...(omittedMilestoneField ? { omittedMilestoneField: true } : {}),
+    ...(omittedInProgressField ? { omittedInProgressField: true } : {}),
     ...(omittedV30TaskFields ? { omittedV30TaskFields: true } : {}),
     ...(omittedEffortField && !omittedV30TaskFields ? { omittedEffortField: true } : {}),
     ...(omittedBlockedByField && !omittedV30TaskFields ? { omittedBlockedByField: true } : {}),

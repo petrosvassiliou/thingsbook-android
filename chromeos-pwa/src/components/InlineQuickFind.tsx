@@ -81,11 +81,13 @@ interface InlineQuickFindProps {
   tags: TagRecord[];
   activeProject?: ProjectRecord | null;
   activeArea?: AreaRecord | null;
+  selectedTask?: TaskRecord | null;
   focusTimer?: FocusTimerUiState | null;
   lang: SupportedLang;
   t: TranslationStrings;
   onNavigate: (nav: ActiveNavigation, highlightTaskId?: string) => void;
   onCreateSmartTask?: (parsed: ParsedSmartSyntax) => void;
+  onToggleSelectedTaskInProgress?: () => void;
   onPlanMyDay?: () => void;
   onOpenAiArchitect?: () => void;
   onOpenWeeklyReview?: () => void;
@@ -107,11 +109,13 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
   tags,
   activeProject = null,
   activeArea = null,
+  selectedTask = null,
   focusTimer = null,
   lang,
   t,
   onNavigate,
   onCreateSmartTask,
+  onToggleSelectedTaskInProgress,
   onPlanMyDay,
   onOpenAiArchitect,
   onOpenWeeklyReview,
@@ -149,6 +153,15 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
     }
     return s;
   }, [checklistItems]);
+  const projectHasInProgressSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const tk of tasks) {
+      if (!tk.isDeleted && tk.status === 'OPEN' && tk.isInProgress && tk.projectId) {
+        s.add(tk.projectId);
+      }
+    }
+    return s;
+  }, [tasks]);
 
   const trimmedQuery = query.trim();
   const isCommandMode = query.trimStart().startsWith('>');
@@ -178,6 +191,37 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
 
   const allQuickActions = useMemo<CommandPaletteActionItem[]>(() => {
     const items: CommandPaletteActionItem[] = [];
+
+    if (
+      selectedTask &&
+      !selectedTask.isDeleted &&
+      selectedTask.status === 'OPEN' &&
+      onToggleSelectedTaskInProgress
+    ) {
+      items.push({
+        id: 'toggle-in-progress',
+        label: t.v33CmdToggleInProgress,
+        keywords: 'in progress wip doing active toggle mark clear arbeit encours incorso encurso',
+        icon: (
+          <span
+            style={{
+              color: 'var(--in-progress-amber-ring)',
+              fontSize: 15,
+              lineHeight: 1,
+              width: 15,
+              textAlign: 'center'
+            }}
+            aria-hidden="true"
+          >
+            ◐
+          </span>
+        ),
+        onRun: () => {
+          onToggleSelectedTaskInProgress();
+          onClose();
+        }
+      });
+    }
 
     if (onPlanMyDay) {
       items.push({
@@ -348,7 +392,9 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
     t,
     activeProject,
     activeArea,
+    selectedTask,
     focusTimer,
+    onToggleSelectedTaskInProgress,
     onPlanMyDay,
     onOpenAiArchitect,
     onOpenWeeklyReview,
@@ -399,7 +445,9 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
 
   const matchedProjects = useMemo(() => {
     if (isCommandMode) return [];
-    const filtered = projects.filter((p) => matchesQuickFindProject(p, filter, referenceNowMs));
+    const filtered = projects.filter((p) =>
+      matchesQuickFindProject(p, filter, referenceNowMs, projectHasInProgressSet.has(p.id))
+    );
     if (!q) return hasFilters ? filtered.slice(0, 25) : filtered.slice(0, 8);
     return filtered
       .filter(
@@ -409,7 +457,16 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
           (p.areaId && (areasMap.get(p.areaId)?.title.toLowerCase().includes(q) ?? false))
       )
       .slice(0, 25);
-  }, [projects, areasMap, q, filter, hasFilters, referenceNowMs, isCommandMode]);
+  }, [
+    projects,
+    areasMap,
+    q,
+    filter,
+    hasFilters,
+    referenceNowMs,
+    isCommandMode,
+    projectHasInProgressSet
+  ]);
 
   const matchedTasks = useMemo(() => {
     if (isCommandMode) return [];
@@ -672,6 +729,19 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
             <span>{t.searchFilterHideCompleted}</span>
           </button>
 
+          <button
+            type="button"
+            data-testid="qf-filter-in-progress"
+            className={`inline-qf-chip ${filter.inProgressOnly ? 'active' : ''}`}
+            onClick={() => {
+              setFilter((f) => ({ ...f, inProgressOnly: !f.inProgressOnly }));
+              setActiveIndex(0);
+            }}
+          >
+            <span aria-hidden="true">◐</span>
+            <span>{t.v33FilterInProgressOnly}</span>
+          </button>
+
           <select
             className={`inline-qf-select ${filter.dateFilter !== 'ALL' ? 'active' : ''}`}
             value={filter.dateFilter}
@@ -818,6 +888,11 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
                         <span className="meta-badge milestone-badge">
                           <Diamond size={10} />
                           <span>{t.milestoneLabel}</span>
+                        </span>
+                      )}
+                      {parsedSmart.isInProgress && (
+                        <span className="meta-badge in-progress-badge">
+                          <span>◐ {t.v33InProgressBadge}</span>
                         </span>
                       )}
                       {parsedSmart.matchedProject && (
@@ -974,6 +1049,9 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
                   (tk) => !tk.isDeleted && tk.projectId === proj.id && tk.status !== 'CANCELED'
                 );
                 const done = projTasks.filter((tk) => tk.status === 'COMPLETED').length;
+                const inProg = projTasks.filter(
+                  (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+                ).length;
                 const area = proj.areaId ? areasMap.get(proj.areaId) : undefined;
                 return (
                   <button
@@ -997,6 +1075,7 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
                       >
                         <ProjectProgressRing
                           completed={done}
+                          inProgress={inProg}
                           total={projTasks.length}
                           size={16}
                           isProjectCompleted={proj.status === 'COMPLETED'}
@@ -1004,6 +1083,11 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
                         <span>{proj.title}</span>
                       </span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {inProg > 0 && proj.status === 'ACTIVE' && (
+                          <span className="meta-badge in-progress-badge">
+                            <span>◐ {t.v33ProjectInProgressCount(inProg)}</span>
+                          </span>
+                        )}
                         <span className="meta-badge">
                           <Folder size={10.5} />
                           <span>
@@ -1109,6 +1193,14 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
 
                     {/* Row 2: Container, When, Reminder, Repeat, Deadline, Checklist, Tags */}
                     <div className="inline-qf-row-meta">
+                      {tk.status === 'OPEN' && tk.isInProgress && (
+                        <span
+                          className="meta-badge in-progress-badge"
+                          data-testid="qf-task-in-progress-pill"
+                        >
+                          <span>◐ {t.v33InProgressBadge}</span>
+                        </span>
+                      )}
                       {containerText && <span className="meta-badge">{containerText}</span>}
                       {tk.whenDate != null && (
                         <span className="meta-badge">

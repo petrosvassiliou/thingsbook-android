@@ -578,6 +578,12 @@ export interface TranslationStrings {
   inspectorOverviewTitle: string;
   inspectorUpcomingDeadlines: string;
   inspectorToggleTooltip: string;
+  v33InProgressBadge: string;
+  v33MarkInProgress: string;
+  v33ClearInProgress: string;
+  v33FilterInProgressOnly: string;
+  v33ProjectInProgressCount: (n: number) => string;
+  v33CmdToggleInProgress: string;
 }
 
 export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
@@ -1165,7 +1171,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     inspectorTitle: 'Inspector',
     inspectorOverviewTitle: 'Overview',
     inspectorUpcomingDeadlines: 'Upcoming Deadlines & Milestones',
-    inspectorToggleTooltip: 'Toggle Inspector Panel'
+    inspectorToggleTooltip: 'Toggle Inspector Panel',
+    v33InProgressBadge: 'In Progress',
+    v33MarkInProgress: 'Mark In Progress',
+    v33ClearInProgress: 'Clear In Progress',
+    v33FilterInProgressOnly: 'In Progress Only',
+    v33ProjectInProgressCount: (n) => `${n} in progress`,
+    v33CmdToggleInProgress: 'Toggle In Progress on Selected Task'
   },
   de: {
     appName: 'Thingsbook',
@@ -1755,7 +1767,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     inspectorTitle: 'Inspektor',
     inspectorOverviewTitle: 'Übersicht',
     inspectorUpcomingDeadlines: 'Anstehende Fristen & Meilensteine',
-    inspectorToggleTooltip: 'Inspektor-Seitenleiste ein-/ausblenden'
+    inspectorToggleTooltip: 'Inspektor-Seitenleiste ein-/ausblenden',
+    v33InProgressBadge: 'In Arbeit',
+    v33MarkInProgress: 'Als „In Arbeit“ markieren',
+    v33ClearInProgress: '„In Arbeit“ aufheben',
+    v33FilterInProgressOnly: 'Nur „In Arbeit“',
+    v33ProjectInProgressCount: (n) => `${n} in Arbeit`,
+    v33CmdToggleInProgress: '„In Arbeit“ für gewählte Aufgabe umschalten'
   },
   fr: {
     appName: 'Thingsbook',
@@ -2345,7 +2363,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     inspectorTitle: 'Inspecteur',
     inspectorOverviewTitle: 'Aperçu',
     inspectorUpcomingDeadlines: 'Échéances & jalons à venir',
-    inspectorToggleTooltip: 'Afficher/masquer le panneau Inspecteur'
+    inspectorToggleTooltip: 'Afficher/masquer le panneau Inspecteur',
+    v33InProgressBadge: 'En cours',
+    v33MarkInProgress: 'Marquer en cours',
+    v33ClearInProgress: 'Retirer « En cours »',
+    v33FilterInProgressOnly: 'En cours uniquement',
+    v33ProjectInProgressCount: (n) => `${n} en cours`,
+    v33CmdToggleInProgress: 'Basculer « En cours » sur la tâche sélectionnée'
   },
   it: {
     appName: 'Thingsbook',
@@ -2934,7 +2958,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     inspectorTitle: 'Ispettore',
     inspectorOverviewTitle: 'Panoramica',
     inspectorUpcomingDeadlines: 'Scadenze e traguardi imminenti',
-    inspectorToggleTooltip: 'Mostra/nascondi pannello Ispettore'
+    inspectorToggleTooltip: 'Mostra/nascondi pannello Ispettore',
+    v33InProgressBadge: 'In corso',
+    v33MarkInProgress: 'Segna in corso',
+    v33ClearInProgress: 'Rimuovi «In corso»',
+    v33FilterInProgressOnly: 'Solo in corso',
+    v33ProjectInProgressCount: (n) => `${n} in corso`,
+    v33CmdToggleInProgress: 'Attiva/disattiva «In corso» sull’attività selezionata'
   },
   es: {
     appName: 'Thingsbook',
@@ -3524,7 +3554,13 @@ export const TRANSLATIONS: Record<SupportedLang, TranslationStrings> = {
     inspectorTitle: 'Inspector',
     inspectorOverviewTitle: 'Resumen',
     inspectorUpcomingDeadlines: 'Próximas fechas límite e hitos',
-    inspectorToggleTooltip: 'Mostrar/ocultar panel Inspector'
+    inspectorToggleTooltip: 'Mostrar/ocultar panel Inspector',
+    v33InProgressBadge: 'En curso',
+    v33MarkInProgress: 'Marcar en curso',
+    v33ClearInProgress: 'Quitar «En curso»',
+    v33FilterInProgressOnly: 'Solo en curso',
+    v33ProjectInProgressCount: (n) => `${n} en curso`,
+    v33CmdToggleInProgress: 'Alternar «En curso» en la tarea seleccionada'
   }
 };
 

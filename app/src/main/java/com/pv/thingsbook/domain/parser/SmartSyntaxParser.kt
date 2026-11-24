@@ -22,6 +22,7 @@ data class ParsedSmartSyntax(
     val matchedProject: Project? = null,
     val matchedArea: Area? = null,
     val isMilestone: Boolean = false,
+    val isInProgress: Boolean = false,
     val hasAnyMatch: Boolean = false
 )
 
@@ -40,6 +41,26 @@ data class ParsedSmartSyntax(
 object SmartSyntaxParser {
 
     private val MULTI_SPACE_REGEX = Regex("""\s+""")
+
+    private val IN_PROGRESS_SMART_TOKENS = setOf(
+        "wip",
+        "inprogress",
+        "in-progress",
+        "doing",
+        "in progress",
+        "inarbeit",
+        "in-arbeit",
+        "in arbeit",
+        "encours",
+        "en-cours",
+        "en cours",
+        "incorso",
+        "in-corso",
+        "in corso",
+        "encurso",
+        "en-curso",
+        "en curso"
+    )
 
     fun parse(
         rawTitle: String,
@@ -71,6 +92,7 @@ object SmartSyntaxParser {
         var resolvedProject: Project? = null
         var resolvedArea: Area? = null
         var resolvedMilestone = false
+        var resolvedInProgress = false
         val strippedSpans = mutableListOf<IntRange>()
 
         var index = 0
@@ -88,6 +110,14 @@ object SmartSyntaxParser {
             // Standalone ◆ milestone symbol
             if (ch == '◆' && (index + 1 == len || rawTitle[index + 1].isWhitespace())) {
                 resolvedMilestone = true
+                strippedSpans += index..index
+                index += 1
+                continue
+            }
+
+            // Standalone ◐ in-progress symbol
+            if (ch == '◐' && (index + 1 == len || rawTitle[index + 1].isWhitespace())) {
+                resolvedInProgress = true
                 strippedSpans += index..index
                 index += 1
                 continue
@@ -128,8 +158,12 @@ object SmartSyntaxParser {
                         }
                     }
                     '!' -> {
-                        if (phrase.equals("milestone", ignoreCase = true)) {
+                        val normalizedBang = phrase.trim().lowercase(Locale.ROOT).replace(MULTI_SPACE_REGEX, " ")
+                        if (normalizedBang == "milestone") {
                             resolvedMilestone = true
+                            true
+                        } else if (normalizedBang in IN_PROGRESS_SMART_TOKENS) {
+                            resolvedInProgress = true
                             true
                         } else {
                             val parsedDate = parseNaturalDateToken(phrase, isQuoted, locale, referenceDate)
@@ -231,6 +265,7 @@ object SmartSyntaxParser {
             matchedProject = resolvedProject,
             matchedArea = resolvedArea,
             isMilestone = resolvedMilestone,
+            isInProgress = resolvedInProgress,
             hasAnyMatch = true
         )
     }

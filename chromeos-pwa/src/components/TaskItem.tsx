@@ -610,6 +610,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       return;
     }
 
+    if (e.shiftKey && task.status === 'OPEN') {
+      flushDraftsIfNeeded();
+      void localDb.toggleTaskInProgress(task.id);
+      return;
+    }
+
     // Mid-animation click cancels completion before DB commit!
     if (animStage !== 'idle') {
       clearAnimTimers();
@@ -709,7 +715,8 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             areaId: parsed.matchedArea.id
           }
         : {}),
-    ...(parsed.isMilestone ? { isMilestone: true } : {})
+    ...(parsed.isMilestone ? { isMilestone: true } : {}),
+    ...(parsed.isInProgress ? { isInProgress: true } : {})
   });
 
   const expandedParsedSmart = useMemo(
@@ -931,8 +938,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       <button
         type="button"
         className={`things-checkbox ${task.isMilestone ? 'milestone' : ''} ${
-          isSomedayDashed ? 'someday-dashed' : ''
-        } ${animStage !== 'idle' ? 'pop' : ''} ${
+          task.status === 'OPEN' && task.isInProgress && animStage === 'idle'
+            ? 'in-progress'
+            : ''
+        } ${isSomedayDashed ? 'someday-dashed' : ''} ${animStage !== 'idle' ? 'pop' : ''} ${
           isVisualCompleted ? 'completed checked' : ''
         } ${isCanceled ? 'canceled' : ''}`}
         onClick={handlePrimaryCheckboxClick}
@@ -967,6 +976,34 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            {task.status === 'OPEN' && (
+              <button
+                type="button"
+                className="dropdown-item"
+                data-testid="task-status-menu-in-progress-btn"
+                onClick={() => {
+                  setStatusMenuOpen(false);
+                  flushDraftsIfNeeded();
+                  void localDb.toggleTaskInProgress(task.id);
+                }}
+              >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    style={{
+                      color: 'var(--in-progress-amber-ring)',
+                      fontSize: 13.5,
+                      lineHeight: 1
+                    }}
+                    aria-hidden="true"
+                  >
+                    ◐
+                  </span>
+                  <span>
+                    {task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                  </span>
+                </span>
+              </button>
+            )}
             {task.status !== 'COMPLETED' && (
               <button
                 type="button"
@@ -1121,6 +1158,24 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           />
 
           <div className="task-bento-header-actions">
+            {task.status === 'OPEN' && (
+              <button
+                type="button"
+                className={`icon-btn ${task.isInProgress ? 'in-progress-active' : ''}`}
+                data-testid="task-in-progress-btn"
+                title={task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                aria-label={task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  void localDb.toggleTaskInProgress(task.id);
+                }}
+              >
+                <span style={{ fontSize: 14, lineHeight: 1 }} aria-hidden="true">
+                  ◐
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
               className={`icon-btn ${task.isMilestone ? 'milestone-active' : ''}`}
@@ -1192,6 +1247,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <span className="meta-badge milestone-badge">
                   <Diamond size={10} />
                   <span>{t.milestoneLabel}</span>
+                </span>
+              )}
+              {expandedParsedSmart.isInProgress && (
+                <span className="meta-badge in-progress-badge">
+                  <span>◐ {t.v33InProgressBadge}</span>
                 </span>
               )}
               {expandedParsedSmart.matchedProject && (
@@ -1564,6 +1624,35 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                       />
                       <span>{t.milestoneLabel}</span>
                     </button>
+
+                    {task.status === 'OPEN' && (
+                      <button
+                        type="button"
+                        data-testid="task-in-progress-chip"
+                        className={`chip-btn ${task.isInProgress ? 'in-progress-active' : ''}`}
+                        title={
+                          task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
+                        }
+                        onClick={() => {
+                          flushDraftsIfNeeded();
+                          void localDb.toggleTaskInProgress(task.id);
+                        }}
+                      >
+                        <span
+                          style={
+                            !task.isInProgress
+                              ? { color: 'var(--in-progress-amber-ring)', opacity: 0.9 }
+                              : undefined
+                          }
+                          aria-hidden="true"
+                        >
+                          ◐
+                        </span>
+                        <span>
+                          {task.isInProgress ? t.v33InProgressBadge : t.v33MarkInProgress}
+                        </span>
+                      </button>
+                    )}
                   </span>
                 </div>
 
@@ -2030,6 +2119,34 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         <span>{t.voiceDictationLabel}</span>
                       </span>
                     </button>
+                    {task.status === 'OPEN' && (
+                      <button
+                        type="button"
+                        className="dropdown-item"
+                        data-testid="task-more-in-progress-btn"
+                        onClick={() => {
+                          setInlineMoreMenuOpen(false);
+                          flushDraftsIfNeeded();
+                          void localDb.toggleTaskInProgress(task.id);
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <span
+                            style={{
+                              color: 'var(--in-progress-amber-ring)',
+                              fontSize: 13.5,
+                              lineHeight: 1
+                            }}
+                            aria-hidden="true"
+                          >
+                            ◐
+                          </span>
+                          <span>
+                            {task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                          </span>
+                        </span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="dropdown-item"
@@ -2146,6 +2263,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       (task.scheduleState !== 'THIS_EVENING' && task.whenDate != null));
 
   const hasSecondRowBadges =
+    Boolean(task.status === 'OPEN' && task.isInProgress) ||
     Boolean(task.isMilestone) ||
     task.scheduleState === 'THIS_EVENING' ||
     showCollapsedSchedulePill ||
@@ -2336,6 +2454,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         <span>◆ {t.milestoneLabel}</span>
                       </span>
                     )}
+                    {inlineParsedSmart.isInProgress && (
+                      <span className="meta-badge in-progress-badge">
+                        <span>◐ {t.v33InProgressBadge}</span>
+                      </span>
+                    )}
                     {inlineParsedSmart.matchedProject && (
                       <span className="meta-badge">
                         <span>{inlineParsedSmart.matchedProject.title}</span>
@@ -2478,6 +2601,17 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           {/* Ordered Second-Row Interactive Badges */}
           {hasSecondRowBadges && (
             <div className="task-row-badges-second">
+              {/* 0a. In Progress Badge */}
+              {task.status === 'OPEN' && task.isInProgress && (
+                <span
+                  className="meta-badge in-progress-badge"
+                  data-testid="task-row-in-progress-pill"
+                  title={t.v33InProgressBadge}
+                >
+                  <span>◐ {t.v33InProgressBadge}</span>
+                </span>
+              )}
+
               {/* 0. Milestone Badge */}
               {task.isMilestone && (
                 <span
@@ -3165,6 +3299,35 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 {task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
                 <span>{task.isPinned ? t.unpinTask : t.pinTask}</span>
               </button>
+
+              {/* 7b. Mark In Progress / Clear In Progress */}
+              {task.status === 'OPEN' && (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  data-testid="task-ctx-in-progress-btn"
+                  onClick={() => {
+                    setCtxMenu(null);
+                    void localDb.toggleTaskInProgress(task.id);
+                  }}
+                >
+                  <span
+                    style={{
+                      color: 'var(--in-progress-amber-ring)',
+                      fontSize: 13.5,
+                      width: 14,
+                      textAlign: 'center',
+                      lineHeight: 1
+                    }}
+                    aria-hidden="true"
+                  >
+                    ◐
+                  </span>
+                  <span>
+                    {task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                  </span>
+                </button>
+              )}
 
               {/* 8. Mark as Milestone / Remove Milestone */}
               <button

@@ -59,6 +59,7 @@ data class ExternalImportedTask(
     val deadline: Long? = null,
     val isPinned: Boolean = false,
     val isMilestone: Boolean = false,
+    val isInProgress: Boolean = false,
     val effortLevel: String? = null,
     val tagNames: List<String> = emptyList(),
     val checklistItems: List<ExternalImportedChecklistItem> = emptyList(),
@@ -180,6 +181,19 @@ object ExternalProjectCodec {
         "termine",
         "completato",
         "completado"
+    )
+
+    private val IN_PROGRESS_PROGRESS_VALUES = setOf(
+        "in progress",
+        "in-progress",
+        "inprogress",
+        "50%",
+        "50",
+        "0.5",
+        "in arbeit",
+        "en cours",
+        "in corso",
+        "en curso"
     )
 
     private val RATIO_CHECKLIST_REGEX = Regex("""^(\d+)\s*/\s*(\d+)$""")
@@ -1587,7 +1601,11 @@ object ExternalProjectCodec {
 
         return orderedPairs.map { (task, bucketName) ->
             val isCompleted = task.status == TaskStatus.COMPLETED
-            val progressStr = if (isCompleted) "Completed" else "Not started"
+            val progressStr = when {
+                isCompleted -> "Completed"
+                task.isInProgress -> "In progress"
+                else -> "Not started"
+            }
             val priorityStr = when {
                 task.isPinned -> "Urgent"
                 EffortLevel.normalize(task.effortLevel) == EffortLevel.DEEP_FOCUS -> "Important"
@@ -2083,7 +2101,9 @@ object ExternalProjectCodec {
             val checklistRaw = col(idxChecklist)
             val labelsRaw = col(idxLabels)
 
-            val isCompleted = progressRaw.lowercase(Locale.ROOT) in COMPLETED_PROGRESS_VALUES
+            val progressLower = progressRaw.lowercase(Locale.ROOT)
+            val isCompleted = progressLower in COMPLETED_PROGRESS_VALUES
+            val isInProgress = !isCompleted && progressLower in IN_PROGRESS_PROGRESS_VALUES
             val status = if (isCompleted) TaskStatus.COMPLETED else TaskStatus.OPEN
             val completedAtMs = if (isCompleted) {
                 parseExternalTimestamp(completedDateRaw, zoneId) ?: System.currentTimeMillis()
@@ -2114,6 +2134,7 @@ object ExternalProjectCodec {
                 whenDate = parseExternalDate(startRaw, zoneId),
                 deadline = parseExternalDate(dueRaw, zoneId),
                 isPinned = isPinned,
+                isInProgress = isInProgress,
                 effortLevel = effortLevel,
                 tagNames = tagNames,
                 checklistItems = checklistItems,

@@ -64,6 +64,8 @@ fun ThingsCheckbox(
     shape: ThingsCheckboxShape = ThingsCheckboxShape.ROUNDED_SQUARE,
     isDashedSomeday: Boolean = false,
     isMilestone: Boolean = false,
+    isInProgress: Boolean = false,
+    onToggleInProgress: (() -> Unit)? = null,
     size: Dp = 20.dp,
     showHoverTooltip: Boolean = true,
     tooltipText: String? = null
@@ -73,6 +75,7 @@ fun ThingsCheckbox(
     var showCancelMenu by remember { mutableStateOf(false) }
 
     val isActive = status == TaskStatus.COMPLETED || status == TaskStatus.CANCELED
+    val isWipOpen = status == TaskStatus.OPEN && isInProgress
 
     var prevStatus by remember { mutableStateOf(status) }
     val popScaleAnim = remember { Animatable(1f) }
@@ -110,6 +113,12 @@ fun ThingsCheckbox(
         label = "checkDrawProgress"
     )
 
+    val inProgressFraction by animateFloatAsState(
+        targetValue = if (isWipOpen) 1f else 0f,
+        animationSpec = tween(durationMillis = 165, easing = FastOutSlowInEasing),
+        label = "checkboxInProgressFraction"
+    )
+
     val activeFillTarget = if (isMilestone) colors.milestoneViolet else colors.checkboxCheckedFill
     val fillColor by animateColorAsState(
         targetValue = if (isActive) activeFillTarget else Color.Transparent,
@@ -121,6 +130,7 @@ fun ThingsCheckbox(
         targetValue = when {
             isActive -> activeFillTarget
             isMilestone -> colors.milestoneViolet
+            isWipOpen -> colors.somedayWarmAmber
             else -> colors.checkboxBorder
         },
         animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
@@ -192,9 +202,17 @@ fun ThingsCheckbox(
                         else -> squircleCornerPx + (circleCornerPx - squircleCornerPx) * clampedMorph
                     }
 
+                    val clampedWip = (if (inProgressFraction.isFinite()) inProgressFraction else 0f).coerceIn(0f, 1f)
                     if (isMilestone && status == TaskStatus.OPEN) {
                         drawRoundRect(
                             color = colors.milestoneVioletSoft.copy(alpha = 0.60f),
+                            topLeft = Offset(insetX + strokePx / 2f, insetY + strokePx / 2f),
+                            size = Size(rectWidth, rectHeight),
+                            cornerRadius = CornerRadius(cornerPx, cornerPx)
+                        )
+                    } else if (status == TaskStatus.OPEN && clampedWip > 0.01f) {
+                        drawRoundRect(
+                            color = colors.somedayWarmAmber.copy(alpha = 0.14f * clampedWip),
                             topLeft = Offset(insetX + strokePx / 2f, insetY + strokePx / 2f),
                             size = Size(rectWidth, rectHeight),
                             cornerRadius = CornerRadius(cornerPx, cornerPx)
@@ -218,6 +236,25 @@ fun ThingsCheckbox(
                         cornerRadius = CornerRadius(cornerPx, cornerPx),
                         style = borderStroke
                     )
+
+                    // Animated In-Progress inner core dot when OPEN
+                    if (status == TaskStatus.OPEN && clampedWip > 0.01f) {
+                        val coreColor = if (isMilestone) colors.milestoneViolet else colors.somedayWarmAmber
+                        val coreSize = (rectWidth * 0.44f * clampedWip).coerceAtLeast(0f)
+                        if (coreSize > 0.5f) {
+                            val coreCorner = when {
+                                isMilestone -> 1.8.dp.toPx() * clampedWip
+                                shape == ThingsCheckboxShape.CIRCLE -> coreSize / 2f
+                                else -> (2.6.dp.toPx() * clampedWip).coerceAtMost(coreSize / 2f)
+                            }
+                            drawRoundRect(
+                                color = coreColor.copy(alpha = 0.92f * clampedWip),
+                                topLeft = Offset((canvasW - coreSize) / 2f, (canvasH - coreSize) / 2f),
+                                size = Size(coreSize, coreSize),
+                                cornerRadius = CornerRadius(coreCorner, coreCorner)
+                            )
+                        }
+                    }
 
                     // Animated fill (clamped against spring overshoot > 1f or < 0f)
                     val clampedAlpha = (if (fillFraction.isFinite()) fillFraction else 0f).coerceIn(0f, 1f)
@@ -303,6 +340,22 @@ fun ThingsCheckbox(
                 expanded = showCancelMenu,
                 onDismissRequest = { showCancelMenu = false }
             ) {
+                if (status == TaskStatus.OPEN && onToggleInProgress != null) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                stringResource(
+                                    if (isInProgress) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
+                                )
+                            )
+                        },
+                        onClick = {
+                            showCancelMenu = false
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleInProgress()
+                        }
+                    )
+                }
                 if (status != TaskStatus.COMPLETED) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.action_complete)) },

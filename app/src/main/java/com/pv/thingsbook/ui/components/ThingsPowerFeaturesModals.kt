@@ -210,6 +210,15 @@ fun SmartSyntaxPreviewChipsRow(
             )
         }
 
+        if (parsed.isInProgress) {
+            ThingsTagPill(
+                title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                contentColor = colors.somedayWarmAmber,
+                borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f)
+            )
+        }
+
         parsed.matchedProject?.let { proj ->
             ThingsTagPill(
                 title = "📁 ${proj.title}",
@@ -517,7 +526,11 @@ fun ThingsQuickShareModal(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                ProjectProgressRing(progress = project.progress, size = 12.dp)
+                                ProjectProgressRing(
+                                    progress = project.progress,
+                                    inProgressFraction = project.inProgressProgress,
+                                    size = 12.dp
+                                )
                                 Text(
                                     text = project.title,
                                     style = MaterialTheme.typography.labelSmall,

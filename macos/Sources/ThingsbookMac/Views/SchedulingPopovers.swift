@@ -2294,6 +2294,7 @@ public struct PerspectiveEditorSheetView: View {
     @State private var selectedDueWindow: String
     @State private var selectedAreaId: String
     @State private var actionableOnly: Bool
+    @State private var inProgressOnly: Bool
 
     public init(store: ThingsbookStore, existingPerspective: SavedPerspective?) {
         self.store = store
@@ -2306,6 +2307,7 @@ public struct PerspectiveEditorSheetView: View {
         _selectedDueWindow = State(initialValue: (existingPerspective?.dueWindow ?? "ANY").uppercased())
         _selectedAreaId = State(initialValue: existingPerspective?.areaId ?? "")
         _actionableOnly = State(initialValue: existingPerspective?.actionableOnly ?? false)
+        _inProgressOnly = State(initialValue: existingPerspective?.inProgressOnly ?? false)
     }
 
     private var canSave: Bool {
@@ -2438,6 +2440,10 @@ public struct PerspectiveEditorSheetView: View {
                 .toggleStyle(.checkbox)
                 .font(.system(size: 12.5))
 
+            Toggle(store.tr("v33_filter_in_progress_only"), isOn: $inProgressOnly)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12.5))
+
             Divider()
 
             HStack {
@@ -2471,7 +2477,8 @@ public struct PerspectiveEditorSheetView: View {
                         dueWindow: selectedDueWindow,
                         areaId: selectedAreaId.isEmpty ? nil : selectedAreaId,
                         actionableOnly: actionableOnly,
-                        sortOrder: existingPerspective?.sortOrder ?? 0.0
+                        sortOrder: existingPerspective?.sortOrder ?? 0.0,
+                        inProgressOnly: inProgressOnly
                     )
                     store.savePerspective(model)
                     dismiss()

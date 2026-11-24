@@ -38,7 +38,7 @@ import com.pv.thingsbook.data.local.entity.TaskTagCrossRef
         AttachmentEntity::class,
         ProjectTemplateEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 @TypeConverters(ThingsTypeConverters::class)

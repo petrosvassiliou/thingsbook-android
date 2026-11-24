@@ -184,6 +184,7 @@ fun WorkspaceInspectorPanel(
     onUpdateTaskSchedule: (TaskItem, ScheduleState, Long?) -> Unit,
     onTogglePin: (String) -> Unit,
     onToggleMilestone: (String, Boolean) -> Unit,
+    onToggleInProgress: (String) -> Unit = {},
     onUpdateDuration: (String, Int?) -> Unit,
     onUpdateEffort: (String, String?) -> Unit,
     onStartFocusTimer: (TaskItem) -> Unit,
@@ -225,6 +226,7 @@ fun WorkspaceInspectorPanel(
                 onUpdateTaskSchedule = onUpdateTaskSchedule,
                 onTogglePin = onTogglePin,
                 onToggleMilestone = onToggleMilestone,
+                onToggleInProgress = onToggleInProgress,
                 onUpdateDuration = onUpdateDuration,
                 onUpdateEffort = onUpdateEffort,
                 onStartFocusTimer = onStartFocusTimer,
@@ -296,6 +298,7 @@ private fun SelectedTaskInspectorContent(
     onUpdateTaskSchedule: (TaskItem, ScheduleState, Long?) -> Unit,
     onTogglePin: (String) -> Unit,
     onToggleMilestone: (String, Boolean) -> Unit,
+    onToggleInProgress: (String) -> Unit = {},
     onUpdateDuration: (String, Int?) -> Unit,
     onUpdateEffort: (String, String?) -> Unit,
     onStartFocusTimer: (TaskItem) -> Unit,
@@ -483,6 +486,12 @@ private fun SelectedTaskInspectorContent(
                     },
                     isDashedSomeday = selectedTask.scheduleState == ScheduleState.SOMEDAY,
                     isMilestone = selectedTask.isMilestone,
+                    isInProgress = selectedTask.isInProgress,
+                    onToggleInProgress = if (selectedTask.status == TaskStatus.OPEN) {
+                        { onToggleInProgress(selectedTask.id) }
+                    } else {
+                        null
+                    },
                     size = 20.dp
                 )
 
@@ -534,11 +543,46 @@ private fun SelectedTaskInspectorContent(
                 )
             }
 
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (selectedTask.status == TaskStatus.OPEN) {
+                    val wipActive = selectedTask.isInProgress
+                    val wipTooltip = stringResource(
+                        if (wipActive) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
+                    )
+                    ThingsHoverTooltip(text = wipTooltip) {
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onToggleInProgress(selectedTask.id)
+                                },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (wipActive) colors.somedayWarmAmber.copy(alpha = 0.16f) else colors.tagPillBg.copy(alpha = 0.72f),
+                            border = BorderStroke(
+                                0.75.dp,
+                                if (wipActive) colors.somedayWarmAmber.copy(alpha = 0.55f) else colors.hairlineDivider
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.5.dp, vertical = 4.5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = if (wipActive) colors.somedayWarmAmber else colors.secondaryText
+                                )
+                            }
+                        }
+                    }
+                }
+
                 val pinTooltip = stringResource(
                     if (selectedTask.isPinned) R.string.v25_unpin_task else R.string.v25_pin_task
                 )

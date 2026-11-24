@@ -386,6 +386,19 @@ public struct ProjectBoardWorkspaceView: View {
         }()
         let totalCount = rawOpenCount + doneCount
         let progress = totalCount > 0 ? Double(doneCount) / Double(totalCount) : 0.0
+        let inProgCount: Int = {
+            if let heading {
+                return store.allOpenTasks.filter {
+                    $0.projectId == project.id && $0.headingId == heading.id && $0.status == .open && $0.isInProgress
+                }.count
+            }
+            return store.allOpenTasks.filter { task in
+                guard task.projectId == project.id, task.status == .open, task.isInProgress else { return false }
+                guard let hid = task.headingId else { return true }
+                return !validHeadingIds.contains(hid)
+            }.count
+        }()
+        let inProgressRatio = totalCount > 0 ? min(max(0.0, 1.0 - progress), Double(inProgCount) / Double(totalCount)) : 0.0
         let targetRenameId = heading?.id ?? Self.generalColumnRenameSentinel
         let isRenaming = renamingHeadingId == targetRenameId
 
@@ -454,6 +467,7 @@ public struct ProjectBoardWorkspaceView: View {
                         if totalCount > 0 && !isRenaming {
                             ProjectProgressRing(
                                 progress: progress,
+                                inProgressProgress: inProgressRatio,
                                 size: 13,
                                 tint: ThingsMacPalette.accentBlue,
                                 isCompleted: rawOpenCount == 0 && doneCount > 0
@@ -719,9 +733,11 @@ private struct KanbanTaskCardView: View {
                     status: task.status,
                     isSomeday: task.scheduleState == .someday,
                     isMilestone: task.isMilestone,
+                    isInProgress: task.isInProgress,
                     helpText: store.tr("macos_checkbox_help"),
                     onToggleComplete: { store.toggleTaskCompletion(latestTask) },
-                    onCancelTask: { store.cancelTask(latestTask) }
+                    onCancelTask: { store.cancelTask(latestTask) },
+                    onToggleInProgress: { store.toggleTaskInProgress(latestTask) }
                 )
                 .padding(.top, 1)
 
@@ -765,6 +781,23 @@ private struct KanbanTaskCardView: View {
 
             if hasAnyMetadataBadges {
                 ThingsFlowLayout(horizontalSpacing: 5, verticalSpacing: 5) {
+                    if task.status == .open && task.isInProgress {
+                        Button {
+                            store.toggleTaskInProgress(latestTask)
+                        } label: {
+                            Text("◐ \(store.tr("v33_in_progress_badge"))")
+                                .font(.system(size: 10.5, weight: .bold))
+                                .lineLimit(1)
+                                .foregroundStyle(ThingsMacPalette.somedayAmber)
+                                .padding(.horizontal, 6.5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .thingsTooltip(store.tr("v33_clear_in_progress"))
+                    }
+
                     if task.isMilestone {
                         HStack(spacing: 3) {
                             Text("◆ \(store.tr("v30_milestone_label"))")
@@ -966,7 +999,8 @@ private struct KanbanTaskCardView: View {
     }
 
     private var hasAnyMetadataBadges: Bool {
-        task.isMilestone
+        (task.status == .open && task.isInProgress)
+            || task.isMilestone
             || store.blockedByBadgeText(for: task) != nil
             || task.resolvedEffort != nil
             || task.formattedTimeblockPill != nil
@@ -1072,6 +1106,18 @@ private struct KanbanTaskCardView: View {
                     store.tr(allMilestones ? "v30_remove_milestone" : "v30_mark_as_milestone"),
                     systemImage: allMilestones ? "diamond.fill" : "diamond"
                 )
+            }
+            let openSelected = store.allOpenTasks.filter { store.selectedTaskIds.contains($0.id) && $0.status == .open }
+            if !openSelected.isEmpty {
+                let allInProg = openSelected.allSatisfy(\.isInProgress)
+                Button {
+                    store.toggleInProgressForSelectedTasks()
+                } label: {
+                    Label(
+                        store.tr(allInProg ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled"
+                    )
+                }
             }
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
@@ -1185,6 +1231,16 @@ private struct KanbanTaskCardView: View {
                     store.tr(latestTask.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
                     systemImage: latestTask.isMilestone ? "diamond.fill" : "diamond"
                 )
+            }
+            if latestTask.status == .open {
+                Button {
+                    store.toggleTaskInProgress(latestTask)
+                } label: {
+                    Label(
+                        store.tr(latestTask.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled"
+                    )
+                }
             }
             Button {
                 _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
@@ -1466,6 +1522,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                 HStack(spacing: 8) {
                     ProjectProgressRing(
                         progress: project.progress,
+                        inProgressProgress: project.inProgressProgress,
                         size: 16,
                         tint: ThingsMacPalette.accentBlue,
                         isCompleted: project.status == .completed
@@ -1806,6 +1863,7 @@ public struct ProjectRoadmapWorkspaceView: View {
                 status: bar.task.status,
                 isSomeday: bar.task.scheduleState == .someday,
                 isMilestone: isMilestone,
+                isInProgress: bar.task.isInProgress,
                 helpText: isFullScreen ? "" : store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     guard !store.isTimelineFullScreen else { return }
@@ -1814,6 +1872,10 @@ public struct ProjectRoadmapWorkspaceView: View {
                 onCancelTask: {
                     guard !store.isTimelineFullScreen else { return }
                     store.cancelTask(bar.task)
+                },
+                onToggleInProgress: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.toggleTaskInProgress(bar.task)
                 }
             )
             .disabled(isFullScreen)
@@ -2559,15 +2621,27 @@ public struct ProjectRoadmapWorkspaceView: View {
                 status: task.status,
                 isSomeday: task.scheduleState == .someday,
                 isMilestone: task.isMilestone,
+                isInProgress: task.isInProgress,
                 helpText: store.tr("macos_checkbox_help"),
                 onToggleComplete: { store.toggleTaskCompletion(task) },
-                onCancelTask: { store.cancelTask(task) }
+                onCancelTask: { store.cancelTask(task) },
+                onToggleInProgress: { store.toggleTaskInProgress(task) }
             )
 
             Text(task.title.isEmpty ? store.tr("macos_untitled_todo") : task.title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+
+            if task.status == .open && task.isInProgress {
+                Text("◐ \(store.tr("v33_in_progress_badge"))")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(ThingsMacPalette.somedayAmber)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                    .fixedSize(horizontal: true, vertical: false)
+            }
 
             if task.isMilestone {
                 Text("◆ \(store.tr("v30_milestone_label"))")
@@ -2694,6 +2768,18 @@ public struct ProjectRoadmapWorkspaceView: View {
                     systemImage: allMilestones ? "diamond.fill" : "diamond"
                 )
             }
+            let openSelected = store.allOpenTasks.filter { store.selectedTaskIds.contains($0.id) && $0.status == .open }
+            if !openSelected.isEmpty {
+                let allInProg = openSelected.allSatisfy(\.isInProgress)
+                Button {
+                    store.toggleInProgressForSelectedTasks()
+                } label: {
+                    Label(
+                        store.tr(allInProg ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled"
+                    )
+                }
+            }
             Button(store.tr("v25_batch_duplicate")) {
                 store.duplicateSelectedTasks()
             }
@@ -2816,6 +2902,16 @@ public struct ProjectRoadmapWorkspaceView: View {
                     store.tr(latest.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"),
                     systemImage: latest.isMilestone ? "diamond.fill" : "diamond"
                 )
+            }
+            if latest.status == .open {
+                Button {
+                    store.toggleTaskInProgress(latest)
+                } label: {
+                    Label(
+                        store.tr(latest.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled"
+                    )
+                }
             }
             Button {
                 _ = try? store.database.duplicateTask(task.id, copySuffix: store.tr("v25_copy_suffix"))
@@ -3485,6 +3581,7 @@ struct RoadmapExportSnapshotView: View {
             HStack(spacing: 10) {
                 ProjectProgressRing(
                     progress: project.progress,
+                    inProgressProgress: project.inProgressProgress,
                     size: 18,
                     tint: ThingsMacPalette.accentBlue,
                     isCompleted: project.status == .completed,
@@ -4523,6 +4620,7 @@ public struct AreaPortfolioRoadmapWorkspaceView: View {
 
                     ProjectProgressRing(
                         progress: proj.progress,
+                        inProgressProgress: proj.inProgressProgress,
                         size: 15,
                         tint: ThingsMacPalette.accentBlue,
                         isCompleted: proj.status == .completed
@@ -4598,6 +4696,7 @@ public struct AreaPortfolioRoadmapWorkspaceView: View {
                 status: taskBar.task.status,
                 isSomeday: taskBar.task.scheduleState == .someday,
                 isMilestone: isMilestone,
+                isInProgress: taskBar.task.isInProgress,
                 helpText: isFull ? "" : store.tr("macos_checkbox_help"),
                 onToggleComplete: {
                     guard !store.isTimelineFullScreen else { return }
@@ -4606,6 +4705,10 @@ public struct AreaPortfolioRoadmapWorkspaceView: View {
                 onCancelTask: {
                     guard !store.isTimelineFullScreen else { return }
                     store.cancelTask(taskBar.task)
+                },
+                onToggleInProgress: {
+                    guard !store.isTimelineFullScreen else { return }
+                    store.toggleTaskInProgress(taskBar.task)
                 }
             )
             .disabled(isFull)
@@ -4857,6 +4960,7 @@ public struct AreaPortfolioRoadmapWorkspaceView: View {
             HStack(spacing: 6) {
                 ProjectProgressRing(
                     progress: lane.project.progress,
+                    inProgressProgress: lane.project.inProgressProgress,
                     size: 13,
                     tint: ThingsMacPalette.accentBlue,
                     isCompleted: lane.project.status == .completed
@@ -5191,6 +5295,7 @@ public struct AreaPortfolioRoadmapWorkspaceView: View {
                         HStack(spacing: 7) {
                             ProjectProgressRing(
                                 progress: proj.progress,
+                                inProgressProgress: proj.inProgressProgress,
                                 size: 14,
                                 tint: ThingsMacPalette.accentBlue,
                                 isCompleted: proj.status == .completed

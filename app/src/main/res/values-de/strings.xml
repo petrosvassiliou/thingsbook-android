@@ -662,4 +662,10 @@
     <string name="v32_actual_vs_estimated">Fokus %1$s / %2$s</string>
     <string name="v32_logbook_focused_7d">Fokuszeit (7 Tg.): %1$s</string>
     <string name="v32_reset_actual_time">Erfasste Zeit zurücksetzen</string>
+    <string name="v33_in_progress_badge">In Arbeit</string>
+    <string name="v33_mark_in_progress">Als „In Arbeit“ markieren</string>
+    <string name="v33_clear_in_progress">„In Arbeit“ aufheben</string>
+    <string name="v33_filter_in_progress_only">Nur „In Arbeit“</string>
+    <string name="v33_project_in_progress_count">%1$d in Arbeit</string>
+    <string name="v33_cmd_toggle_in_progress">„In Arbeit“ für gewählte Aufgabe umschalten</string>
 </resources>

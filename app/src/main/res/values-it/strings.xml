@@ -662,4 +662,10 @@
     <string name="v32_actual_vs_estimated">Focus %1$s / %2$s</string>
     <string name="v32_logbook_focused_7d">Focus (7g): %1$s</string>
     <string name="v32_reset_actual_time">Azzera tempo registrato</string>
+    <string name="v33_in_progress_badge">In corso</string>
+    <string name="v33_mark_in_progress">Segna in corso</string>
+    <string name="v33_clear_in_progress">Rimuovi «In corso»</string>
+    <string name="v33_filter_in_progress_only">Solo in corso</string>
+    <string name="v33_project_in_progress_count">%1$d in corso</string>
+    <string name="v33_cmd_toggle_in_progress">Attiva/disattiva «In corso» sull’attività selezionata</string>
 </resources>

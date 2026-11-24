@@ -123,6 +123,16 @@ export function evaluateProjectStalledStatus(
     };
   }
 
+  if (openTasks.some((t) => Boolean(t.isInProgress))) {
+    return {
+      isStalled: false,
+      reason: null,
+      openTasksCount: openTasks.length,
+      lastActivityAt: reviewAnchor,
+      daysSinceActivity
+    };
+  }
+
   if (reviewAnchor <= 0 || elapsedMs >= STALLED_PROJECT_THRESHOLD_MS) {
     return {
       isStalled: true,
@@ -314,6 +324,11 @@ export function buildDailyTimeline(
   unscheduledTasks.sort((a, b) => {
     if (Boolean(b.isPinned) !== Boolean(a.isPinned)) {
       return a.isPinned ? -1 : 1;
+    }
+    const aInProg = a.status === 'OPEN' && Boolean(a.isInProgress);
+    const bInProg = b.status === 'OPEN' && Boolean(b.isInProgress);
+    if (bInProg !== aInProg) {
+      return aInProg ? -1 : 1;
     }
     return a.sortOrder - b.sortOrder;
   });
@@ -2183,6 +2198,7 @@ export interface QuickFindFilter {
   dateFilter: QuickFindDateFilter;
   hasDeadlineOnly: boolean;
   hasChecklistOnly: boolean;
+  inProgressOnly?: boolean;
   tagId: string | null;
   scope: QuickFindEntityScope;
 }
@@ -2192,6 +2208,7 @@ export const DEFAULT_QUICK_FIND_FILTER: QuickFindFilter = {
   dateFilter: 'ALL',
   hasDeadlineOnly: false,
   hasChecklistOnly: false,
+  inProgressOnly: false,
   tagId: null,
   scope: 'ALL'
 };
@@ -2202,6 +2219,7 @@ export function hasActiveQuickFindFilters(filter: QuickFindFilter): boolean {
     filter.dateFilter !== 'ALL' ||
     filter.hasDeadlineOnly ||
     filter.hasChecklistOnly ||
+    Boolean(filter.inProgressOnly) ||
     filter.tagId !== null ||
     filter.scope !== 'ALL'
   );
@@ -2216,6 +2234,7 @@ export function shouldShowSmartViewsAndAreasInQuickFind(
     filter.dateFilter !== 'ALL' ||
     filter.hasDeadlineOnly ||
     filter.hasChecklistOnly ||
+    Boolean(filter.inProgressOnly) ||
     filter.tagId !== null
   ) {
     return false;
@@ -2330,7 +2349,7 @@ export function matchesQuickFindTask(
   task: Pick<
     TaskRecord,
     'status' | 'scheduleState' | 'whenDate' | 'deadline' | 'tagIds' | 'isDeleted'
-  >,
+  > & { isInProgress?: boolean },
   filter: QuickFindFilter,
   hasChecklist: boolean,
   nowMs: number = Date.now()
@@ -2338,6 +2357,7 @@ export function matchesQuickFindTask(
   if (task.isDeleted) return false;
   if (filter.scope === 'PROJECTS') return false;
   if (filter.hideCompleted && task.status !== 'OPEN') return false;
+  if (filter.inProgressOnly && !(task.status === 'OPEN' && Boolean(task.isInProgress))) return false;
   if (filter.hasDeadlineOnly && task.deadline == null) return false;
   if (filter.hasChecklistOnly && !hasChecklist) return false;
   if (filter.tagId !== null && !task.tagIds.includes(filter.tagId)) return false;
@@ -2359,11 +2379,13 @@ export function matchesQuickFindProject(
     'status' | 'scheduleState' | 'whenDate' | 'deadline' | 'tagIds' | 'isDeleted'
   >,
   filter: QuickFindFilter,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  hasInProgressTask = false
 ): boolean {
   if (project.isDeleted) return false;
   if (filter.scope === 'TASKS') return false;
   if (filter.hasChecklistOnly) return false;
+  if (filter.inProgressOnly && (!hasInProgressTask || project.status !== 'ACTIVE')) return false;
   if (filter.hideCompleted && project.status !== 'ACTIVE') return false;
   if (filter.hasDeadlineOnly && project.deadline == null) return false;
   if (filter.tagId !== null && !project.tagIds.includes(filter.tagId)) return false;
@@ -2606,6 +2628,12 @@ export function sortTasksForView(
       return aPinned ? -1 : 1;
     }
 
+    const aInProg = a.status === 'OPEN' && Boolean(a.isInProgress);
+    const bInProg = b.status === 'OPEN' && Boolean(b.isInProgress);
+    if (bInProg !== aInProg) {
+      return aInProg ? -1 : 1;
+    }
+
     if (sortMode === 'deadline') {
       const aHasDl = a.deadline != null && Number.isFinite(a.deadline);
       const bHasDl = b.deadline != null && Number.isFinite(b.deadline);
@@ -2751,6 +2779,10 @@ export function filterTasksForPerspective(
 
   return tasks.filter((task) => {
     if (task.isDeleted || task.status !== 'OPEN') return false;
+
+    if (perspective.inProgressOnly && !task.isInProgress) {
+      return false;
+    }
 
     if (perspective.actionableOnly) {
       if (task.scheduleState === 'SOMEDAY') return false;

@@ -492,7 +492,11 @@ fun CompactMobileDragDropDock(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            ProjectProgressRing(progress = proj.progress, size = 13.dp)
+                            ProjectProgressRing(
+                                progress = proj.progress,
+                                inProgressFraction = proj.inProgressProgress,
+                                size = 13.dp
+                            )
                             Text(
                                 text = proj.title,
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
@@ -535,6 +539,7 @@ fun ProjectBoardWorkspace(
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
     onToggleTaskPin: (taskId: String) -> Unit,
     onToggleTaskMilestone: (taskId: String) -> Unit = {},
+    onToggleTaskInProgress: (taskId: String) -> Unit = {},
     onOpenTaskEditor: (taskId: String) -> Unit,
     onSelectSingleTask: ((taskId: String) -> Unit)? = null,
     onToggleTaskSelection: (taskId: String) -> Unit,
@@ -647,6 +652,7 @@ fun ProjectBoardWorkspace(
                     onUpdateTaskStatus = onUpdateTaskStatus,
                     onToggleTaskPin = onToggleTaskPin,
                     onToggleTaskMilestone = onToggleTaskMilestone,
+                    onToggleTaskInProgress = onToggleTaskInProgress,
                     onOpenTaskEditor = onOpenTaskEditor,
                     onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
@@ -683,6 +689,7 @@ fun ProjectBoardWorkspace(
                     onUpdateTaskStatus = onUpdateTaskStatus,
                     onToggleTaskPin = onToggleTaskPin,
                     onToggleTaskMilestone = onToggleTaskMilestone,
+                    onToggleTaskInProgress = onToggleTaskInProgress,
                     onOpenTaskEditor = onOpenTaskEditor,
                     onSelectSingleTask = onSelectSingleTask,
                     onToggleTaskSelection = onToggleTaskSelection,
@@ -838,6 +845,7 @@ private fun ProjectBoardPhaseColumn(
     onUpdateTaskStatus: (String, TaskStatus) -> Unit,
     onToggleTaskPin: (String) -> Unit,
     onToggleTaskMilestone: (String) -> Unit,
+    onToggleTaskInProgress: (String) -> Unit = {},
     onOpenTaskEditor: (String) -> Unit,
     onSelectSingleTask: ((String) -> Unit)? = null,
     onToggleTaskSelection: (String) -> Unit,
@@ -898,6 +906,12 @@ private fun ProjectBoardPhaseColumn(
     }
     val isOverduePhase = endLocal != null && endLocal.isBefore(today) && tasks.isNotEmpty()
     val phaseProgress = if (totalCount > 0) completedCount.toFloat() / totalCount.toFloat() else 0f
+    val inProgressInPhase = tasks.count { it.status == TaskStatus.OPEN && it.isInProgress }
+    val phaseInProgressFraction = if (totalCount > 0) {
+        (inProgressInPhase.toFloat() / totalCount.toFloat()).coerceIn(0f, (1f - phaseProgress).coerceAtLeast(0f))
+    } else {
+        0f
+    }
 
     Surface(
         modifier = Modifier
@@ -1111,6 +1125,7 @@ private fun ProjectBoardPhaseColumn(
                             if (totalCount > 0) {
                                 ProjectProgressRing(
                                     progress = phaseProgress,
+                                    inProgressFraction = phaseInProgressFraction,
                                     size = 14.dp,
                                     showFraction = true,
                                     completedCount = completedCount,
@@ -1214,6 +1229,7 @@ private fun ProjectBoardPhaseColumn(
                             onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
                             onTogglePin = { onToggleTaskPin(task.id) },
                             onToggleMilestone = { onToggleTaskMilestone(task.id) },
+                            onToggleInProgress = { onToggleTaskInProgress(task.id) },
                             onOpenEditor = { onOpenTaskEditor(task.id) },
                             onSelectSingle = onSelectSingleTask?.let { fn -> { fn(task.id) } },
                             onToggleSelection = { onToggleTaskSelection(task.id) },
@@ -1320,6 +1336,7 @@ private fun KanbanTaskCard(
     onStatusChange: (TaskStatus) -> Unit,
     onTogglePin: () -> Unit,
     onToggleMilestone: (() -> Unit)? = null,
+    onToggleInProgress: (() -> Unit)? = null,
     onOpenEditor: () -> Unit,
     onSelectSingle: (() -> Unit)? = null,
     onToggleSelection: () -> Unit,
@@ -1466,6 +1483,8 @@ private fun KanbanTaskCard(
                         onStatusChange = onStatusChange,
                         isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
                         isMilestone = task.isMilestone,
+                        isInProgress = task.isInProgress,
+                        onToggleInProgress = if (task.status == TaskStatus.OPEN) onToggleInProgress else null,
                         size = 18.dp
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1555,7 +1574,8 @@ private fun KanbanTaskCard(
                     )
                 }
 
-                val hasBadges = task.isMilestone ||
+                val hasBadges = (task.status == TaskStatus.OPEN && task.isInProgress) ||
+                    task.isMilestone ||
                     activeOpenBlockerIds.isNotEmpty() ||
                     EffortLevel.normalize(task.effortLevel) != null ||
                     task.scheduledStartMinutes != null ||
@@ -1576,6 +1596,15 @@ private fun KanbanTaskCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        if (task.status == TaskStatus.OPEN && task.isInProgress) {
+                            ThingsTagPill(
+                                title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                                containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                                contentColor = colors.somedayWarmAmber,
+                                borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f),
+                                onClick = onToggleInProgress
+                            )
+                        }
                         if (task.isMilestone) {
                             ThingsTagPill(
                                 title = "◆ ${stringResource(R.string.v30_milestone_label)}",
@@ -1706,6 +1735,34 @@ private fun KanbanTaskCard(
             )
 
             HorizontalDivider(color = colors.hairlineDivider)
+
+            // 3a. Mark In Progress / Clear In Progress
+            if (task.status == TaskStatus.OPEN && onToggleInProgress != null) {
+                DropdownMenuItem(
+                    modifier = compactMenuModifier,
+                    contentPadding = compactMenuPadding,
+                    text = {
+                        Text(
+                            text = stringResource(
+                                if (task.isInProgress) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (task.isInProgress) colors.somedayWarmAmber else colors.primaryText
+                        )
+                    },
+                    leadingIcon = {
+                        Text(
+                            text = "◐",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.somedayWarmAmber
+                        )
+                    },
+                    onClick = {
+                        showKanbanContextMenu = false
+                        onToggleInProgress()
+                    }
+                )
+            }
 
             // 3. Pin to Top / Unpin
             DropdownMenuItem(
@@ -1883,7 +1940,8 @@ private sealed interface RoadmapDisplayRow {
         val title: String,
         val phaseBar: RoadmapPhaseBar?,
         val completedCount: Int,
-        val totalCount: Int
+        val totalCount: Int,
+        val inProgressCount: Int = 0
     ) : RoadmapDisplayRow
 
     data class TaskRow(
@@ -1906,6 +1964,7 @@ fun ProjectRoadmapWorkspace(
     onUpdateTaskDeadline: (task: TaskItem, deadline: Long?) -> Unit,
     onScheduleTaskToday: (task: TaskItem) -> Unit,
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
+    onToggleTaskInProgress: ((taskId: String) -> Unit)? = null,
     onOpenTaskEditor: (taskId: String) -> Unit,
     onShowError: (String) -> Unit,
     selectedTaskIds: Set<String> = emptySet(),
@@ -1987,12 +2046,15 @@ fun ProjectRoadmapWorkspace(
             val counts = h?.let { headingTaskCounts[it.id] }
             val completed = counts?.first ?: 0
             val total = counts?.second ?: (lane.taskBars.size + lane.unscheduledTasks.size)
+            val wip = lane.taskBars.count { it.task.status == TaskStatus.OPEN && it.task.isInProgress } +
+                lane.unscheduledTasks.count { it.status == TaskStatus.OPEN && it.isInProgress }
             rows += RoadmapDisplayRow.PhaseRow(
                 heading = h,
                 title = h?.title?.ifBlank { generalTitle } ?: generalTitle,
                 phaseBar = lane.phaseBar,
                 completedCount = completed,
-                totalCount = total
+                totalCount = total,
+                inProgressCount = wip
             )
             for (tb in lane.taskBars) {
                 rows += RoadmapDisplayRow.TaskRow(tb)
@@ -2039,7 +2101,11 @@ fun ProjectRoadmapWorkspace(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
-                        ProjectProgressRing(progress = project.progress, size = 16.dp)
+                        ProjectProgressRing(
+                            progress = project.progress,
+                            inProgressFraction = project.inProgressProgress,
+                            size = 16.dp
+                        )
                         Text(
                             text = projectTitle,
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
@@ -2308,6 +2374,7 @@ fun ProjectRoadmapWorkspace(
                             onShiftHeadingDates = onShiftHeadingDates,
                             onShiftTaskDates = onShiftTaskDates,
                             onUpdateTaskStatus = onUpdateTaskStatus,
+                            onToggleTaskInProgress = onToggleTaskInProgress,
                             onOpenTaskEditor = onOpenTaskEditor,
                             readOnly = isFullScreen
                         )
@@ -2437,6 +2504,12 @@ fun ProjectRoadmapWorkspace(
                                             status = task.status,
                                             onStatusChange = { next -> onUpdateTaskStatus(task.id, next) },
                                             isMilestone = task.isMilestone,
+                                            isInProgress = task.isInProgress,
+                                            onToggleInProgress = if (onToggleTaskInProgress != null && task.status == TaskStatus.OPEN) {
+                                                { onToggleTaskInProgress(task.id) }
+                                            } else {
+                                                null
+                                            },
                                             size = 18.dp
                                         )
                                         Text(
@@ -2447,6 +2520,19 @@ fun ProjectRoadmapWorkspace(
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f, fill = false)
                                         )
+                                        if (task.status == TaskStatus.OPEN && task.isInProgress) {
+                                            ThingsTagPill(
+                                                title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                                                containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                                                contentColor = colors.somedayWarmAmber,
+                                                borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f),
+                                                onClick = if (onToggleTaskInProgress != null) {
+                                                    { onToggleTaskInProgress(task.id) }
+                                                } else {
+                                                    null
+                                                }
+                                            )
+                                        }
                                         if (task.isMilestone) {
                                             ThingsTagPill(
                                                 title = "◆ ${stringResource(R.string.v30_milestone_label)}",
@@ -2689,6 +2775,7 @@ private fun RoadmapSynchronizedLanesBody(
     onShiftHeadingDates: (heading: Heading, deltaDays: Long, fallbackRange: Pair<Long, Long>?) -> Unit,
     onShiftTaskDates: (task: TaskItem, deltaDays: Long) -> Unit,
     onUpdateTaskStatus: (taskId: String, status: TaskStatus) -> Unit,
+    onToggleTaskInProgress: ((taskId: String) -> Unit)? = null,
     onOpenTaskEditor: (taskId: String) -> Unit,
     readOnly: Boolean = false
 ) {
@@ -2755,6 +2842,10 @@ private fun RoadmapSynchronizedLanesBody(
                         val phaseProgress = if (row.totalCount > 0) {
                             row.completedCount.toFloat() / row.totalCount.toFloat()
                         } else 0f
+                        val phaseInProgressFraction = if (row.totalCount > 0) {
+                            (row.inProgressCount.toFloat() / row.totalCount.toFloat())
+                                .coerceIn(0f, (1f - phaseProgress).coerceAtLeast(0f))
+                        } else 0f
                         val phaseDateText = row.phaseBar?.let { pb ->
                             val s = LocalDate.ofEpochDay(pb.startEpochDay).format(shortDateFmt)
                             val e = LocalDate.ofEpochDay(pb.endEpochDay).format(shortDateFmt)
@@ -2808,7 +2899,11 @@ private fun RoadmapSynchronizedLanesBody(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     if (row.totalCount > 0) {
-                                        ProjectProgressRing(progress = phaseProgress, size = 12.5.dp)
+                                        ProjectProgressRing(
+                                            progress = phaseProgress,
+                                            inProgressFraction = phaseInProgressFraction,
+                                            size = 12.5.dp
+                                        )
                                     }
                                     if (phaseDateText != null) {
                                         Row(
@@ -2951,6 +3046,12 @@ private fun RoadmapSynchronizedLanesBody(
                                     status = task.status,
                                     onStatusChange = { next -> if (!readOnly) onUpdateTaskStatus(task.id, next) },
                                     isMilestone = task.isMilestone,
+                                    isInProgress = task.isInProgress,
+                                    onToggleInProgress = if (!readOnly && onToggleTaskInProgress != null && task.status == TaskStatus.OPEN) {
+                                        { onToggleTaskInProgress(task.id) }
+                                    } else {
+                                        null
+                                    },
                                     size = 16.dp,
                                     showHoverTooltip = !readOnly,
                                     modifier = if (readOnly) {
@@ -2971,8 +3072,14 @@ private fun RoadmapSynchronizedLanesBody(
                                     }
                                 )
                                 val baseTitle = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) }
+                                val roadmapLabelTitle = when {
+                                    task.isMilestone && task.status == TaskStatus.OPEN && task.isInProgress -> "◆ ◐ $baseTitle"
+                                    task.isMilestone -> "◆ $baseTitle"
+                                    task.status == TaskStatus.OPEN && task.isInProgress -> "◐ $baseTitle"
+                                    else -> baseTitle
+                                }
                                 Text(
-                                    text = if (task.isMilestone) "◆ $baseTitle" else baseTitle,
+                                    text = roadmapLabelTitle,
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontWeight = if (task.isMilestone) FontWeight.SemiBold else FontWeight.Medium,
                                         textDecoration = if (task.status != TaskStatus.OPEN) TextDecoration.LineThrough else TextDecoration.None
@@ -6358,7 +6465,11 @@ fun AreaPortfolioRoadmapWorkspace(
                                                 tint = colors.secondaryText,
                                                 modifier = Modifier.size(16.dp)
                                             )
-                                            ProjectProgressRing(progress = proj.progress, size = 15.dp)
+                                            ProjectProgressRing(
+                                                progress = proj.progress,
+                                                inProgressFraction = proj.inProgressProgress,
+                                                size = 15.dp
+                                            )
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     text = proj.title,
@@ -6619,7 +6730,11 @@ fun AreaPortfolioRoadmapWorkspace(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    ProjectProgressRing(progress = proj.progress, size = 14.dp)
+                                    ProjectProgressRing(
+                                        progress = proj.progress,
+                                        inProgressFraction = proj.inProgressProgress,
+                                        size = 14.dp
+                                    )
                                     Text(
                                         text = proj.title,
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),

@@ -282,10 +282,10 @@ class V32SmartSyntaxAndZenFocusTest {
         val powerModalsKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsPowerFeaturesModals.kt").readText()
         val viewModelKt = File(appSrcMain, "java/com/pv/thingsbook/ui/viewmodel/ThingsbookViewModel.kt").readText()
 
-        assertTrue(dbKt.contains("version = 8"))
+        assertTrue(dbKt.contains("version = 9"))
         assertTrue(appModuleKt.contains("MIGRATION_7_8 = object : Migration(7, 8)"))
         assertTrue(appModuleKt.contains("ALTER TABLE `tasks` ADD COLUMN `actualMinutes` INTEGER"))
-        assertTrue(appModuleKt.contains("MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8"))
+        assertTrue(appModuleKt.contains("MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9"))
 
         assertTrue(smartViewKt.contains("KEYCODE_K"))
         assertTrue(smartViewKt.contains("Key.K"))

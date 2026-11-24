@@ -1653,6 +1653,7 @@ fun ThingsSmartViewScreen(
                                     onToggleMilestone = { taskId, isMilestone ->
                                         viewModel.setTaskMilestone(taskId, isMilestone)
                                     },
+                                    onToggleInProgress = { taskId -> viewModel.toggleTaskInProgress(taskId) },
                                     onUpdateDuration = { taskId, mins ->
                                         viewModel.setStandaloneTaskDuration(taskId, mins)
                                     },
@@ -2655,6 +2656,9 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val allTags by viewModel.allTags.collectAsState()
     val navTarget by viewModel.navigationTarget.collectAsState()
     val focusTimerState by viewModel.focusTimerState.collectAsState()
+    val selectedTaskIds by viewModel.selectedTaskIds.collectAsState()
+    val expandedTaskId by viewModel.expandedTaskId.collectAsState()
+    val allOpenTasks by viewModel.allOpenTasks.collectAsState()
     val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
     val hasSampleTasks by viewModel.hasSampleTasks.collectAsState()
     val isInitialSetupBannerDismissed by viewModel.isInitialSetupBannerDismissed.collectAsState()
@@ -2719,6 +2723,10 @@ private fun ThingsTopHeaderAndQuickFindSection(
     val paletteActiveArea = (navTarget as? ActiveNavigationTarget.AreaDetail)?.let { ad ->
         areas.firstOrNull { it.id == ad.areaId }
     }
+    val paletteSelectedTask = remember(expandedTaskId, selectedTaskIds, allOpenTasks) {
+        val targetId = expandedTaskId ?: selectedTaskIds.firstOrNull()
+        targetId?.let { id -> allOpenTasks.firstOrNull { it.id == id && it.status == TaskStatus.OPEN && !it.isDeleted } }
+    }
     AnimatedVisibility(
         visible = isQuickFindOpen,
         enter = expandVertically() + fadeIn(),
@@ -2735,11 +2743,20 @@ private fun ThingsTopHeaderAndQuickFindSection(
             locale = activeLocale,
             activeProject = paletteActiveProject,
             activeArea = paletteActiveArea,
+            selectedTask = paletteSelectedTask,
             isFocusTimerActive = focusTimerState != null,
             onQueryChange = { viewModel.updateQuickFindQuery(it) },
             onFilterChange = { viewModel.updateQuickFindFilter(it) },
             onCreateTaskFromSmartSyntax = { rawInput ->
                 viewModel.createTaskFromSmartSyntax(rawInput)
+            },
+            onToggleSelectedTaskInProgress = if (paletteSelectedTask != null) {
+                {
+                    viewModel.setQuickFindOpen(false)
+                    viewModel.toggleTaskInProgress(paletteSelectedTask.id)
+                }
+            } else {
+                null
             },
             onOpenPlanMyDay = {
                 viewModel.setQuickFindOpen(false)
@@ -2892,6 +2909,7 @@ private fun ThingsTaskRowItem(
             onUpdateTimeblock = { s, d -> viewModel.updateTaskTimeblock(task.id, s, d) },
             onTogglePin = { viewModel.toggleTaskPinned(task.id) },
             onToggleMilestone = { viewModel.toggleTaskMilestone(task.id) },
+            onToggleInProgress = { viewModel.toggleTaskInProgress(task.id) },
             onUpdateEffortLevel = { eff -> viewModel.setTaskEffortLevel(task.id, eff) },
             onUpdateStandaloneDuration = { mins -> viewModel.setStandaloneTaskDuration(task.id, mins) },
             onUpdateBlockedBy = { blockers -> viewModel.setTaskBlockedBy(task.id, blockers) },
@@ -3080,6 +3098,11 @@ private fun ThingsMainTaskLazyList(
                     viewModel.expandTask(taskId)
                 }
             },
+            onToggleInProgress = { taskId ->
+                if (!isEffectiveTimelineFullScreen) {
+                    viewModel.toggleTaskInProgress(taskId)
+                }
+            },
             isFullScreen = isEffectiveTimelineFullScreen,
             modifier = modifier.imePadding()
         )
@@ -3138,6 +3161,9 @@ private fun ThingsMainTaskLazyList(
                 },
                 onToggleTaskMilestone = { taskId ->
                     viewModel.toggleTaskMilestone(taskId)
+                },
+                onToggleTaskInProgress = { taskId ->
+                    viewModel.toggleTaskInProgress(taskId)
                 },
                 onOpenTaskEditor = { taskId ->
                     viewModel.expandTask(taskId)
@@ -3204,6 +3230,11 @@ private fun ThingsMainTaskLazyList(
                 onUpdateTaskStatus = { taskId, status ->
                     if (!isEffectiveTimelineFullScreen) {
                         viewModel.updateTaskStatus(taskId, status)
+                    }
+                },
+                onToggleTaskInProgress = { taskId ->
+                    if (!isEffectiveTimelineFullScreen) {
+                        viewModel.toggleTaskInProgress(taskId)
                     }
                 },
                 onOpenTaskEditor = { taskId ->
@@ -3883,7 +3914,11 @@ private fun ThingsMainTaskLazyList(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            ProjectProgressRing(progress = proj.progress, size = 16.dp)
+                            ProjectProgressRing(
+                                progress = proj.progress,
+                                inProgressFraction = proj.inProgressProgress,
+                                size = 16.dp
+                            )
                             Text(
                                 text = proj.title,
                                 style = MaterialTheme.typography.titleSmall.copy(
@@ -5161,7 +5196,11 @@ private fun AreaProjectOverviewRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                ProjectProgressRing(progress = project.progress, size = 20.dp)
+                ProjectProgressRing(
+                    progress = project.progress,
+                    inProgressFraction = project.inProgressProgress,
+                    size = 20.dp
+                )
                 Column {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -5221,7 +5260,13 @@ private fun AreaProjectOverviewRow(
                         }
                     }
                     Text(
-                        text = "${project.completedTaskCount}/${project.totalTaskCount} • ${if (project.totalTaskCount == 1) stringResource(R.string.entity_todo) else stringResource(R.string.entity_todos)}",
+                        text = buildList {
+                            add("${project.completedTaskCount}/${project.totalTaskCount}")
+                            if (project.inProgressTaskCount > 0) {
+                                add("◐ ${stringResource(R.string.v33_project_in_progress_count, project.inProgressTaskCount)}")
+                            }
+                            add(if (project.totalTaskCount == 1) stringResource(R.string.entity_todo) else stringResource(R.string.entity_todos))
+                        }.joinToString(" • "),
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.secondaryText
                     )
@@ -5888,7 +5933,11 @@ private fun SmartViewNavigationStrip(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        ProjectProgressRing(progress = project.progress, size = 16.dp)
+                        ProjectProgressRing(
+                            progress = project.progress,
+                            inProgressFraction = project.inProgressProgress,
+                            size = 16.dp
+                        )
                         Text(
                             text = project.title,
                             style = MaterialTheme.typography.labelMedium.copy(
@@ -5941,7 +5990,11 @@ private fun SmartViewNavigationStrip(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    ProjectProgressRing(progress = project.progress, size = 16.dp)
+                    ProjectProgressRing(
+                        progress = project.progress,
+                        inProgressFraction = project.inProgressProgress,
+                        size = 16.dp
+                    )
                     Text(
                         text = project.title,
                         style = MaterialTheme.typography.labelMedium.copy(
@@ -6492,6 +6545,7 @@ private fun ViewTitleHeader(
                                 val projTitle = currentProject?.title ?: stringResource(R.string.entity_project)
                                 ProjectProgressRing(
                                     progress = currentProject?.progress ?: 0f,
+                                    inProgressFraction = currentProject?.inProgressProgress ?: 0f,
                                     size = 26.dp
                                 )
                                 ThingsHoverTooltip(
@@ -8072,10 +8126,12 @@ private fun InlineQuickFindSection(
     locale: Locale,
     activeProject: Project? = null,
     activeArea: Area? = null,
+    selectedTask: TaskItem? = null,
     isFocusTimerActive: Boolean = false,
     onQueryChange: (String) -> Unit,
     onFilterChange: (QuickFindFilter) -> Unit = {},
     onCreateTaskFromSmartSyntax: (String) -> Unit = {},
+    onToggleSelectedTaskInProgress: (() -> Unit)? = null,
     onOpenPlanMyDay: () -> Unit = {},
     onOpenAiArchitect: () -> Unit = {},
     onOpenWeeklyReview: () -> Unit = {},
@@ -8117,6 +8173,7 @@ private fun InlineQuickFindSection(
         query.trim()
     }
 
+    val toggleInProgressCmdLabel = stringResource(R.string.v33_cmd_toggle_in_progress)
     val planMyDayLabel = stringResource(R.string.v32_cmd_plan_my_day)
     val aiArchitectLabel = stringResource(R.string.v32_cmd_ai_architect)
     val weeklyReviewLabel = stringResource(R.string.v32_cmd_weekly_review)
@@ -8132,7 +8189,10 @@ private fun InlineQuickFindSection(
     val allPaletteActions = remember(
         activeProject?.id,
         activeArea?.id,
+        selectedTask?.id,
+        selectedTask?.isInProgress,
         isFocusTimerActive,
+        toggleInProgressCmdLabel,
         planMyDayLabel,
         aiArchitectLabel,
         weeklyReviewLabel,
@@ -8146,6 +8206,17 @@ private fun InlineQuickFindSection(
         openSettingsLabel
     ) {
         buildList {
+            if (selectedTask != null && onToggleSelectedTaskInProgress != null) {
+                val suffix = selectedTask.title.trim().takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty()
+                add(
+                    PaletteQuickActionItem(
+                        id = "toggle_in_progress",
+                        label = "◐ $toggleInProgressCmdLabel$suffix",
+                        icon = Icons.Outlined.Schedule,
+                        onTrigger = onToggleSelectedTaskInProgress
+                    )
+                )
+            }
             add(
                 PaletteQuickActionItem(
                     id = "plan_my_day",
@@ -8402,6 +8473,13 @@ private fun InlineQuickFindSection(
                     icon = Icons.Outlined.CheckCircleOutline,
                     active = filter.hideCompleted,
                     onClick = { onFilterChange(filter.copy(hideCompleted = !filter.hideCompleted)) }
+                )
+
+                QuickFindFilterChip(
+                    label = "◐ ${stringResource(R.string.v33_filter_in_progress_only)}",
+                    icon = Icons.Outlined.Schedule,
+                    active = filter.inProgressOnly,
+                    onClick = { onFilterChange(filter.copy(inProgressOnly = !filter.inProgressOnly)) }
                 )
 
                 Box {
@@ -8799,13 +8877,25 @@ private fun InlineQuickFindSection(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    ProjectProgressRing(progress = proj.progress, size = 18.dp)
+                                    ProjectProgressRing(
+                                        progress = proj.progress,
+                                        inProgressFraction = proj.inProgressProgress,
+                                        size = 18.dp
+                                    )
                                     Text(
                                         text = proj.title,
                                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                         color = colors.primaryText,
                                         modifier = Modifier.weight(1f)
                                     )
+                                    if (proj.inProgressTaskCount > 0) {
+                                        ThingsTagPill(
+                                            title = "◐ ${stringResource(R.string.v33_project_in_progress_count, proj.inProgressTaskCount)}",
+                                            containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                                            contentColor = colors.somedayWarmAmber,
+                                            borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f)
+                                        )
+                                    }
                                     ThingsTagPill(title = "📁 ${proj.completedTaskCount}/${proj.totalTaskCount}")
                                     proj.deadline?.let { dl ->
                                         ThingsDeadlineBadge(deadlineEpochMillis = dl, locale = locale)
@@ -8871,6 +8961,15 @@ private fun InlineQuickFindSection(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
+                                    if (task.status == TaskStatus.OPEN && task.isInProgress) {
+                                        ThingsTagPill(
+                                            title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                                            containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                                            contentColor = colors.somedayWarmAmber,
+                                            borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
                                     ThingsTagPill(title = scheduleLabel)
                                 }
 
@@ -9827,7 +9926,11 @@ private fun ThingsChromebookSidebar(
                                             modifier = Modifier.size(12.dp)
                                         )
                                     }
-                                    ProjectProgressRing(progress = project.progress, size = 16.dp)
+                                    ProjectProgressRing(
+                                        progress = project.progress,
+                                        inProgressFraction = project.inProgressProgress,
+                                        size = 16.dp
+                                    )
                                 }
                             }
                         }
@@ -9942,7 +10045,11 @@ private fun ThingsChromebookSidebar(
                                 modifier = Modifier.size(12.dp)
                             )
                         }
-                        ProjectProgressRing(progress = project.progress, size = 16.dp)
+                        ProjectProgressRing(
+                            progress = project.progress,
+                            inProgressFraction = project.inProgressProgress,
+                            size = 16.dp
+                        )
                     }
                 }
             }

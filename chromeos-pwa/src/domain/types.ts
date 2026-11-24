@@ -1,5 +1,5 @@
-export const APP_VERSION = '3.2.2';
-export const APP_BUILD_CODE = 118;
+export const APP_VERSION = '3.3.0-beta.1';
+export const APP_BUILD_CODE = 119;
 export const MAX_AREAS = 8;
 
 export type ScheduleState =
@@ -37,6 +37,7 @@ export interface SavedPerspective {
   dueWindow: 'ANY' | 'TODAY' | 'NEXT_7_DAYS' | 'OVERDUE';
   areaId: string | null;
   actionableOnly: boolean;
+  inProgressOnly?: boolean;
   sortOrder: number;
 }
 
@@ -133,6 +134,7 @@ export interface TaskRecord {
   actualMinutes?: number | null;
   isPinned?: boolean;
   isMilestone?: boolean;
+  isInProgress?: boolean;
   effortLevel?: EffortLevel | null;
   blockedByTaskIds?: string[];
   workspaceId?: string | null;

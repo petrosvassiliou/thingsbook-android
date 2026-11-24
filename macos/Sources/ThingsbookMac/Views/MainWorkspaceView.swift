@@ -827,7 +827,9 @@ public struct MainWorkspaceView: View {
 
     private var multiSelectBar: some View {
         let selectedCandidates = (store.allOpenTasks + store.logbookTasks).filter { store.selectedTaskIds.contains($0.id) }
+        let openCandidates = store.allOpenTasks.filter { store.selectedTaskIds.contains($0.id) && $0.status == .open }
         let allSelectedPinned = !selectedCandidates.isEmpty && selectedCandidates.allSatisfy(\.isPinned)
+        let allSelectedInProgress = !openCandidates.isEmpty && openCandidates.allSatisfy(\.isInProgress)
 
         return HStack(spacing: 11) {
             Text(store.trf("multiselect_count", store.selectedTaskIds.count))
@@ -898,6 +900,23 @@ public struct MainWorkspaceView: View {
             .fixedSize(horizontal: true, vertical: false)
             .buttonStyle(.plain)
             .thingsTooltip("\(store.tr(allSelectedPinned ? "v25_unpin_task" : "v25_pin_task")) (⇧⌘P)")
+
+            if !openCandidates.isEmpty {
+                Button {
+                    store.toggleInProgressForSelectedTasks()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "circle.lefthalf.filled")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(store.tr(allSelectedInProgress ? "v33_clear_in_progress" : "v33_in_progress_badge"))
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+                .foregroundStyle(allSelectedInProgress ? ThingsMacPalette.somedayAmber : .white.opacity(0.92))
+                .fixedSize(horizontal: true, vertical: false)
+                .buttonStyle(.plain)
+                .thingsTooltip(store.tr(allSelectedInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"))
+            }
 
             Button {
                 isBatchTagPopoverOpen.toggle()

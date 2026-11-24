@@ -409,12 +409,14 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.2.2")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.2.2")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 118)
-        XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.2.2", current: "3.2.1"))
-        XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.0-beta.1")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.0-beta.1")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 119)
+        XCTAssertTrue(AppUpdateService.currentVersionIsPrerelease)
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.0-beta.1", current: "3.2.2", includeBeta: true))
+        XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.3.0-beta.1", current: "3.2.2", includeBeta: false))
+        XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
+        XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false, current: "3.2.2"))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
         XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: true))
@@ -6655,6 +6657,272 @@ final class ThingsbookCoreTests: XCTestCase {
                 src.contains("uniqueKeysWithValues"),
                 "Unsafe Dictionary(uniqueKeysWithValues:) found in \(fileURL.lastPathComponent); use uniquingKeysWith instead"
             )
+        }
+    }
+
+    func testV33InProgressDatabaseAutoSignalsSmartSyntaxBackupAndSync() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let refDate = Date(timeIntervalSince1970: 1_795_540_000)
+        let todayStart = DateEpochConverter.startOfDayMillis(for: refDate, calendar: cal)
+
+        // 1. Non-destructive SQLite ALTER TABLE migration from a pre-v3.3 tasks schema
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("thingsbook-v33-mig-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let migDbPath = tempDir.appendingPathComponent("legacy_v32.sqlite3").path
+
+        var rawHandle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(migDbPath, &rawHandle), SQLITE_OK)
+        let legacySql = """
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            schedule_state TEXT NOT NULL DEFAULT 'TODAY',
+            when_date INTEGER,
+            deadline INTEGER,
+            reminder_time INTEGER,
+            scheduled_start_minutes INTEGER DEFAULT NULL,
+            duration_minutes INTEGER DEFAULT NULL,
+            actual_minutes INTEGER DEFAULT NULL,
+            completed_at INTEGER,
+            project_id TEXT,
+            heading_id TEXT,
+            area_id TEXT,
+            recurrence_rule TEXT,
+            sort_order REAL NOT NULL DEFAULT 0.0,
+            is_pinned INTEGER NOT NULL DEFAULT 0,
+            is_milestone INTEGER NOT NULL DEFAULT 0,
+            effort_level TEXT DEFAULT NULL,
+            blocked_by_json TEXT NOT NULL DEFAULT '[]',
+            workspace_id TEXT DEFAULT NULL,
+            assignee_id TEXT DEFAULT NULL,
+            tag_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            is_purged INTEGER NOT NULL DEFAULT 0,
+            is_dirty INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO tasks (id, title, status, schedule_state, when_date, sort_order, created_at, updated_at)
+        VALUES ('legacy-v32-task', 'Legacy Task Before v3.3', 'OPEN', 'TODAY', \(todayStart), 1000.0, 1000, 1000);
+        """
+        XCTAssertEqual(sqlite3_exec(rawHandle, legacySql, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(rawHandle)
+
+        let migratedDb = try ThingsSQLiteDatabase(path: migDbPath)
+        var migSnap = try migratedDb.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let migratedTask = try XCTUnwrap(migSnap.allOpenTasks.first { $0.id == "legacy-v32-task" })
+        XCTAssertFalse(migratedTask.isInProgress)
+        try migratedDb.setTaskInProgress("legacy-v32-task", isInProgress: true)
+        migSnap = try migratedDb.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertTrue(migSnap.allOpenTasks.first(where: { $0.id == "legacy-v32-task" })?.isInProgress == true)
+
+        // 2. CRUD, Project.inProgressTaskCount / inProgressProgress, FTS & Filter Search (column 27 & column 19)
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let proj = try db.createProject(title: "Glacier v3.3 Release")
+        let tDone = try db.createTask(title: "Design Spec", scheduleState: .anytime, projectId: proj.id)
+        _ = try db.setTaskStatus(taskId: tDone.id, status: .completed, referenceDate: refDate, calendar: cal)
+        let tWip1 = try db.createTask(
+            title: "Core SQLite Migration Architecture",
+            scheduleState: .today,
+            whenDate: todayStart,
+            projectId: proj.id,
+            isInProgress: true
+        )
+        let tChecklist = try db.createTask(
+            title: "SwiftUI Progress Ring Polish",
+            scheduleState: .today,
+            whenDate: todayStart,
+            projectId: proj.id,
+            checklistTitles: ["Amber 2-tone bar", "Shift-click checkbox"]
+        )
+        let tTimer = try db.createTask(
+            title: "Cloud Sync Hints Verification",
+            scheduleState: .anytime,
+            projectId: proj.id
+        )
+
+        // Auto-Signal A: Checking a checklist item on an OPEN task auto-sets isInProgress = true
+        var snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let freshChecklistTask = try XCTUnwrap(snap.allOpenTasks.first { $0.id == tChecklist.id })
+        XCTAssertFalse(freshChecklistTask.isInProgress)
+        var firstChk = try XCTUnwrap(freshChecklistTask.checklistItems.first)
+        firstChk.isCompleted = true
+        try db.updateChecklistItem(firstChk)
+
+        snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertTrue(snap.allOpenTasks.first(where: { $0.id == tChecklist.id })?.isInProgress == true)
+
+        // Project now has 4 non-canceled tasks: 1 completed (0.25), 2 open in-progress (0.50), 1 open idle
+        let updatedProj = try XCTUnwrap(snap.projects.first { $0.id == proj.id })
+        XCTAssertEqual(updatedProj.totalTaskCount, 4)
+        XCTAssertEqual(updatedProj.completedTaskCount, 1)
+        XCTAssertEqual(updatedProj.inProgressTaskCount, 2)
+        XCTAssertEqual(updatedProj.progress, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(updatedProj.inProgressProgress, 0.50, accuracy: 0.0001)
+
+        // Manual Clear In Progress override works even while 1/2 checklist items remain checked
+        try db.setTaskInProgress(tChecklist.id, isInProgress: false)
+        snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertFalse(snap.allOpenTasks.first(where: { $0.id == tChecklist.id })?.isInProgress ?? true)
+        XCTAssertEqual(snap.projects.first(where: { $0.id == proj.id })?.inProgressTaskCount, 1)
+
+        // Auto-Signal B: Incrementing actual_minutes (Focus Timer) on an OPEN task auto-sets isInProgress = true
+        try db.addTaskActualMinutes(taskId: tTimer.id, deltaMinutes: 20)
+        snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let afterTimer = try XCTUnwrap(snap.allOpenTasks.first { $0.id == tTimer.id })
+        XCTAssertEqual(afterTimer.actualMinutes, 20)
+        XCTAssertTrue(afterTimer.isInProgress)
+
+        // FTS search (column 27) & filter-only search (inProgressOnly) for both tasks & projects (column 19)
+        let ftsHits = try db.searchQuickFind(rawQuery: "Architecture", referenceDate: refDate, calendar: cal)
+        let ftsTask = try XCTUnwrap(ftsHits.tasks.first { $0.id == tWip1.id })
+        XCTAssertTrue(ftsTask.isInProgress)
+
+        let inProgFilter = QuickFindFilter(inProgressOnly: true)
+        let filteredHits = try db.searchQuickFind(rawQuery: "", filter: inProgFilter, referenceDate: refDate, calendar: cal)
+        XCTAssertEqual(Set(filteredHits.tasks.map(\.id)), Set([tWip1.id, tTimer.id]))
+        XCTAssertEqual(filteredHits.projects.map(\.id), [proj.id])
+        XCTAssertEqual(filteredHits.projects.first?.inProgressTaskCount, 2)
+
+        let ftsProjHits = try db.searchQuickFind(rawQuery: "Glacier", filter: inProgFilter, referenceDate: refDate, calendar: cal)
+        XCTAssertEqual(ftsProjHits.projects.map(\.id), [proj.id])
+
+        // 3. TaskViewSorter & SavedPerspective.inProgressOnly
+        let sortedOpen = TaskViewSorter.sort(snap.allOpenTasks, mode: "manual")
+        XCTAssertEqual(Array(sortedOpen.prefix(2).map(\.id)), [tWip1.id, tTimer.id])
+        let wipPerspective = SavedPerspective(id: "persp-wip", title: "Active WIP", inProgressOnly: true)
+        let perspMatched = PerspectiveFilterEngine.filter(
+            tasks: snap.allOpenTasks,
+            perspective: wipPerspective,
+            openTaskIds: Set(snap.allOpenTasks.map(\.id)),
+            todayEpochMillis: todayStart
+        )
+        XCTAssertEqual(Set(perspMatched.map(\.id)), Set([tWip1.id, tTimer.id]))
+
+        // 4. Resets on Duplication, Recurring Spawn, Completion, Logbook Move & Project Completion
+        let dupTask = try XCTUnwrap(try db.duplicateTask(tWip1.id, copySuffix: "Copy"))
+        XCTAssertFalse(dupTask.isInProgress, "Duplicated task must start with isInProgress = false")
+
+        let dupProj = try XCTUnwrap(try db.duplicateProject(proj.id, copySuffix: "Copy"))
+        XCTAssertEqual(dupProj.inProgressTaskCount, 0, "Duplicated project tasks must start with isInProgress = false")
+
+        let recurringTask = try db.createTask(
+            title: "Daily Standup Prep",
+            scheduleState: .today,
+            whenDate: todayStart,
+            recurrenceRule: RecurrenceRule(mode: .fixedSchedule, interval: 1, unit: .days),
+            isInProgress: true
+        )
+        let spawnedId = try XCTUnwrap(
+            try db.setTaskStatus(taskId: recurringTask.id, status: .completed, referenceDate: refDate, calendar: cal)
+        )
+        snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let completedParent = try XCTUnwrap(snap.logbookTasks.first { $0.id == recurringTask.id })
+        XCTAssertFalse(completedParent.isInProgress, "Completed task must reset isInProgress = false")
+        let spawnedOccurrence = try XCTUnwrap(snap.allOpenTasks.first { $0.id == spawnedId })
+        XCTAssertFalse(spawnedOccurrence.isInProgress, "Spawned recurring occurrence must start with isInProgress = false")
+
+        _ = try db.moveTasksToDestination([tTimer.id], destination: .smartView(.logbook), referenceDate: refDate, calendar: cal)
+        snap = try db.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertFalse(snap.logbookTasks.first(where: { $0.id == tTimer.id })?.isInProgress ?? true)
+
+        // 5. SmartSyntaxParser across EN/DE/FR/IT/ES + ◐
+        let syntaxTokens = [
+            "Ship v3.3 release ◐",
+            "Ship v3.3 release !wip",
+            "Ship v3.3 release !inprogress",
+            "Ship v3.3 release !in-progress",
+            "Ship v3.3 release !doing",
+            "Ship v3.3 release !\"in progress\"",
+            "Ship v3.3 release !inarbeit",
+            "Ship v3.3 release !in-arbeit",
+            "Ship v3.3 release !\"in arbeit\"",
+            "Ship v3.3 release !encours",
+            "Ship v3.3 release !en-cours",
+            "Ship v3.3 release !\"en cours\"",
+            "Ship v3.3 release !incorso",
+            "Ship v3.3 release !in-corso",
+            "Ship v3.3 release !\"in corso\"",
+            "Ship v3.3 release !encurso",
+            "Ship v3.3 release !en-curso",
+            "Ship v3.3 release !\"en curso\""
+        ]
+        for input in syntaxTokens {
+            let parsed = SmartSyntaxParser.parse(input, tags: [], projects: [], areas: [], referenceDate: refDate, calendar: cal)
+            XCTAssertTrue(parsed.isInProgress, "Expected isInProgress=true for '\(input)'")
+            XCTAssertTrue(parsed.hasAnyMatch, "Expected hasAnyMatch=true for '\(input)'")
+            XCTAssertEqual(parsed.cleanTitle, "Ship v3.3 release", "Expected cleanTitle for '\(input)'")
+        }
+
+        // 6. .tbbackup round-trip & Cloud Sync omittedInProgress preservation
+        var prefs = AppPreferences()
+        prefs.savedPerspectives = [wipPerspective]
+        let backupPayload = try db.buildBackupPayload(preferences: prefs)
+        XCTAssertEqual(backupPayload.tasks.first(where: { $0.id == tWip1.id })?.isInProgress, true)
+        let encrypted = try ThingsBackupCodec.encodeBackup(payload: backupPayload, password: "InProgressBackup33!")
+        let decoded = try ThingsBackupCodec.decodeBackup(rawBytes: encrypted, password: "InProgressBackup33!")
+
+        let dbRestored = try ThingsSQLiteDatabase(path: ":memory:")
+        try dbRestored.restoreBackupPayload(decoded)
+        var restoredSnap = try dbRestored.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let restoredWip = try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == tWip1.id })
+        XCTAssertTrue(restoredWip.isInProgress)
+
+        let legacyPeerWire: [String: Any] = [
+            "id": restoredWip.id,
+            "title": "Core SQLite Migration Architecture (Edited on v3.2)",
+            "status": "OPEN",
+            "scheduleState": "TODAY",
+            "whenDate": todayStart,
+            "projectId": proj.id,
+            "sortOrder": restoredWip.sortOrder,
+            "createdAt": restoredWip.createdAt,
+            "updatedAt": restoredWip.updatedAt + 10_000,
+            "isDeleted": false
+        ]
+        let legacyHints = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(legacyPeerWire))
+        XCTAssertTrue(legacyHints.omittedInProgress)
+        _ = try dbRestored.applyRemoteDeltas(
+            RemoteDeltaBatch(
+                tasks: [legacyHints.task],
+                taskOmittedInProgressIds: legacyHints.omittedInProgress ? [legacyHints.task.id] : []
+            )
+        )
+        restoredSnap = try dbRestored.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        let afterLegacySync = try XCTUnwrap(restoredSnap.allOpenTasks.first { $0.id == restoredWip.id })
+        XCTAssertEqual(afterLegacySync.title, "Core SQLite Migration Architecture (Edited on v3.2)")
+        XCTAssertTrue(afterLegacySync.isInProgress, "Legacy peer omitting isInProgress must preserve local isInProgress on OPEN task")
+
+        var explicitClearWire = legacyPeerWire
+        explicitClearWire["isInProgress"] = false
+        explicitClearWire["updatedAt"] = afterLegacySync.updatedAt + 10_000
+        let explicitHints = try XCTUnwrap(FirebaseCloudSyncService.parseTaskWithHints(explicitClearWire))
+        XCTAssertFalse(explicitHints.omittedInProgress)
+        XCTAssertFalse(explicitHints.task.isInProgress)
+        _ = try dbRestored.applyRemoteDeltas(RemoteDeltaBatch(tasks: [explicitHints.task]))
+        restoredSnap = try dbRestored.loadWorkspaceSnapshot(referenceDate: refDate, calendar: cal)
+        XCTAssertFalse(restoredSnap.allOpenTasks.first(where: { $0.id == restoredWip.id })?.isInProgress ?? true)
+
+        // 7. All 6 v33_* localization keys exist across EN/DE/FR/IT/ES
+        let v33Keys = [
+            "v33_in_progress_badge",
+            "v33_mark_in_progress",
+            "v33_clear_in_progress",
+            "v33_filter_in_progress_only",
+            "v33_project_in_progress_count",
+            "v33_cmd_toggle_in_progress"
+        ]
+        for lang in [AppLanguage.en, .de, .fr, .it, .es] {
+            for key in v33Keys {
+                let text = ThingsStrings.shared.text(key, lang: lang)
+                XCTAssertNotEqual(text, key, "Missing v33 key \(key) in \(lang.rawValue)")
+                XCTAssertFalse(text.isEmpty)
+            }
         }
     }
 }

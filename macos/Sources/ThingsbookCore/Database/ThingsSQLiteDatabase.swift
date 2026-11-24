@@ -76,6 +76,7 @@ public struct RemoteDeltaBatch: Sendable {
     public var taskOmittedMilestoneTaskIds: Set<String>
     public var taskOmittedV30TaskIds: Set<String>
     public var taskOmittedActualMinutesIds: Set<String>
+    public var taskOmittedInProgressIds: Set<String>
     public var checklistItems: [ChecklistItem]
     public var attachments: [RemoteAttachmentDelta]
     public var projectTemplates: [ProjectTemplate]
@@ -95,6 +96,7 @@ public struct RemoteDeltaBatch: Sendable {
         taskOmittedMilestoneTaskIds: Set<String> = [],
         taskOmittedV30TaskIds: Set<String> = [],
         taskOmittedActualMinutesIds: Set<String> = [],
+        taskOmittedInProgressIds: Set<String> = [],
         checklistItems: [ChecklistItem] = [],
         attachments: [RemoteAttachmentDelta] = [],
         projectTemplates: [ProjectTemplate] = []
@@ -113,6 +115,7 @@ public struct RemoteDeltaBatch: Sendable {
         self.taskOmittedMilestoneTaskIds = taskOmittedMilestoneTaskIds
         self.taskOmittedV30TaskIds = taskOmittedV30TaskIds
         self.taskOmittedActualMinutesIds = taskOmittedActualMinutesIds
+        self.taskOmittedInProgressIds = taskOmittedInProgressIds
         self.checklistItems = checklistItems
         self.attachments = attachments
         self.projectTemplates = projectTemplates
@@ -325,6 +328,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             sort_order REAL NOT NULL DEFAULT 0.0,
             is_pinned INTEGER NOT NULL DEFAULT 0,
             is_milestone INTEGER NOT NULL DEFAULT 0,
+            is_in_progress INTEGER NOT NULL DEFAULT 0,
             effort_level TEXT DEFAULT NULL,
             blocked_by_json TEXT NOT NULL DEFAULT '[]',
             workspace_id TEXT DEFAULT NULL,
@@ -449,6 +453,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
         // Safe non-destructive v3.2.0 column migration
         try? execLocked("ALTER TABLE tasks ADD COLUMN actual_minutes INTEGER DEFAULT NULL;")
+
+        // Safe non-destructive v3.3.0 column migration
+        try? execLocked("ALTER TABLE tasks ADD COLUMN is_in_progress INTEGER NOT NULL DEFAULT 0;")
 
         try installFts5Locked()
     }
@@ -737,6 +744,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             inbox = TaskViewSorter.sort(inbox, mode: "manual")
             todayDaytime.sort {
                 if $0.isPinned != $1.isPinned { return $0.isPinned && !$1.isPinned }
+                let ip0 = $0.status == .open && $0.isInProgress
+                let ip1 = $1.status == .open && $1.isInProgress
+                if ip0 != ip1 { return ip0 && !ip1 }
                 let d0 = $0.deadline == nil ? 1 : 0
                 let d1 = $1.deadline == nil ? 1 : 0
                 if d0 != d1 { return d0 < d1 }
@@ -749,6 +759,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 let w1 = $1.whenDate ?? ($1.isMilestone ? $1.deadline : nil) ?? Int64.max
                 if w0 != w1 { return w0 < w1 }
                 if $0.isPinned != $1.isPinned { return $0.isPinned && !$1.isPinned }
+                let ip0 = $0.status == .open && $0.isInProgress
+                let ip1 = $1.status == .open && $1.isInProgress
+                if ip0 != ip1 { return ip0 && !ip1 }
                 return $0.sortOrder < $1.sortOrder
             }
             anytime = TaskViewSorter.sort(anytime, mode: "manual")
@@ -806,7 +819,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
             var matchedTasks: [TaskItem] = []
             if filter.scope != .projects {
-                let statusClause = filter.hideCompleted ? " AND t.status = 'OPEN'" : ""
+                let statusClause = (filter.hideCompleted || filter.inProgressOnly) ? " AND t.status = 'OPEN'" : ""
+                let inProgClause = filter.inProgressOnly ? " AND t.is_in_progress = 1" : ""
                 let taskSql: String
                 if !sanitized.isEmpty {
                     taskSql = """
@@ -815,10 +829,10 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
                                t.scheduled_start_minutes, t.duration_minutes,
                                t.is_pinned, t.effort_level, t.blocked_by_json, t.workspace_id, t.assignee_id, t.is_milestone,
-                               t.actual_minutes
+                               t.actual_minutes, t.is_in_progress
                         FROM tasks t
                         JOIN tasks_fts fts ON t.rowid = fts.rowid
-                        WHERE tasks_fts MATCH ? AND t.is_deleted = 0\(statusClause)
+                        WHERE tasks_fts MATCH ? AND t.is_deleted = 0\(statusClause)\(inProgClause)
                         ORDER BY bm25(tasks_fts), t.updated_at DESC
                         LIMIT 250;
                     """
@@ -829,9 +843,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                t.recurrence_rule, t.sort_order, t.tag_ids_json, t.created_at, t.updated_at, t.is_deleted,
                                t.scheduled_start_minutes, t.duration_minutes,
                                t.is_pinned, t.effort_level, t.blocked_by_json, t.workspace_id, t.assignee_id, t.is_milestone,
-                               t.actual_minutes
+                               t.actual_minutes, t.is_in_progress
                         FROM tasks t
-                        WHERE t.is_deleted = 0\(statusClause)
+                        WHERE t.is_deleted = 0\(statusClause)\(inProgClause)
                         ORDER BY CASE WHEN t.status = 'OPEN' THEN 0 ELSE 1 END ASC, t.updated_at DESC
                         LIMIT 300;
                     """
@@ -869,7 +883,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
                                (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
                                (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
-                               p.last_reviewed_at, p.workspace_id, p.view_mode
+                               p.last_reviewed_at, p.workspace_id, p.view_mode,
+                               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'OPEN' AND t.is_in_progress = 1) AS in_prog_cnt
                         FROM projects p
                         JOIN projects_fts fts ON p.rowid = fts.rowid
                         WHERE projects_fts MATCH ? AND p.is_deleted = 0\(projStatusClause)
@@ -882,7 +897,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
                                (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
                                (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
-                               p.last_reviewed_at, p.workspace_id, p.view_mode
+                               p.last_reviewed_at, p.workspace_id, p.view_mode,
+                               (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'OPEN' AND t.is_in_progress = 1) AS in_prog_cnt
                         FROM projects p
                         WHERE p.is_deleted = 0\(projStatusClause)
                         ORDER BY p.sort_order ASC
@@ -1089,7 +1105,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         tagIds: [String] = [],
         checklistTitles: [String] = [],
         sortOrder: Double? = nil,
-        isMilestone: Bool = false
+        isMilestone: Bool = false,
+        isInProgress: Bool = false
     ) throws -> TaskItem {
         let created = try queue.sync { () -> TaskItem in
             let now = nowMillis()
@@ -1143,7 +1160,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     checklistItems: items,
                     tags: tags,
                     createdAt: now,
-                    updatedAt: now
+                    updatedAt: now,
+                    isInProgress: isInProgress
                 )
                 try upsertTaskLocked(task, tagIds: tagIds, isDirty: true)
                 for item in items {
@@ -1273,6 +1291,41 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         if didMutate { notifyMutation() }
     }
 
+    public func setTaskInProgress(_ id: String, isInProgress: Bool) throws {
+        try setTasksInProgress([id], isInProgress: isInProgress)
+    }
+
+    public func setTasksInProgress(_ ids: [String], isInProgress: Bool) throws {
+        guard !ids.isEmpty else { return }
+        let didMutate: Bool = try queue.sync {
+            let now = nowMillis()
+            var changed = false
+            try inTransactionLocked {
+                let stmt = try prepareLocked("""
+                    UPDATE tasks
+                    SET is_in_progress = CASE WHEN status = 'OPEN' THEN ? ELSE 0 END,
+                        updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END,
+                        is_dirty = 1
+                    WHERE id = ? AND is_deleted = 0;
+                """)
+                defer { sqlite3_finalize(stmt) }
+                for tid in Set(ids) {
+                    sqlite3_reset(stmt)
+                    sqlite3_clear_bindings(stmt)
+                    bindBool(stmt, 1, isInProgress)
+                    bindInt64(stmt, 2, now)
+                    bindInt64(stmt, 3, now)
+                    bindText(stmt, 4, tid)
+                    if sqlite3_step(stmt) == SQLITE_DONE, sqlite3_changes(db) > 0 {
+                        changed = true
+                    }
+                }
+            }
+            return changed
+        }
+        if didMutate { notifyMutation() }
+    }
+
     public func setTaskEffortAndDuration(
         taskId: String,
         effortLevel: String?,
@@ -1351,6 +1404,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 let stmt = try prepareLocked("""
                     UPDATE tasks
                     SET actual_minutes = ?,
+                        is_in_progress = CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END,
                         updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END,
                         is_dirty = 1
                     WHERE id = ? AND is_deleted = 0;
@@ -1463,6 +1517,9 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             let rawTagIds = (try? fetchAllTaskTagIdsLocked()[taskId]) ?? existing.tagIds
             let now = max(Int64(referenceDate.timeIntervalSince1970 * 1000.0), existing.updatedAt + 1)
             existing.status = status
+            if status != .open {
+                existing.isInProgress = false
+            }
             existing.completedAt = (status == .completed || status == .canceled) ? now : nil
             existing.updatedAt = now
             didMutate = true
@@ -1613,7 +1670,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             checklistItems: clonedChecklists,
             tags: completedTask.tags,
             createdAt: existingById?.createdAt ?? nowMillis,
-            updatedAt: nextUpdatedAt
+            updatedAt: nextUpdatedAt,
+            isInProgress: false
         )
 
         if Self.buildRecurringSeriesKey(spawned, overrideTagIds: rawTagIds) != nil {
@@ -1667,6 +1725,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     primary.scheduleState = nextSchedule
                     primary.deadline = nextDeadline
                     primary.reminderTime = nextReminder
+                    primary.isInProgress = false
                 } else {
                     if primary.deadline == nil, let sDead = nextDeadline {
                         primary.deadline = sDead
@@ -1723,7 +1782,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 bindText(chkStmt, 2, taskId)
                 _ = sqlite3_step(chkStmt)
 
-                let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, is_in_progress = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
                 defer { sqlite3_finalize(stmt) }
                 bindInt64(stmt, 1, now)
                 bindText(stmt, 2, taskId)
@@ -1845,7 +1904,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindText(ttStmt, 1, taskId)
         _ = sqlite3_step(ttStmt)
 
-        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, is_pinned = 0, is_milestone = 0, effort_level = NULL, blocked_by_json = '[]', workspace_id = NULL, assignee_id = NULL, title = '', notes = '', recurrence_rule = NULL, tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, actual_minutes = NULL, updated_at = MAX(updated_at + 1, ?) WHERE id = ?;")
+        let stmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 1, is_dirty = 1, is_pinned = 0, is_milestone = 0, is_in_progress = 0, effort_level = NULL, blocked_by_json = '[]', workspace_id = NULL, assignee_id = NULL, title = '', notes = '', recurrence_rule = NULL, tag_ids_json = '[]', scheduled_start_minutes = NULL, duration_minutes = NULL, actual_minutes = NULL, updated_at = MAX(updated_at + 1, ?) WHERE id = ?;")
         defer { sqlite3_finalize(stmt) }
         bindInt64(stmt, 1, now)
         bindText(stmt, 2, taskId)
@@ -1958,7 +2017,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             checklistItems: clonedChecklists,
             tags: source.tags,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            isInProgress: false
         )
         try upsertTaskLocked(copy, tagIds: rawTagIds, isDirty: true)
         for chk in clonedChecklists {
@@ -2175,7 +2235,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         bindText(chkStmt, 2, tid)
                         _ = sqlite3_step(chkStmt)
 
-                        let delStmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
+                        let delStmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, is_in_progress = 0, updated_at = ?, is_dirty = 1 WHERE id = ?;")
                         defer { sqlite3_finalize(delStmt) }
                         bindInt64(delStmt, 1, max(now + Int64(idx), existing.updatedAt + 1))
                         bindText(delStmt, 2, tid)
@@ -2247,6 +2307,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         case .logbook:
                             let prevStatus = existing.status
                             existing.status = .completed
+                            existing.isInProgress = false
                             existing.completedAt = existing.completedAt ?? stepNow
                             existing.updatedAt = stepNow
                             try upsertTaskLocked(existing, tagIds: rawTags, isDirty: true)
@@ -2597,6 +2658,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             copy.updatedAt = now
             try inTransactionLocked {
                 try upsertChecklistItemLocked(copy, isDirty: true)
+                if copy.isCompleted && !copy.isDeleted {
+                    let ipStmt = try prepareLocked("UPDATE tasks SET is_in_progress = 1, updated_at = ?, is_dirty = 1 WHERE id = ? AND is_deleted = 0 AND status = 'OPEN' AND is_in_progress = 0;")
+                    defer { sqlite3_finalize(ipStmt) }
+                    bindInt64(ipStmt, 1, now)
+                    bindText(ipStmt, 2, copy.taskId)
+                    _ = sqlite3_step(ipStmt)
+                }
                 try touchTaskUpdatedLocked(taskId: copy.taskId, now: now)
             }
         }
@@ -3144,6 +3212,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                             let tags = rawTagsByTask[tid] ?? tk.tagIds
                             let stamp = max(now, tk.updatedAt + 1)
                             tk.status = .completed
+                            tk.isInProgress = false
                             tk.completedAt = stamp
                             tk.updatedAt = stamp
                             try upsertTaskLocked(tk, tagIds: tags, isDirty: true)
@@ -3226,7 +3295,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         }
                     }
 
-                    let delTasksStmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
+                    let delTasksStmt = try prepareLocked("UPDATE tasks SET is_deleted = 1, is_purged = 0, is_in_progress = 0, updated_at = ?, is_dirty = 1 WHERE project_id = ? AND is_deleted = 0;")
                     defer { sqlite3_finalize(delTasksStmt) }
                     bindInt64(delTasksStmt, 1, now)
                     bindText(delTasksStmt, 2, projectId)
@@ -3479,7 +3548,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         checklistItems: clonedChecklists,
                         tags: t.tags,
                         createdAt: now,
-                        updatedAt: now
+                        updatedAt: now,
+                        isInProgress: false
                     )
                     try upsertTaskLocked(clonedTask, tagIds: t.tagIds, isDirty: true)
                     for chk in clonedChecklists {
@@ -5115,7 +5185,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                     assigneeId: t.assigneeId,
                     tagIdsJson: encodeStringArray(t.tagIds),
                     createdAt: t.createdAt,
-                    updatedAt: t.updatedAt
+                    updatedAt: t.updatedAt,
+                    isInProgress: t.status == .open && t.isInProgress
                 )
             }
 
@@ -5370,7 +5441,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                         workspaceId: dto.workspaceId,
                         assigneeId: dto.assigneeId,
                         createdAt: dto.createdAt,
-                        updatedAt: dto.updatedAt
+                        updatedAt: dto.updatedAt,
+                        isInProgress: TaskStatus.normalized(dto.status) == .open && dto.isInProgress
                     )
                     try upsertTaskLocked(task, tagIds: mergedTags, isDirty: true)
                 }
@@ -5794,6 +5866,15 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                                 if toSave.actualMinutes == nil {
                                     toSave.actualMinutes = existingLocal.actualMinutes
                                 }
+                            }
+                            if let existingLocal,
+                               !toSave.isDeleted,
+                               toSave.status == .open,
+                               deltas.taskOmittedInProgressIds.contains(remote.id) {
+                                toSave.isInProgress = existingLocal.isInProgress
+                            }
+                            if toSave.status != .open || toSave.isDeleted {
+                                toSave.isInProgress = false
                             }
                             let rawTags = deltas.taskTagIdsByTaskId[remote.id] ?? remote.tagIds
                             let remappedTags = Self.remapTagIdList(rawTags, using: tagRemap)
@@ -6812,6 +6893,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             guard !task.isDeleted, let m = task.actualMinutes, m > 0 else { return nil }
             return Int64(min(48_000, m))
         }()
+        let effectiveInProgress = !task.isDeleted && task.status == .open && task.isInProgress
         let stmt = try prepareLocked("""
             INSERT INTO tasks (
                 id, title, notes, status, schedule_state, when_date, deadline, reminder_time,
@@ -6819,8 +6901,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 completed_at, project_id, heading_id, area_id, recurrence_rule, sort_order,
                 is_pinned, is_milestone, effort_level, blocked_by_json, workspace_id, assignee_id,
                 tag_ids_json, created_at, updated_at, is_deleted, is_purged, is_dirty,
-                actual_minutes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                actual_minutes, is_in_progress
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 notes = excluded.notes,
@@ -6840,6 +6922,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                 sort_order = excluded.sort_order,
                 is_pinned = excluded.is_pinned,
                 is_milestone = excluded.is_milestone,
+                is_in_progress = excluded.is_in_progress,
                 effort_level = excluded.effort_level,
                 blocked_by_json = excluded.blocked_by_json,
                 workspace_id = excluded.workspace_id,
@@ -6884,6 +6967,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         bindBool(stmt, 27, isPurgedTombstone)
         bindBool(stmt, 28, isDirty)
         bindInt64(stmt, 29, effectiveActualMinutes)
+        bindBool(stmt, 30, effectiveInProgress)
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw ThingsDatabaseError.sqlError(currentErrorMessageLocked())
         }
@@ -7018,7 +7102,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                    p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
-                   p.last_reviewed_at, p.workspace_id, p.view_mode
+                   p.last_reviewed_at, p.workspace_id, p.view_mode,
+                   (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'OPEN' AND t.is_in_progress = 1) AS in_prog_cnt
             FROM projects p WHERE p.id = ? LIMIT 1;
         """)
         defer { sqlite3_finalize(stmt) }
@@ -7041,7 +7126,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                    p.deadline, p.completed_at, p.sort_order, p.tag_ids_json, p.created_at, p.updated_at, p.is_deleted,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status != 'CANCELED') AS total_cnt,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'COMPLETED') AS comp_cnt,
-                   p.last_reviewed_at, p.workspace_id, p.view_mode
+                   p.last_reviewed_at, p.workspace_id, p.view_mode,
+                   (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.is_deleted = 0 AND t.status = 'OPEN' AND t.is_in_progress = 1) AS in_prog_cnt
             FROM projects p WHERE \(whereClause) ORDER BY p.sort_order ASC;
         """)
         defer { sqlite3_finalize(stmt) }
@@ -7094,7 +7180,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             completedTaskCount: Int(sqlite3_column_int(stmt, 15)),
             createdAt: sqlite3_column_int64(stmt, 11),
             updatedAt: sqlite3_column_int64(stmt, 12),
-            isDeleted: isDeleted
+            isDeleted: isDeleted,
+            inProgressTaskCount: isDeleted ? 0 : Int(colInt64(stmt, 19) ?? 0)
         )
     }
 
@@ -7326,7 +7413,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
                    tag_ids_json, created_at, updated_at, is_deleted,
                    scheduled_start_minutes, duration_minutes,
                    is_pinned, effort_level, blocked_by_json, workspace_id, assignee_id, is_milestone,
-                   actual_minutes
+                   actual_minutes, is_in_progress
             FROM tasks WHERE \(whereClause) ORDER BY \(orderBy);
         """)
         defer { sqlite3_finalize(stmt) }
@@ -7356,6 +7443,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     ) -> TaskItem {
         let id = colString(stmt, 0) ?? ""
         let isDeleted = colBool(stmt, 17)
+        let status = TaskStatus.normalized(colString(stmt, 3))
         let refTagIds = isDeleted ? [] : (tagIdsByTask[id] ?? [])
         let resolvedTags = refTagIds.compactMap { tagsById[$0] }.sorted { $0.sortOrder < $1.sortOrder }
         let isPinned = !isDeleted && colBool(stmt, 20)
@@ -7365,12 +7453,13 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
         let assigneeId = isDeleted ? nil : colString(stmt, 24)
         let isMilestone = !isDeleted && colBool(stmt, 25)
         let actualMinutes = isDeleted ? nil : colInt64(stmt, 26).map(Int.init)
+        let isInProgress = !isDeleted && status == .open && colBool(stmt, 27)
 
         return TaskItem(
             id: id,
             title: colString(stmt, 1) ?? "",
             notes: colString(stmt, 2) ?? "",
-            status: TaskStatus.normalized(colString(stmt, 3)),
+            status: status,
             scheduleState: ScheduleState.normalized(colString(stmt, 4), fallback: .inbox),
             whenDate: colInt64(stmt, 5),
             deadline: colInt64(stmt, 6),
@@ -7395,7 +7484,8 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
             attachments: attachmentsByTask[id] ?? [],
             createdAt: sqlite3_column_int64(stmt, 15),
             updatedAt: sqlite3_column_int64(stmt, 16),
-            isDeleted: isDeleted
+            isDeleted: isDeleted,
+            isInProgress: isInProgress
         )
     }
 

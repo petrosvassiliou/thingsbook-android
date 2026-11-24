@@ -1711,6 +1711,9 @@ export const PerspectiveModal: React.FC<PerspectiveModalProps> = ({
   const [actionableOnly, setActionableOnly] = useState<boolean>(
     perspective ? perspective.actionableOnly : true
   );
+  const [inProgressOnly, setInProgressOnly] = useState<boolean>(
+    Boolean(perspective?.inProgressOnly)
+  );
 
   const activeAreas = areas.filter((a) => !a.isDeleted);
   const activeTags = tags.filter((tg) => !tg.isDeleted);
@@ -1734,6 +1737,7 @@ export const PerspectiveModal: React.FC<PerspectiveModalProps> = ({
       dueWindow,
       areaId,
       actionableOnly,
+      inProgressOnly,
       sortOrder: perspective?.sortOrder ?? nextSortOrder
     });
   };
@@ -1931,6 +1935,34 @@ export const PerspectiveModal: React.FC<PerspectiveModalProps> = ({
               aria-label={t.perspectiveActionableOnlyLabel}
               aria-pressed={actionableOnly}
               onClick={() => setActionableOnly((v) => !v)}
+            >
+              <span className="toggle-switch-knob" />
+            </button>
+          </div>
+
+          {/* In Progress Only Toggle */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              padding: '9px 12px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)'
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 560 }}>
+              ◐ {t.v33FilterInProgressOnly}
+            </span>
+            <button
+              type="button"
+              data-testid="perspective-in-progress-only-toggle"
+              className={`toggle-switch ${inProgressOnly ? 'on' : ''}`}
+              aria-label={t.v33FilterInProgressOnly}
+              aria-pressed={inProgressOnly}
+              onClick={() => setInProgressOnly((v) => !v)}
             >
               <span className="toggle-switch-knob" />
             </button>

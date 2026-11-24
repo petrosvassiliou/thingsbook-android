@@ -61,8 +61,11 @@ export interface RoadmapPhaseLane {
   plottedTasks: PlottedRoadmapTask[];
   unscheduledTasks: TaskRecord[];
   completedCount: number;
+  inProgressCount: number;
   totalCount: number;
 }
+
+export type RoadmapLane = RoadmapPhaseLane;
 
 export interface RoadmapDependencyEdge {
   fromTaskId: string;
@@ -220,6 +223,11 @@ export function buildProjectRoadmapLayout(
       if (Boolean(b.isPinned) !== Boolean(a.isPinned)) {
         return a.isPinned ? -1 : 1;
       }
+      const aInProg = a.status === 'OPEN' && Boolean(a.isInProgress);
+      const bInProg = b.status === 'OPEN' && Boolean(b.isInProgress);
+      if (bInProg !== aInProg) {
+        return aInProg ? -1 : 1;
+      }
       return a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
     });
 
@@ -253,6 +261,7 @@ export function buildProjectRoadmapLayout(
     rawSpans: RawResolvedTaskSpan[];
     unscheduledTasks: TaskRecord[];
     completedCount: number;
+    inProgressCount: number;
     totalCount: number;
   }
 
@@ -308,6 +317,7 @@ export function buildProjectRoadmapLayout(
       rawSpans,
       unscheduledTasks: unscheduled,
       completedCount: ungroupedAll.filter((t) => t.status === 'COMPLETED').length,
+      inProgressCount: ungroupedAll.filter((t) => t.status === 'OPEN' && Boolean(t.isInProgress)).length,
       totalCount: ungroupedAll.length
     });
   }
@@ -374,6 +384,7 @@ export function buildProjectRoadmapLayout(
       rawSpans,
       unscheduledTasks: unscheduled,
       completedCount: laneTasks.filter((t) => t.status === 'COMPLETED').length,
+      inProgressCount: laneTasks.filter((t) => t.status === 'OPEN' && Boolean(t.isInProgress)).length,
       totalCount: laneTasks.length
     });
   }
@@ -506,6 +517,7 @@ export function buildProjectRoadmapLayout(
       plottedTasks,
       unscheduledTasks: pl.unscheduledTasks,
       completedCount: pl.completedCount,
+      inProgressCount: pl.inProgressCount,
       totalCount: pl.totalCount
     };
   });
@@ -765,6 +777,7 @@ export interface AreaPortfolioProjectLane {
   spanDays: number;
   milestoneBars: PlottedRoadmapTask[];
   completedCount: number;
+  inProgressCount: number;
   totalCount: number;
 }
 
@@ -801,6 +814,7 @@ export function buildAreaPortfolioRoadmapLayout(
     summaryStartEpoch: number;
     summaryEndEpoch: number;
     completedCount: number;
+    inProgressCount: number;
     totalCount: number;
   }
 
@@ -856,6 +870,7 @@ export function buildAreaPortfolioRoadmapLayout(
         summaryStartEpoch,
         summaryEndEpoch,
         completedCount: projTasks.filter((t) => t.status === 'COMPLETED').length,
+        inProgressCount: projTasks.filter((t) => t.status === 'OPEN' && Boolean(t.isInProgress)).length,
         totalCount: projTasks.length
       });
     }
@@ -982,6 +997,7 @@ export function buildAreaPortfolioRoadmapLayout(
         (pt) => pt.isMilestone || Boolean(pt.task.isMilestone)
       ),
       completedCount: cand.completedCount,
+      inProgressCount: cand.inProgressCount,
       totalCount: cand.totalCount
     };
   });
@@ -1045,6 +1061,7 @@ export function toExportablePortfolioLayout(
       plottedTasks: remappedBars,
       unscheduledTasks: [],
       completedCount: pLane.completedCount,
+      inProgressCount: pLane.inProgressCount,
       totalCount: pLane.totalCount
     });
   });

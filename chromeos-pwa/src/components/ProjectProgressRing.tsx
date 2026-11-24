@@ -4,6 +4,7 @@ import { Check } from 'lucide-react';
 interface ProjectProgressRingProps {
   completed: number;
   total: number;
+  inProgress?: number;
   size?: number;
   isProjectCompleted?: boolean;
   showCount?: boolean;
@@ -17,6 +18,7 @@ interface ProjectProgressRingProps {
 export const ProjectProgressRing: React.FC<ProjectProgressRingProps> = ({
   completed,
   total,
+  inProgress = 0,
   size = 16,
   isProjectCompleted = false,
   showCount = false
@@ -26,6 +28,13 @@ export const ProjectProgressRing: React.FC<ProjectProgressRingProps> = ({
     : total > 0
       ? Math.min(1, Math.max(0, completed / total))
       : 0;
+  const completedPct = Math.round(ratio * 100);
+  const safeInProgress =
+    !isProjectCompleted && total > 0 && inProgress > 0 ? Math.max(0, inProgress) : 0;
+  const stackedPct =
+    safeInProgress > 0
+      ? Math.min(100, Math.round(Math.min(1, (completed + safeInProgress) / total) * 100))
+      : completedPct;
   const isLarge = size >= 22;
   const trackWidth = isLarge ? 68 : size >= 15 ? 34 : 26;
   const trackHeight = isLarge ? 6 : 4.5;
@@ -44,9 +53,15 @@ export const ProjectProgressRing: React.FC<ProjectProgressRingProps> = ({
         className="project-linear-track"
         style={{ width: trackWidth, height: trackHeight }}
       >
+        {stackedPct > completedPct && (
+          <span
+            className="project-linear-fill-in-progress"
+            style={{ width: `${stackedPct}%` }}
+          />
+        )}
         <span
           className="project-linear-fill"
-          style={{ width: `${Math.round(ratio * 100)}%` }}
+          style={{ width: `${completedPct}%` }}
         />
       </span>
       {(showCount || isLarge) && (

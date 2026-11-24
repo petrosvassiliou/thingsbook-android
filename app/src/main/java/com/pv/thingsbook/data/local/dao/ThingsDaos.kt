@@ -83,6 +83,7 @@ interface ProjectDao {
         SELECT p.*,
             (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0 AND t.status != 'CANCELED') AS totalTaskCount,
             (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0 AND t.status = 'COMPLETED') AS completedTaskCount,
+            (SELECT COUNT(*) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0 AND t.status = 'OPEN' AND t.isInProgress = 1) AS inProgressTaskCount,
             (SELECT MAX(CASE WHEN COALESCE(t.completedAt, 0) > t.updatedAt THEN COALESCE(t.completedAt, 0) ELSE t.updatedAt END) FROM tasks t WHERE t.projectId = p.id AND t.isDeleted = 0) AS lastTaskActivityAt
         FROM projects p
         WHERE p.isDeleted = 0 AND p.status = 'ACTIVE'
@@ -620,6 +621,9 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET isMilestone = :isMilestone, updatedAt = :updatedAt, isDirty = 1 WHERE id = :taskId")
     suspend fun updateTaskMilestone(taskId: String, isMilestone: Boolean, updatedAt: Long)
+
+    @Query("UPDATE tasks SET isInProgress = :isInProgress, updatedAt = :updatedAt, isDirty = 1 WHERE id = :taskId")
+    suspend fun updateTaskInProgress(taskId: String, isInProgress: Boolean, updatedAt: Long)
 }
 
 @Dao

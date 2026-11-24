@@ -64,12 +64,14 @@ data class CloudDeltaBatchPayload(
             var omittedPinIds = emptySet<String>()
             var omittedV30TaskIds = emptySet<String>()
             var omittedActualMinutesIds = emptySet<String>()
+            var omittedInProgressIds = emptySet<String>()
             runCatching {
                 val arr = rootObj["tasks"]?.jsonArray ?: return@runCatching
                 val tbSet = HashSet<String>()
                 val pinSet = HashSet<String>()
                 val v30Set = HashSet<String>()
                 val actSet = HashSet<String>()
+                val wipSet = HashSet<String>()
                 for (el in arr) {
                     val obj = el.jsonObject
                     val tid = obj["id"]?.jsonPrimitive?.content?.trim().orEmpty()
@@ -90,11 +92,15 @@ data class CloudDeltaBatchPayload(
                     if (!obj.containsKey("actualMinutes")) {
                         actSet.add(tid)
                     }
+                    if (!obj.containsKey("isInProgress")) {
+                        wipSet.add(tid)
+                    }
                 }
                 omittedTimeblockIds = tbSet
                 omittedPinIds = pinSet
                 omittedV30TaskIds = v30Set
                 omittedActualMinutesIds = actSet
+                omittedInProgressIds = wipSet
             }
 
             var omittedEndDateHeadingIds = emptySet<String>()
@@ -138,6 +144,7 @@ data class CloudDeltaBatchPayload(
                 omittedPinIds.isEmpty() &&
                 omittedV30TaskIds.isEmpty() &&
                 omittedActualMinutesIds.isEmpty() &&
+                omittedInProgressIds.isEmpty() &&
                 omittedEndDateHeadingIds.isEmpty() &&
                 omittedStartDateHeadingIds.isEmpty() &&
                 omittedV30ProjectIds.isEmpty()
@@ -173,7 +180,8 @@ data class CloudDeltaBatchPayload(
                     omittedTimeblockIds.isEmpty() &&
                     omittedPinIds.isEmpty() &&
                     omittedV30TaskIds.isEmpty() &&
-                    omittedActualMinutesIds.isEmpty()
+                    omittedActualMinutesIds.isEmpty() &&
+                    omittedInProgressIds.isEmpty()
                 ) {
                     base.tasks
                 } else {
@@ -182,12 +190,14 @@ data class CloudDeltaBatchPayload(
                         val omitPin = dto.id in omittedPinIds
                         val omitV30 = dto.id in omittedV30TaskIds
                         val omitAct = dto.id in omittedActualMinutesIds
-                        if (omitTb || omitPin || omitV30 || omitAct) {
+                        val omitWip = dto.id in omittedInProgressIds
+                        if (omitTb || omitPin || omitV30 || omitAct || omitWip) {
                             dto.copy(
                                 omittedTimeblockFields = dto.omittedTimeblockFields || omitTb,
                                 omittedPinField = dto.omittedPinField || omitPin,
                                 omittedV30TaskFields = dto.omittedV30TaskFields || omitV30,
-                                omittedActualMinutesField = dto.omittedActualMinutesField || omitAct
+                                omittedActualMinutesField = dto.omittedActualMinutesField || omitAct,
+                                omittedInProgressField = dto.omittedInProgressField || omitWip
                             )
                         } else {
                             dto
@@ -491,6 +501,7 @@ data class TaskFirestoreDto(
     val sortOrder: Double = 0.0,
     val isPinned: Boolean = false,
     val isMilestone: Boolean? = null,
+    val isInProgress: Boolean = false,
     val effortLevel: String? = null,
     val blockedByTaskIds: List<String> = emptyList(),
     val workspaceId: String? = null,
@@ -507,10 +518,13 @@ data class TaskFirestoreDto(
     @Transient
     val omittedV30TaskFields: Boolean = false,
     @Transient
-    val omittedActualMinutesField: Boolean = false
+    val omittedActualMinutesField: Boolean = false,
+    @Transient
+    val omittedInProgressField: Boolean = false
 ) {
     fun toEntity(existingLocal: TaskEntity? = null): TaskEntity {
         val isPurgedTombstone = isDeleted && (purgedFromTrash || (title.isEmpty() && notes.isEmpty()))
+        val resolvedStatus = runCatching { TaskStatus.valueOf(status.trim().uppercase(Locale.ROOT)) }.getOrDefault(TaskStatus.OPEN)
         val cleanBlockers = if (isPurgedTombstone) {
             emptyList()
         } else {
@@ -521,11 +535,16 @@ data class TaskFirestoreDto(
             omittedActualMinutesField -> existingLocal?.actualMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES }
             else -> actualMinutes?.takeIf { it in 1..MAX_TASK_DURATION_MINUTES }
         }
+        val resolvedIsInProgress = when {
+            isPurgedTombstone || resolvedStatus != TaskStatus.OPEN -> false
+            omittedInProgressField -> existingLocal?.isInProgress ?: false
+            else -> isInProgress
+        }
         return TaskEntity(
             id = id,
             title = if (isPurgedTombstone) "" else title,
             notes = if (isPurgedTombstone) "" else notes,
-            status = runCatching { TaskStatus.valueOf(status.trim().uppercase(Locale.ROOT)) }.getOrDefault(TaskStatus.OPEN),
+            status = resolvedStatus,
             scheduleState = runCatching { ScheduleState.valueOf(scheduleState.trim().uppercase(Locale.ROOT)) }.getOrDefault(ScheduleState.INBOX),
             whenDate = whenDate,
             deadline = deadline,
@@ -543,6 +562,7 @@ data class TaskFirestoreDto(
             sortOrder = sortOrder.finiteOrZero(),
             isPinned = if (isPurgedTombstone) false else isPinned,
             isMilestone = if (isPurgedTombstone) false else (isMilestone ?: existingLocal?.isMilestone ?: false),
+            isInProgress = resolvedIsInProgress,
             effortLevel = if (isPurgedTombstone) null else EffortLevel.normalize(effortLevel),
             blockedByJson = firestoreJson.encodeToString(cleanBlockers),
             workspaceId = if (isPurgedTombstone) null else workspaceId?.takeIf { it.isNotBlank() },
@@ -582,6 +602,7 @@ data class TaskFirestoreDto(
             "sortOrder" to sortOrder.finiteOrZero(),
             "isPinned" to (if (isPurgedTombstone) false else isPinned),
             "isMilestone" to (if (isPurgedTombstone) false else (isMilestone ?: false)),
+            "isInProgress" to (if (isPurgedTombstone) false else isInProgress),
             "effortLevel" to (if (isPurgedTombstone) null else EffortLevel.normalize(effortLevel)),
             "blockedByTaskIds" to cleanBlockers,
             "workspaceId" to (if (isPurgedTombstone) null else workspaceId),
@@ -626,6 +647,7 @@ data class TaskFirestoreDto(
                 sortOrder = entity.sortOrder.finiteOrZero(),
                 isPinned = if (isPurgedTombstone) false else entity.isPinned,
                 isMilestone = if (isPurgedTombstone) false else entity.isMilestone,
+                isInProgress = if (isPurgedTombstone || entity.status != TaskStatus.OPEN) false else entity.isInProgress,
                 effortLevel = if (isPurgedTombstone) null else EffortLevel.normalize(entity.effortLevel),
                 blockedByTaskIds = decodedBlockers,
                 workspaceId = if (isPurgedTombstone) null else entity.workspaceId,
@@ -654,8 +676,10 @@ data class TaskFirestoreDto(
                 !map.containsKey("workspaceId") &&
                 !map.containsKey("assigneeId")
             val omittedActualMinutes = !map.containsKey("actualMinutes")
+            val omittedInProgress = !map.containsKey("isInProgress")
             val rawIsPinned = map["isPinned"] as? Boolean ?: false
             val rawIsMilestone = map["isMilestone"] as? Boolean
+            val rawIsInProgress = map["isInProgress"] as? Boolean ?: false
             val rawBlockers = (map["blockedByTaskIds"] as? List<*>)?.filterIsInstance<String>()
                 ?: (map["blockedByJson"] as? String)?.let { raw ->
                     runCatching { firestoreJson.decodeFromString<List<String>>(raw) }.getOrNull()
@@ -681,6 +705,7 @@ data class TaskFirestoreDto(
                 sortOrder = ((map["sortOrder"] as? Number)?.toDouble() ?: 0.0).finiteOrZero(),
                 isPinned = if (purged) false else rawIsPinned,
                 isMilestone = if (purged) false else rawIsMilestone,
+                isInProgress = if (purged) false else rawIsInProgress,
                 effortLevel = if (purged) null else EffortLevel.normalize(map["effortLevel"] as? String),
                 blockedByTaskIds = if (purged) emptyList() else rawBlockers.map { it.trim() }.filter { it.isNotEmpty() && it != id }.distinct(),
                 workspaceId = if (purged) null else (map["workspaceId"] as? String)?.takeIf { it.isNotBlank() },
@@ -693,7 +718,8 @@ data class TaskFirestoreDto(
                 omittedTimeblockFields = omittedTimeblock,
                 omittedPinField = omittedPin,
                 omittedV30TaskFields = omittedV30,
-                omittedActualMinutesField = omittedActualMinutes
+                omittedActualMinutesField = omittedActualMinutes,
+                omittedInProgressField = omittedInProgress
             )
         }
     }

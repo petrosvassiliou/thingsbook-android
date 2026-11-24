@@ -771,7 +771,11 @@ fun ThingsWeeklyReviewModal(
                                                                 onOpenProject(proj.id)
                                                             }
                                                     ) {
-                                                        ProjectProgressRing(progress = proj.progress, size = 18.dp)
+                                                        ProjectProgressRing(
+                                                            progress = proj.progress,
+                                                            inProgressFraction = proj.inProgressProgress,
+                                                            size = 18.dp
+                                                        )
                                                         Text(
                                                             text = proj.title,
                                                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
@@ -1765,6 +1769,7 @@ fun ThingsTemplatesAndImportModal(
                                                     ) {
                                                         ProjectProgressRing(
                                                             progress = selectedExportProject.progress,
+                                                            inProgressFraction = selectedExportProject.inProgressProgress,
                                                             size = 18.dp
                                                         )
                                                         Text(
@@ -1798,6 +1803,7 @@ fun ThingsTemplatesAndImportModal(
                                                             ) {
                                                                 ProjectProgressRing(
                                                                     progress = proj.progress,
+                                                                    inProgressFraction = proj.inProgressProgress,
                                                                     size = 16.dp
                                                                 )
                                                                 Text(
@@ -2303,6 +2309,7 @@ fun ThingsTodayTimelineSection(
     onShiftTimeblock: (taskId: String, deltaMinutes: Int) -> Unit,
     onStartFocusTimer: (task: TaskItem) -> Unit,
     onOpenTask: (String) -> Unit,
+    onToggleInProgress: ((String) -> Unit)? = null,
     isFullScreen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -2522,6 +2529,12 @@ fun ThingsTodayTimelineSection(
                                         onStatusChange = { if (!isFullScreen) onCompleteTask(task.id) },
                                         isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
                                         isMilestone = task.isMilestone,
+                                        isInProgress = task.isInProgress,
+                                        onToggleInProgress = if (!isFullScreen && onToggleInProgress != null && task.status == TaskStatus.OPEN) {
+                                            { onToggleInProgress(task.id) }
+                                        } else {
+                                            null
+                                        },
                                         showHoverTooltip = !isFullScreen,
                                         modifier = if (isFullScreen) {
                                             Modifier.pointerInput(Unit) {
@@ -2562,6 +2575,14 @@ fun ThingsTodayTimelineSection(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
+                                            if (task.status == TaskStatus.OPEN && task.isInProgress) {
+                                                ThingsTagPill(
+                                                    title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                                                    containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                                                    contentColor = colors.somedayWarmAmber,
+                                                    borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f)
+                                                )
+                                            }
                                             if (task.isMilestone) {
                                                 ThingsTagPill(
                                                     title = "◆ ${stringResource(R.string.v30_milestone_label)}",
@@ -2688,7 +2709,13 @@ fun ThingsTodayTimelineSection(
                                 status = task.status,
                                 onStatusChange = { onCompleteTask(task.id) },
                                 isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
-                                isMilestone = task.isMilestone
+                                isMilestone = task.isMilestone,
+                                isInProgress = task.isInProgress,
+                                onToggleInProgress = if (onToggleInProgress != null && task.status == TaskStatus.OPEN) {
+                                    { onToggleInProgress(task.id) }
+                                } else {
+                                    null
+                                }
                             )
                             Text(
                                 text = task.title.ifBlank { stringResource(R.string.placeholder_todo_title) },
@@ -2700,6 +2727,14 @@ fun ThingsTodayTimelineSection(
                                     .weight(1f)
                                     .clickable { onOpenTask(task.id) }
                             )
+                            if (task.status == TaskStatus.OPEN && task.isInProgress) {
+                                ThingsTagPill(
+                                    title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                                    containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                                    contentColor = colors.somedayWarmAmber,
+                                    borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f)
+                                )
+                            }
                             if (task.isMilestone) {
                                 ThingsTagPill(
                                     title = "◆ ${stringResource(R.string.v30_milestone_label)}",

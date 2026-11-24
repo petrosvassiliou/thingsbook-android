@@ -662,4 +662,10 @@
     <string name="v32_actual_vs_estimated">Focused %1$s / %2$s</string>
     <string name="v32_logbook_focused_7d">Focused (7d): %1$s</string>
     <string name="v32_reset_actual_time">Reset tracked time</string>
+    <string name="v33_in_progress_badge">In Progress</string>
+    <string name="v33_mark_in_progress">Mark In Progress</string>
+    <string name="v33_clear_in_progress">Clear In Progress</string>
+    <string name="v33_filter_in_progress_only">In Progress Only</string>
+    <string name="v33_project_in_progress_count">%1$d in progress</string>
+    <string name="v33_cmd_toggle_in_progress">Toggle In Progress on Selected Task</string>
 </resources>

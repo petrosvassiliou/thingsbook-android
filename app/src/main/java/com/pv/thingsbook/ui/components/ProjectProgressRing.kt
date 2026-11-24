@@ -37,6 +37,7 @@ import com.pv.thingsbook.ui.theme.ThingsTheme
 fun ProjectProgressRing(
     progress: Float,
     modifier: Modifier = Modifier,
+    inProgressFraction: Float = 0f,
     size: Dp = 20.dp,
     tintColor: Color = ThingsTheme.colors.thingsBlue,
     showFraction: Boolean = false,
@@ -45,10 +46,17 @@ fun ProjectProgressRing(
 ) {
     val colors = ThingsTheme.colors
     val safeTarget = (if (progress.isFinite()) progress else 0f).coerceIn(0f, 1f)
+    val safeInProgressTarget = (if (inProgressFraction.isFinite()) inProgressFraction else 0f)
+        .coerceIn(0f, (1f - safeTarget).coerceAtLeast(0f))
     val animatedProgress by animateFloatAsState(
         targetValue = safeTarget,
         animationSpec = spring(dampingRatio = 0.80f, stiffness = 340f),
         label = "projectLinearProgress"
+    )
+    val animatedInProgress by animateFloatAsState(
+        targetValue = safeInProgressTarget,
+        animationSpec = spring(dampingRatio = 0.80f, stiffness = 340f),
+        label = "projectLinearInProgress"
     )
     val barWidth = (size * 1.55f).coerceIn(22.dp, 42.dp)
     val barHeight = (size * 0.34f).coerceIn(5.dp, 8.dp)
@@ -111,6 +119,17 @@ fun ProjectProgressRing(
                     size = Size(w, h),
                     cornerRadius = CornerRadius(r, r)
                 )
+                val clampedInProgress = (if (animatedInProgress.isFinite()) animatedInProgress else 0f)
+                    .coerceIn(0f, (1f - clamped).coerceAtLeast(0f))
+                if (clampedInProgress > 0.005f) {
+                    val wipW = (w * (clamped + clampedInProgress).coerceAtMost(1f)).coerceIn(h, w)
+                    drawRoundRect(
+                        color = colors.somedayWarmAmber.copy(alpha = 0.72f),
+                        topLeft = Offset.Zero,
+                        size = Size(wipW, h),
+                        cornerRadius = CornerRadius(r, r)
+                    )
+                }
                 // Sky Light Blue linear fill
                 if (clamped > 0.01f) {
                     val fillW = (w * clamped).coerceIn(h, w)

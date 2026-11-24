@@ -169,7 +169,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       (tk) => !tk.isDeleted && tk.projectId === projectId && tk.status !== 'CANCELED'
     );
     const done = projTasks.filter((tk) => tk.status === 'COMPLETED').length;
-    return { done, total: projTasks.length };
+    const inProgress = projTasks.filter(
+      (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+    ).length;
+    return { done, inProgress, total: projTasks.length };
   };
 
   const resolveCurrentAreaId = (): string | null =>
@@ -565,6 +568,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           )}
                           <ProjectProgressRing
                             completed={prog.done}
+                            inProgress={prog.inProgress}
                             total={prog.total}
                             size={15}
                             showCount={prog.total > 0}
@@ -620,6 +624,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                     <ProjectProgressRing
                       completed={prog.done}
+                      inProgress={prog.inProgress}
                       total={prog.total}
                       size={15}
                       showCount={prog.total > 0}
@@ -919,7 +924,10 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
       (tk) => !tk.isDeleted && tk.projectId === projectId && tk.status !== 'CANCELED'
     );
     const done = projTasks.filter((tk) => tk.status === 'COMPLETED').length;
-    return { done, total: projTasks.length };
+    const inProgress = projTasks.filter(
+      (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+    ).length;
+    return { done, inProgress, total: projTasks.length };
   };
 
   const makeStripDropHandlers = (key: string, target: SidebarDropTarget) => ({
@@ -1049,7 +1057,12 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
                     })}
                   >
                     <span>{proj.title}</span>
-                    <ProjectProgressRing completed={prog.done} total={prog.total} size={13} />
+                    <ProjectProgressRing
+                      completed={prog.done}
+                      inProgress={prog.inProgress}
+                      total={prog.total}
+                      size={13}
+                    />
                     {proj.deadline != null && (
                       <Flag size={11.5} style={{ color: 'var(--deadline-red)' }} />
                     )}
@@ -1077,7 +1090,12 @@ export const SmartViewNavigationStrip: React.FC<SmartViewNavigationStripProps> =
               {...makeStripDropHandlers(projKey, { kind: 'project', projectId: proj.id })}
             >
               <span>{proj.title}</span>
-              <ProjectProgressRing completed={prog.done} total={prog.total} size={13} />
+              <ProjectProgressRing
+                completed={prog.done}
+                inProgress={prog.inProgress}
+                total={prog.total}
+                size={13}
+              />
               {proj.deadline != null && (
                 <Flag size={11.5} style={{ color: 'var(--deadline-red)' }} />
               )}

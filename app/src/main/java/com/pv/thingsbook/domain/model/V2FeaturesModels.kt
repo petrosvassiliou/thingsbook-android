@@ -1596,6 +1596,9 @@ object StalledProjectDetector {
         ) {
             return null
         }
+        if (project.inProgressTaskCount > 0) {
+            return null
+        }
         val taskActivity = project.lastTaskActivityAt ?: 0L
         val lastReviewed = project.lastReviewedAt
         val activityAnchor = maxOf(

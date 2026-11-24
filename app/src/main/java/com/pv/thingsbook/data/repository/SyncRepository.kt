@@ -1031,6 +1031,7 @@ class SyncRepository @Inject constructor(
                     durationMinutes = patch.durationMinutes ?: current.durationMinutes,
                     deadline = patch.deadline ?: current.deadline,
                     reminderTime = patch.reminderTime ?: current.reminderTime,
+                    isInProgress = patch.isInProgress ?: current.isInProgress,
                     updatedAt = maxOf(nowMillis, patch.minUpdatedAt),
                     isDirty = true
                 )
@@ -1050,6 +1051,8 @@ class SyncRepository @Inject constructor(
                         durationMinutes = null,
                         actualMinutes = null,
                         isPinned = false,
+                        isMilestone = false,
+                        isInProgress = false,
                         effortLevel = null,
                         blockedByJson = "[]",
                         workspaceId = null,
@@ -2644,6 +2647,7 @@ class SyncRepository @Inject constructor(
         val durationMinutes: Int? = null,
         val deadline: Long? = null,
         val reminderTime: Long? = null,
+        val isInProgress: Boolean? = null,
         val minUpdatedAt: Long
     )
 
@@ -2938,6 +2942,11 @@ class SyncRepository @Inject constructor(
                 } else {
                     null
                 }
+                val donorInProgress = if (!winner.isInProgress && losers.any { it.isInProgress }) {
+                    true
+                } else {
+                    null
+                }
 
                 if (donorArea != null ||
                     donorHeading != null ||
@@ -2946,7 +2955,8 @@ class SyncRepository @Inject constructor(
                     donorStartMin != null ||
                     donorDuration != null ||
                     donorDeadline != null ||
-                    donorReminder != null
+                    donorReminder != null ||
+                    donorInProgress != null
                 ) {
                     val maxGroupUpdatedAt = sorted.maxOf { it.updatedAt }
                     enrichments += RecurringWinnerEnrichment(
@@ -2959,6 +2969,7 @@ class SyncRepository @Inject constructor(
                         durationMinutes = donorDuration,
                         deadline = donorDeadline,
                         reminderTime = donorReminder,
+                        isInProgress = donorInProgress,
                         minUpdatedAt = maxGroupUpdatedAt + 1L
                     )
                 }

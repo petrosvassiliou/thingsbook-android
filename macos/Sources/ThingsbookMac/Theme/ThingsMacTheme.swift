@@ -76,9 +76,11 @@ public struct ThingsCheckboxButton: View {
     public let status: TaskStatus
     public let isSomeday: Bool
     public let isMilestone: Bool
+    public let isInProgress: Bool
     public let helpText: String
     public let onToggleComplete: () -> Void
     public let onCancelTask: () -> Void
+    public let onToggleInProgress: (() -> Void)?
 
     @State private var isHovering = false
 
@@ -86,21 +88,29 @@ public struct ThingsCheckboxButton: View {
         status: TaskStatus,
         isSomeday: Bool = false,
         isMilestone: Bool = false,
+        isInProgress: Bool = false,
         helpText: String = "",
         onToggleComplete: @escaping () -> Void,
-        onCancelTask: @escaping () -> Void
+        onCancelTask: @escaping () -> Void,
+        onToggleInProgress: (() -> Void)? = nil
     ) {
         self.status = status
         self.isSomeday = isSomeday
         self.isMilestone = isMilestone
+        self.isInProgress = isInProgress
         self.helpText = helpText
         self.onToggleComplete = onToggleComplete
         self.onCancelTask = onCancelTask
+        self.onToggleInProgress = onToggleInProgress
     }
 
     public var body: some View {
+        let activeInProgress = status == .open && isInProgress
+
         Button {
-            if NSEvent.modifierFlags.contains(.option) {
+            if NSEvent.modifierFlags.contains(.shift), status == .open, let onToggleInProgress {
+                onToggleInProgress()
+            } else if NSEvent.modifierFlags.contains(.option) {
                 onCancelTask()
             } else {
                 onToggleComplete()
@@ -112,7 +122,9 @@ public struct ThingsCheckboxButton: View {
                     case .open:
                         RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                             .strokeBorder(
-                                ThingsMacPalette.milestoneViolet.opacity(isHovering ? 1.0 : 0.88),
+                                activeInProgress
+                                    ? ThingsMacPalette.somedayAmber.opacity(isHovering ? 1.0 : 0.94)
+                                    : ThingsMacPalette.milestoneViolet.opacity(isHovering ? 1.0 : 0.88),
                                 style: StrokeStyle(
                                     lineWidth: 1.65,
                                     dash: isSomeday ? [2.8, 2.2] : []
@@ -120,10 +132,21 @@ public struct ThingsCheckboxButton: View {
                             )
                             .background(
                                 RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                                    .fill(ThingsMacPalette.milestoneViolet.opacity(isHovering ? 0.22 : 0.11))
+                                    .fill(
+                                        activeInProgress
+                                            ? ThingsMacPalette.somedayAmber.opacity(isHovering ? 0.24 : 0.13)
+                                            : ThingsMacPalette.milestoneViolet.opacity(isHovering ? 0.22 : 0.11)
+                                    )
                             )
                             .frame(width: 13.5, height: 13.5)
                             .rotationEffect(.degrees(45))
+
+                        if activeInProgress {
+                            Circle()
+                                .fill(ThingsMacPalette.somedayAmber)
+                                .frame(width: 5.2, height: 5.2)
+                                .shadow(color: ThingsMacPalette.somedayAmber.opacity(0.45), radius: 2.0)
+                        }
                     case .completed:
                         RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                             .fill(ThingsMacPalette.milestoneViolet)
@@ -146,7 +169,9 @@ public struct ThingsCheckboxButton: View {
                     case .open:
                         RoundedRectangle(cornerRadius: 6.0, style: .continuous)
                             .strokeBorder(
-                                isHovering ? ThingsMacPalette.accentBlue : Color.secondary.opacity(0.48),
+                                activeInProgress
+                                    ? ThingsMacPalette.somedayAmber.opacity(isHovering ? 1.0 : 0.94)
+                                    : (isHovering ? ThingsMacPalette.accentBlue : Color.secondary.opacity(0.48)),
                                 style: StrokeStyle(
                                     lineWidth: 1.55,
                                     dash: isSomeday ? [2.8, 2.2] : []
@@ -154,8 +179,19 @@ public struct ThingsCheckboxButton: View {
                             )
                             .background(
                                 RoundedRectangle(cornerRadius: 6.0, style: .continuous)
-                                    .fill(isHovering ? ThingsMacPalette.accentBlue.opacity(0.10) : ThingsMacPalette.cardSurface)
+                                    .fill(
+                                        activeInProgress
+                                            ? ThingsMacPalette.somedayAmber.opacity(isHovering ? 0.20 : 0.11)
+                                            : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.10) : ThingsMacPalette.cardSurface)
+                                    )
                             )
+
+                        if activeInProgress {
+                            Circle()
+                                .fill(ThingsMacPalette.somedayAmber)
+                                .frame(width: 6.2, height: 6.2)
+                                .shadow(color: ThingsMacPalette.somedayAmber.opacity(0.45), radius: 2.0)
+                        }
                     case .completed:
                         Circle()
                             .fill(ThingsMacPalette.accentBlue)
@@ -174,6 +210,7 @@ public struct ThingsCheckboxButton: View {
             .frame(width: 18, height: 18)
             .animation(.spring(response: 0.24, dampingFraction: 0.72), value: status)
             .animation(.spring(response: 0.24, dampingFraction: 0.78), value: isMilestone)
+            .animation(.spring(response: 0.24, dampingFraction: 0.76), value: activeInProgress)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -188,6 +225,7 @@ public struct ThingsCheckboxButton: View {
 
 public struct ProjectProgressRing: View {
     public let progress: Double
+    public var inProgressProgress: Double = 0
     public var size: CGFloat = 16
     public var tint: Color = ThingsMacPalette.accentBlue
     public var isCompleted: Bool = false
@@ -197,6 +235,7 @@ public struct ProjectProgressRing: View {
 
     public init(
         progress: Double,
+        inProgressProgress: Double = 0,
         size: CGFloat = 16,
         tint: Color = ThingsMacPalette.accentBlue,
         isCompleted: Bool = false,
@@ -204,7 +243,9 @@ public struct ProjectProgressRing: View {
         completedCount: Int = 0,
         totalCount: Int = 0
     ) {
-        self.progress = min(1.0, max(0.0, progress))
+        let clampedCompleted = min(1.0, max(0.0, progress))
+        self.progress = clampedCompleted
+        self.inProgressProgress = min(max(0.0, 1.0 - clampedCompleted), max(0.0, inProgressProgress))
         self.size = size
         self.tint = tint
         self.isCompleted = isCompleted
@@ -217,6 +258,7 @@ public struct ProjectProgressRing: View {
         let barWidth = min(44, max(24, size * 1.65))
         let barHeight = min(7.5, max(5.0, size * 0.34))
         let badgeHeight = min(15.0, max(11.0, size * 0.68))
+        let clampedInProgress = min(max(0.0, 1.0 - progress), max(0.0, inProgressProgress))
 
         HStack(spacing: 5) {
             if isCompleted || progress >= 0.999 {
@@ -233,6 +275,12 @@ public struct ProjectProgressRing: View {
                     Capsule(style: .continuous)
                         .fill(tint.opacity(0.20))
                         .frame(width: barWidth, height: barHeight)
+
+                    if clampedInProgress > 0.005 {
+                        Capsule(style: .continuous)
+                            .fill(ThingsMacPalette.somedayAmber.opacity(0.72))
+                            .frame(width: max(barHeight, barWidth * min(1.0, progress + clampedInProgress)), height: barHeight)
+                    }
 
                     if progress > 0.005 {
                         Capsule(style: .continuous)
@@ -251,6 +299,7 @@ public struct ProjectProgressRing: View {
             }
         }
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: progress)
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: clampedInProgress)
     }
 }
 

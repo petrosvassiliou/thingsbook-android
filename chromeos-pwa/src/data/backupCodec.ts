@@ -121,6 +121,7 @@ export interface BackupTaskDto {
   actualMinutes?: number | null;
   isPinned?: boolean | null;
   isMilestone?: boolean | null;
+  isInProgress?: boolean | null;
   effortLevel?: string | null;
   blockedByTaskIdsJson?: string | null;
   blockedByTaskIds?: string[] | null;
@@ -445,6 +446,7 @@ export function buildBackupPayloadFromEntities(params: {
             : null,
         isPinned: Boolean(t.isPinned),
         isMilestone: Boolean(t.isMilestone),
+        isInProgress: t.status === 'OPEN' && Boolean(t.isInProgress),
         effortLevel: t.effortLevel ?? null,
         blockedByTaskIdsJson: JSON.stringify(cleanBlocked),
         blockedByTaskIds: cleanBlocked,
@@ -838,6 +840,8 @@ export function safeParseSavedPerspectives(raw: unknown): SavedPerspective[] {
     const areaId =
       typeof rec.areaId === 'string' && rec.areaId.trim().length > 0 ? rec.areaId.trim() : null;
     const actionableOnly = rec.actionableOnly === undefined ? true : Boolean(rec.actionableOnly);
+    const hasExplicitInProgressOnly = typeof rec.inProgressOnly === 'boolean';
+    const inProgressOnly = Boolean(rec.inProgressOnly);
     const sortOrder =
       typeof rec.sortOrder === 'number' && Number.isFinite(rec.sortOrder)
         ? rec.sortOrder
@@ -852,6 +856,7 @@ export function safeParseSavedPerspectives(raw: unknown): SavedPerspective[] {
       dueWindow,
       areaId,
       actionableOnly,
+      ...(hasExplicitInProgressOnly || inProgressOnly ? { inProgressOnly } : {}),
       sortOrder
     });
   }
@@ -1062,11 +1067,13 @@ export function normalizeBackupPayloadToEntities(
           ? t.assigneeId.trim()
           : null;
 
+      const resolvedStatus = normalizeTaskStatus(t.status);
+
       return {
         id: t.id,
         title: t.title || '',
         notes: t.notes || '',
-        status: normalizeTaskStatus(t.status),
+        status: resolvedStatus,
         scheduleState: normalizedSchedule,
         whenDate: t.whenDate ?? null,
         deadline: t.deadline ?? null,
@@ -1076,6 +1083,7 @@ export function normalizeBackupPayloadToEntities(
         actualMinutes,
         isPinned: Boolean(t.isPinned),
         isMilestone: Boolean(t.isMilestone),
+        isInProgress: resolvedStatus === 'OPEN' && Boolean(t.isInProgress),
         effortLevel: normalizeEffortLevel(t.effortLevel),
         blockedByTaskIds: cleanBlocked,
         workspaceId,

@@ -244,6 +244,7 @@ fun ExpandableTaskCard(
     onUpdateBlockedBy: ((blockerIds: List<String>) -> Unit)? = null,
     onTogglePin: (() -> Unit)? = null,
     onToggleMilestone: (() -> Unit)? = null,
+    onToggleInProgress: (() -> Unit)? = null,
     onMoveTaskToContainer: ((projectId: String?, headingId: String?, areaId: String?) -> Unit)? = null,
     onUpdateTaskTags: ((List<String>) -> Unit)? = null,
     onCreateAndAssignTag: ((String) -> Unit)? = null,
@@ -573,6 +574,9 @@ fun ExpandableTaskCard(
             if (parsed.isMilestone && !task.isMilestone) {
                 onToggleMilestone?.invoke()
             }
+            if (parsed.isInProgress && !task.isInProgress) {
+                onToggleInProgress?.invoke()
+            }
             if (parsed.matchedProject != null || parsed.matchedArea != null) {
                 val pId = parsed.matchedProject?.id ?: task.projectId
                 val hId = if (pId == task.projectId) task.headingId else null
@@ -901,6 +905,7 @@ fun ExpandableTaskCard(
                     onOpenTagPickerDialog = { showTagPickerDialog = true },
                     onTogglePin = onTogglePin,
                     onToggleMilestone = onToggleMilestone,
+                    onToggleInProgress = onToggleInProgress,
                     onDuplicateTask = onDuplicateTask,
                     onStartFocusTimer = onStartFocusTimer,
                     onApplySmartSyntax = { parsed -> applySmartSyntaxNow(parsed) },
@@ -932,7 +937,9 @@ fun ExpandableTaskCard(
                                 status = effectiveVisualStatus,
                                 onStatusChange = handleStatusRequest,
                                 isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
-                                isMilestone = task.isMilestone
+                                isMilestone = task.isMilestone,
+                                isInProgress = task.isInProgress,
+                                onToggleInProgress = if (effectiveVisualStatus == TaskStatus.OPEN) onToggleInProgress else null
                             )
                         }
 
@@ -1264,6 +1271,7 @@ fun ExpandableTaskCard(
                             openTaskIds = openTaskIds,
                             locale = locale,
                             onToggleMilestone = onToggleMilestone,
+                            onToggleInProgress = onToggleInProgress,
                             onOpenWhenDialog = { showWhenDialog = true },
                             onOpenDeadlineDialog = { showDeadlineDialog = true },
                             onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
@@ -1293,6 +1301,7 @@ fun ExpandableTaskCard(
                 onOpenTagPickerDialog = { showTagPickerDialog = true },
                 onTogglePin = onTogglePin,
                 onToggleMilestone = onToggleMilestone,
+                onToggleInProgress = onToggleInProgress,
                 onDuplicateTask = onDuplicateTask,
                 onDeleteTask = onDeleteTask,
                 onDismiss = { showContextMenu = false }
@@ -1460,7 +1469,8 @@ private fun CollapsedTaskTitleWithStrike(
 }
 
 private fun hasCollapsedTaskBadges(task: TaskItem, isActivelyBlocked: Boolean = false): Boolean {
-    return task.isMilestone ||
+    return (task.status == TaskStatus.OPEN && task.isInProgress) ||
+        task.isMilestone ||
         task.scheduleState == ScheduleState.THIS_EVENING ||
         task.scheduleState == ScheduleState.UPCOMING ||
         task.scheduleState == ScheduleState.SOMEDAY ||
@@ -1485,6 +1495,7 @@ private fun CollapsedTaskInlineBadges(
     openTaskIds: Set<String> = emptySet(),
     locale: Locale,
     onToggleMilestone: (() -> Unit)? = null,
+    onToggleInProgress: (() -> Unit)? = null,
     onOpenWhenDialog: (() -> Unit)? = null,
     onOpenDeadlineDialog: (() -> Unit)? = null,
     onOpenTimeblockDialog: (() -> Unit)? = null,
@@ -1507,6 +1518,25 @@ private fun CollapsedTaskInlineBadges(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        if (task.status == TaskStatus.OPEN && task.isInProgress) {
+            val wipTooltip = if (onToggleInProgress != null) {
+                stringResource(R.string.v33_clear_in_progress)
+            } else {
+                stringResource(R.string.v33_in_progress_badge)
+            }
+            ThingsHoverTooltip(
+                text = wipTooltip,
+                enableTouchLongPress = false
+            ) {
+                ThingsTagPill(
+                    title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                    containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                    contentColor = colors.somedayWarmAmber,
+                    borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f),
+                    onClick = onToggleInProgress
+                )
+            }
+        }
         if (task.isMilestone) {
             val milestoneTooltip = if (onToggleMilestone != null) {
                 stringResource(R.string.v30_remove_milestone)
@@ -2225,6 +2255,7 @@ private fun ExpandedTaskCardBody(
     onOpenTagPickerDialog: () -> Unit,
     onTogglePin: (() -> Unit)? = null,
     onToggleMilestone: (() -> Unit)? = null,
+    onToggleInProgress: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onStartFocusTimer: (() -> Unit)? = null,
     onApplySmartSyntax: ((ParsedSmartSyntax) -> Unit)? = null,
@@ -2351,6 +2382,8 @@ private fun ExpandedTaskCardBody(
                     onStatusChange = onStatusChange,
                     isDashedSomeday = task.scheduleState == ScheduleState.SOMEDAY,
                     isMilestone = task.isMilestone,
+                    isInProgress = task.isInProgress,
+                    onToggleInProgress = if (effectiveVisualStatus == TaskStatus.OPEN) onToggleInProgress else null,
                     size = 22.dp
                 )
             }
@@ -2402,6 +2435,52 @@ private fun ExpandedTaskCardBody(
                     }
                 }
             )
+
+            if (task.status == TaskStatus.OPEN && (onToggleInProgress != null || task.isInProgress)) {
+                Spacer(modifier = Modifier.width(8.dp))
+                val wipLabel = stringResource(
+                    if (task.isInProgress) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
+                )
+                ThingsHoverTooltip(text = wipLabel) {
+                    Row(
+                        modifier = Modifier
+                            .height(32.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(
+                                if (task.isInProgress) colors.somedayWarmAmber.copy(alpha = 0.18f) else colors.tagPillBg.copy(alpha = 0.65f)
+                            )
+                            .border(
+                                width = 0.75.dp,
+                                color = if (task.isInProgress) colors.somedayWarmAmber.copy(alpha = 0.55f) else colors.hairlineDivider,
+                                shape = RoundedCornerShape(9.dp)
+                            )
+                            .then(
+                                if (onToggleInProgress != null) {
+                                    Modifier.clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onToggleInProgress()
+                                    }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(horizontal = if (task.isInProgress) 9.dp else 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (task.isInProgress) {
+                                "◐ ${stringResource(R.string.v33_in_progress_badge)}"
+                            } else {
+                                "◐"
+                            },
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (task.isInProgress) colors.somedayWarmAmber else colors.secondaryText,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
 
             if (onToggleMilestone != null) {
                 Spacer(modifier = Modifier.width(8.dp))
@@ -3555,6 +3634,32 @@ private fun ExpandedTaskCardBody(
                                 )
                             }
 
+                            if (task.status == TaskStatus.OPEN && onToggleInProgress != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(
+                                                if (task.isInProgress) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
+                                            ),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (task.isInProgress) colors.somedayWarmAmber else colors.primaryText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Text(
+                                            text = "◐",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = colors.somedayWarmAmber
+                                        )
+                                    },
+                                    onClick = {
+                                        showInlineMoreMenu = false
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onToggleInProgress()
+                                    }
+                                )
+                            }
+
                             if (onTogglePin != null) {
                                 DropdownMenuItem(
                                     text = {
@@ -3790,6 +3895,7 @@ private fun TaskContextDropdownMenu(
     onOpenTagPickerDialog: () -> Unit,
     onTogglePin: (() -> Unit)? = null,
     onToggleMilestone: (() -> Unit)? = null,
+    onToggleInProgress: (() -> Unit)? = null,
     onDuplicateTask: (() -> Unit)? = null,
     onDeleteTask: () -> Unit,
     onDismiss: () -> Unit
@@ -3986,8 +4092,36 @@ private fun TaskContextDropdownMenu(
             }
         )
 
-        if (onTogglePin != null || onToggleMilestone != null || onToggleSelection != null || onDuplicateTask != null) {
+        if (onToggleInProgress != null || onTogglePin != null || onToggleMilestone != null || onToggleSelection != null || onDuplicateTask != null) {
             HorizontalDivider(color = colors.hairlineDivider)
+        }
+
+        // 7a. Mark In Progress / Clear In Progress
+        if (task.status == TaskStatus.OPEN && onToggleInProgress != null) {
+            DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
+                text = {
+                    Text(
+                        text = stringResource(
+                            if (task.isInProgress) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (task.isInProgress) colors.somedayWarmAmber else colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Text(
+                        text = "◐",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.somedayWarmAmber
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onToggleInProgress()
+                }
+            )
         }
 
         // 7. Pin to Top / Unpin

@@ -35,6 +35,7 @@ export interface ParsedSmartSyntax {
   matchedProject: ProjectRecord | null;
   matchedArea: AreaRecord | null;
   isMilestone: boolean;
+  isInProgress: boolean;
   hasAnyMatch: boolean;
 }
 
@@ -44,6 +45,26 @@ const MILESTONE_KEYWORDS = new Set([
   'jalon',
   'traguardo',
   'hito'
+]);
+
+const IN_PROGRESS_KEYWORDS = new Set([
+  'wip',
+  'inprogress',
+  'in-progress',
+  'in progress',
+  'doing',
+  'inarbeit',
+  'in-arbeit',
+  'in arbeit',
+  'encours',
+  'en-cours',
+  'en cours',
+  'incorso',
+  'in-corso',
+  'in corso',
+  'encurso',
+  'en-curso',
+  'en curso'
 ]);
 
 function normalizeLookupText(input: string): string {
@@ -193,6 +214,7 @@ export function parseSmartTaskSyntax(
   let matchedProject: ProjectRecord | null = null;
   let matchedArea: AreaRecord | null = null;
   let isMilestone = false;
+  let isInProgress = false;
   let hasAnyMatch = false;
 
   if (!trimmedSource) {
@@ -211,6 +233,7 @@ export function parseSmartTaskSyntax(
       matchedProject: null,
       matchedArea: null,
       isMilestone: false,
+      isInProgress: false,
       hasAnyMatch: false
     };
   }
@@ -237,6 +260,15 @@ export function parseSmartTaskSyntax(
       continue;
     }
 
+    // Standalone ◐ in-progress symbol
+    if (ch === '◐' && (i + 1 === len || /\s/.test(source[i + 1]))) {
+      isInProgress = true;
+      hasAnyMatch = true;
+      strippedRanges.push([i, i + 1]);
+      i += 1;
+      continue;
+    }
+
     if (ch !== '@' && ch !== '!' && ch !== '~' && ch !== '#' && ch !== '/') {
       i++;
       continue;
@@ -252,8 +284,8 @@ export function parseSmartTaskSyntax(
     let tokenEnd = i + 1;
 
     const nextCh = source[i + 1];
-    if (nextCh === '"' || nextCh === '“') {
-      const closingChar = nextCh === '“' ? '”' : '"';
+    if (nextCh === '"' || nextCh === '“' || nextCh === '«') {
+      const closingChar = nextCh === '“' ? '”' : nextCh === '«' ? '»' : '"';
       const closeIdx = source.indexOf(closingChar, i + 2);
       if (closeIdx > i + 1 && (closeIdx + 1 === len || /\s/.test(source[closeIdx + 1]))) {
         rawToken = source.slice(i + 2, closeIdx);
@@ -302,9 +334,17 @@ export function parseSmartTaskSyntax(
           break;
         }
       } else if (ch === '!') {
-        const lowerToken = normalizeDiacritics(cand.token.trim().toLowerCase());
+        const lowerToken = normalizeDiacritics(
+          cand.token.trim().toLowerCase().replace(/\s+/g, ' ')
+        );
         if (MILESTONE_KEYWORDS.has(lowerToken)) {
           isMilestone = true;
+          hasAnyMatch = true;
+          consumedEnd = cand.endPos;
+          break;
+        }
+        if (IN_PROGRESS_KEYWORDS.has(lowerToken)) {
+          isInProgress = true;
           hasAnyMatch = true;
           consumedEnd = cand.endPos;
           break;
@@ -396,6 +436,7 @@ export function parseSmartTaskSyntax(
     matchedProject,
     matchedArea,
     isMilestone,
+    isInProgress,
     hasAnyMatch
   };
 }

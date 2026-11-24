@@ -59,6 +59,14 @@ public struct SmartSyntaxPreviewPillsView: View {
                     )
                 }
 
+                if parsed.isInProgress {
+                    smartPill(
+                        icon: "circle.lefthalf.filled",
+                        text: store.tr("v33_in_progress_badge"),
+                        tint: ThingsMacPalette.somedayAmber
+                    )
+                }
+
                 if parsed.isMilestone {
                     smartPill(
                         icon: "diamond.fill",
@@ -237,6 +245,21 @@ public struct QuickFindOverlay: View {
                 }
             }
         ]
+
+        if store.allOpenTasks.contains(where: { store.selectedTaskIds.contains($0.id) || store.expandedTaskId == $0.id }) {
+            items.append(
+                PaletteCommandItem(
+                    id: "cmd:toggle_in_progress",
+                    title: store.tr("v33_cmd_toggle_in_progress"),
+                    icon: "circle.lefthalf.filled",
+                    tint: ThingsMacPalette.somedayAmber,
+                    shortcut: nil
+                ) {
+                    store.toggleInProgressForSelectedOrExpandedTasks()
+                    dismiss()
+                }
+            )
+        }
 
         if case .project(let pid) = store.selectedDestination,
            let proj = store.project(byId: pid),
@@ -487,6 +510,15 @@ public struct QuickFindOverlay: View {
                         helpText: store.tr("search_filter_hide_completed")
                     ) {
                         filter.hideCompleted.toggle()
+                    }
+
+                    filterTogglePill(
+                        icon: "circle.lefthalf.filled",
+                        title: store.tr("v33_filter_in_progress_only"),
+                        isActive: filter.inProgressOnly,
+                        helpText: store.tr("v33_filter_in_progress_only")
+                    ) {
+                        filter.inProgressOnly.toggle()
                     }
 
                     Menu {
@@ -753,6 +785,7 @@ public struct QuickFindOverlay: View {
                 HStack(spacing: 10) {
                     ProjectProgressRing(
                         progress: proj.progress,
+                        inProgressProgress: proj.inProgressProgress,
                         size: 15,
                         isCompleted: proj.status == .completed
                     )
@@ -762,6 +795,11 @@ public struct QuickFindOverlay: View {
                         .strikethrough(proj.status != .active)
                         .foregroundStyle(proj.status != .active ? .secondary : .primary)
                     Spacer()
+                    if proj.status == .active && proj.inProgressTaskCount > 0 {
+                        Text("◐ \(store.trf("v33_project_in_progress_count", proj.inProgressTaskCount))")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                    }
                     if let deadline = proj.deadline {
                         HStack(spacing: 3) {
                             Image(systemName: "flag.fill")
@@ -815,8 +853,16 @@ public struct QuickFindOverlay: View {
             dismiss()
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: task.status == .completed ? "checkmark.square.fill" : "circle")
-                    .foregroundStyle(task.status == .completed ? ThingsMacPalette.accentBlue : .secondary)
+                Image(
+                    systemName: task.status == .completed
+                        ? "checkmark.square.fill"
+                        : ((task.status == .open && task.isInProgress) ? "circle.lefthalf.filled" : "circle")
+                )
+                    .foregroundStyle(
+                        task.status == .completed
+                            ? ThingsMacPalette.accentBlue
+                            : ((task.status == .open && task.isInProgress) ? ThingsMacPalette.somedayAmber : .secondary)
+                    )
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(displayTitle)
@@ -833,6 +879,14 @@ public struct QuickFindOverlay: View {
                 }
                 Spacer()
                 HStack(spacing: 6) {
+                    if task.status == .open && task.isInProgress {
+                        Text("◐ \(store.tr("v33_in_progress_badge"))")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(ThingsMacPalette.somedayAmber.opacity(0.14)))
+                    }
                     if totalChecklistCount > 0 {
                         Text("\(doneCount)/\(totalChecklistCount)")
                             .font(.system(size: 10.5, weight: .medium))

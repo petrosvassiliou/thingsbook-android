@@ -608,21 +608,31 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 type="button"
                 className={`things-checkbox ${
                   selectedTask.isMilestone ? 'milestone' : ''
+                } ${
+                  selectedTask.status === 'OPEN' && selectedTask.isInProgress ? 'in-progress' : ''
                 } ${isSomedayDashed ? 'someday-dashed' : ''} ${
                   isCompleted ? 'completed checked' : ''
                 } ${isCanceled ? 'canceled' : ''}`}
                 title={
-                  selectedTask.status === 'OPEN' ? t.actionComplete : t.actionReopenTodo
+                  selectedTask.status === 'OPEN'
+                    ? `${t.actionComplete} · Shift+Click: ${
+                        selectedTask.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
+                      }`
+                    : t.actionReopenTodo
                 }
                 aria-label={
                   selectedTask.status === 'OPEN' ? t.actionComplete : t.actionReopenTodo
                 }
-                onClick={() =>
+                onClick={(e) => {
+                  if (e.shiftKey && selectedTask.status === 'OPEN') {
+                    void localDb.toggleTaskInProgress(selectedTask.id);
+                    return;
+                  }
                   void localDb.upsertTask({
                     id: selectedTask.id,
                     status: selectedTask.status === 'OPEN' ? 'COMPLETED' : 'OPEN'
-                  })
-                }
+                  });
+                }}
               >
                 {isCompleted ? (
                   <Check size={12.5} strokeWidth={3} />
@@ -699,6 +709,28 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 <Diamond size={12} />
                 <span>{t.milestoneLabel}</span>
               </button>
+
+              {selectedTask.status === 'OPEN' && (
+                <button
+                  type="button"
+                  className={`chip-btn ${
+                    selectedTask.isInProgress ? 'in-progress-active' : ''
+                  }`}
+                  data-testid="inspector-in-progress-btn"
+                  title={
+                    selectedTask.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
+                  }
+                  aria-label={
+                    selectedTask.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
+                  }
+                  onClick={() => void localDb.toggleTaskInProgress(selectedTask.id)}
+                >
+                  <span aria-hidden="true">◐</span>
+                  <span>
+                    {selectedTask.isInProgress ? t.v33InProgressBadge : t.v33MarkInProgress}
+                  </span>
+                </button>
+              )}
             </div>
           </section>
 

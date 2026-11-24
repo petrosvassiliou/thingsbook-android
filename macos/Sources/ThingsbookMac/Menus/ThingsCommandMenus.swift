@@ -54,6 +54,19 @@ public struct ThingsCommandMenus: Commands {
         return !matches.isEmpty && matches.allSatisfy(\.isMilestone)
     }
 
+    @MainActor
+    private var openInProgressTargetTasks: [TaskItem] {
+        let ids = pinTargetIds
+        guard !ids.isEmpty else { return [] }
+        return store.allOpenTasks.filter { ids.contains($0.id) && $0.status == .open && !$0.isDeleted }
+    }
+
+    @MainActor
+    private var allTargetsInProgress: Bool {
+        let matches = openInProgressTargetTasks
+        return !matches.isEmpty && matches.allSatisfy(\.isInProgress)
+    }
+
     public var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button(store.tr("settings_updates_search_btn") + "…") {
@@ -237,6 +250,12 @@ public struct ThingsCommandMenus: Commands {
                 store.toggleMilestoneForSelectedOrExpandedTasks()
             }
             .disabled(isCommandBlocked || pinTargetIds.isEmpty)
+
+            Button(store.tr(allTargetsInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")) {
+                guard !isShortcutBlocked() else { return }
+                store.toggleInProgressForSelectedOrExpandedTasks()
+            }
+            .disabled(isCommandBlocked || openInProgressTargetTasks.isEmpty)
 
             Button(store.tr("action_duplicate_todo")) {
                 guard !isShortcutBlocked() else { return }

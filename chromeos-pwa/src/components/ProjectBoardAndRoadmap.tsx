@@ -468,6 +468,8 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
             <button
               type="button"
               className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''} ${
+                tk.status === 'OPEN' && tk.isInProgress ? 'in-progress' : ''
+              } ${
                 tk.scheduleState === 'SOMEDAY' && tk.status === 'OPEN'
                   ? 'someday-dashed'
                   : ''
@@ -479,6 +481,10 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 e.stopPropagation();
                 if (e.altKey) {
                   setStatusMenuTaskId((cur) => (cur === tk.id ? null : tk.id));
+                  return;
+                }
+                if (e.shiftKey && tk.status === 'OPEN') {
+                  void localDb.toggleTaskInProgress(tk.id);
                   return;
                 }
                 void commitTaskStatus(
@@ -507,6 +513,33 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                   onClick={() => setStatusMenuTaskId(null)}
                 />
                 <div className="dropdown-popover" style={{ left: 0, right: 'auto' }}>
+                  {tk.status === 'OPEN' && (
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      data-testid="board-status-menu-in-progress-btn"
+                      onClick={() => {
+                        setStatusMenuTaskId(null);
+                        void localDb.toggleTaskInProgress(tk.id);
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            color: 'var(--in-progress-amber-ring)',
+                            fontSize: 13.5,
+                            lineHeight: 1
+                          }}
+                          aria-hidden="true"
+                        >
+                          ◐
+                        </span>
+                        <span>
+                          {tk.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                        </span>
+                      </span>
+                    </button>
+                  )}
                   {tk.status !== 'COMPLETED' && (
                     <button
                       type="button"
@@ -591,6 +624,15 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
         )}
 
         <div className="board-card-badges">
+          {tk.status === 'OPEN' && tk.isInProgress && (
+            <span
+              className="meta-badge in-progress-badge"
+              data-testid="board-card-in-progress-pill"
+              title={t.v33InProgressBadge}
+            >
+              <span>◐ {t.v33InProgressBadge}</span>
+            </span>
+          )}
           {tk.isMilestone && (
             <span
               className="meta-badge milestone-badge"
@@ -701,6 +743,9 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
         )
       : allProjectTasks.filter((tItem) => tItem.headingId === heading.id);
     const doneColCount = allColTasks.filter((tItem) => tItem.status === 'COMPLETED').length;
+    const inProgressColCount = allColTasks.filter(
+      (tItem) => tItem.status === 'OPEN' && Boolean(tItem.isInProgress)
+    ).length;
 
     const isEditing =
       heading != null
@@ -799,6 +844,7 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 <span className="board-column-ring-wrap">
                   <ProjectProgressRing
                     completed={doneColCount}
+                    inProgress={inProgressColCount}
                     total={allColTasks.length}
                     size={14}
                   />
@@ -1136,6 +1182,38 @@ export const ProjectBoardWorkspace: React.FC<ProjectBoardWorkspaceProps> = ({
                 {cardCtxMenu.task.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
                 <span>{cardCtxMenu.task.isPinned ? t.unpinTask : t.pinTask}</span>
               </button>
+
+              {/* 7b. Mark In Progress / Clear In Progress */}
+              {cardCtxMenu.task.status === 'OPEN' && (
+                <button
+                  type="button"
+                  className="context-menu-item"
+                  data-testid="board-ctx-in-progress-btn"
+                  onClick={() => {
+                    const tk = cardCtxMenu.task;
+                    setCardCtxMenu(null);
+                    void localDb.toggleTaskInProgress(tk.id);
+                  }}
+                >
+                  <span
+                    style={{
+                      color: 'var(--in-progress-amber-ring)',
+                      fontSize: 13.5,
+                      width: 14,
+                      textAlign: 'center',
+                      lineHeight: 1
+                    }}
+                    aria-hidden="true"
+                  >
+                    ◐
+                  </span>
+                  <span>
+                    {cardCtxMenu.task.isInProgress
+                      ? t.v33ClearInProgress
+                      : t.v33MarkInProgress}
+                  </span>
+                </button>
+              )}
 
               {/* 8. Mark as Milestone / Remove Milestone */}
               <button
@@ -2409,6 +2487,7 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             <span className="roadmap-lane-ring-wrap">
                               <ProjectProgressRing
                                 completed={lane.completedCount}
+                                inProgress={lane.inProgressCount}
                                 total={lane.totalCount}
                                 size={13}
                               />
@@ -2805,6 +2884,8 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             type="button"
                             className={`things-checkbox ${
                               isMilestoneTask ? 'milestone' : ''
+                            } ${
+                              tk.status === 'OPEN' && tk.isInProgress ? 'in-progress' : ''
                             } ${tk.status === 'COMPLETED' ? 'completed checked' : ''}`}
                             disabled={isFullScreen}
                             aria-disabled={isFullScreen || undefined}
@@ -2818,6 +2899,10 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                             onClick={(e) => {
                               e.stopPropagation();
                               if (isFullScreen) return;
+                              if (e.shiftKey && tk.status === 'OPEN') {
+                                void localDb.toggleTaskInProgress(tk.id);
+                                return;
+                              }
                               void localDb.upsertTask({
                                 id: tk.id,
                                 status: tk.status === 'COMPLETED' ? 'OPEN' : 'COMPLETED'
@@ -3198,12 +3283,18 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                     <div className="roadmap-unscheduled-item-left">
                       <button
                         type="button"
-                        className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''}`}
+                        className={`things-checkbox ${tk.isMilestone ? 'milestone' : ''} ${
+                          tk.status === 'OPEN' && tk.isInProgress ? 'in-progress' : ''
+                        }`}
                         aria-label={t.actionComplete}
                         title={t.actionComplete}
-                        onClick={() =>
-                          void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' })
-                        }
+                        onClick={(e) => {
+                          if (e.shiftKey && tk.status === 'OPEN') {
+                            void localDb.toggleTaskInProgress(tk.id);
+                            return;
+                          }
+                          void localDb.upsertTask({ id: tk.id, status: 'COMPLETED' });
+                        }}
                       />
                       <button
                         type="button"
@@ -3214,6 +3305,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
                       >
                         {tk.title || t.placeholderTodoTitle}
                       </button>
+                      {tk.status === 'OPEN' && tk.isInProgress && (
+                        <span className="meta-badge in-progress-badge">
+                          ◐ {t.v33InProgressBadge}
+                        </span>
+                      )}
                       {tk.isMilestone && (
                         <span
                           className="meta-badge milestone-badge"
@@ -4355,6 +4451,7 @@ export const AreaPortfolioRoadmapWorkspace: React.FC<AreaPortfolioRoadmapWorkspa
 
                         <ProjectProgressRing
                           completed={pLane.completedCount}
+                          inProgress={pLane.inProgressCount}
                           total={pLane.totalCount}
                           size={16}
                         />
@@ -4612,11 +4709,19 @@ export const AreaPortfolioRoadmapWorkspace: React.FC<AreaPortfolioRoadmapWorkspa
                                       type="button"
                                       className={`things-checkbox ${
                                         isMilestoneTask ? 'milestone' : ''
+                                      } ${
+                                        tk.status === 'OPEN' && tk.isInProgress
+                                          ? 'in-progress'
+                                          : ''
                                       } ${tk.status === 'COMPLETED' ? 'completed checked' : ''}`}
                                       disabled={isFullScreen}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (isFullScreen) return;
+                                        if (e.shiftKey && tk.status === 'OPEN') {
+                                          void localDb.toggleTaskInProgress(tk.id);
+                                          return;
+                                        }
                                         void localDb.upsertTask({
                                           id: tk.id,
                                           status: tk.status === 'COMPLETED' ? 'OPEN' : 'COMPLETED'
@@ -4810,6 +4915,9 @@ export const AreaPortfolioRoadmapWorkspace: React.FC<AreaPortfolioRoadmapWorkspa
                 (tk) => !tk.isDeleted && tk.status !== 'CANCELED' && tk.projectId === proj.id
               );
               const doneCount = projTasks.filter((tk) => tk.status === 'COMPLETED').length;
+              const inProgressCount = projTasks.filter(
+                (tk) => tk.status === 'OPEN' && Boolean(tk.isInProgress)
+              ).length;
               return (
                 <div
                   key={`unsch-proj-${proj.id}`}
@@ -4819,6 +4927,7 @@ export const AreaPortfolioRoadmapWorkspace: React.FC<AreaPortfolioRoadmapWorkspa
                   <div className="roadmap-unscheduled-item-left">
                     <ProjectProgressRing
                       completed={doneCount}
+                      inProgress={inProgressCount}
                       total={projTasks.length}
                       size={16}
                     />

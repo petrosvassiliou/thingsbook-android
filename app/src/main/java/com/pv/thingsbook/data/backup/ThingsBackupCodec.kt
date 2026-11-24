@@ -126,6 +126,7 @@ data class BackupTaskDto(
     val sortOrder: Double = 0.0,
     val isPinned: Boolean = false,
     val isMilestone: Boolean = false,
+    val isInProgress: Boolean = false,
     val effortLevel: String? = null,
     val blockedByJson: String = "[]",
     val workspaceId: String? = null,

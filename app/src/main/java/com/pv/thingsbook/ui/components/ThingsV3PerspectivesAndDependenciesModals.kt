@@ -454,6 +454,9 @@ fun PerspectiveEditorDialog(
     var actionableOnly by remember(initialPerspective?.id) {
         mutableStateOf(initialPerspective?.actionableOnly ?: false)
     }
+    var inProgressOnly by remember(initialPerspective?.id) {
+        mutableStateOf(initialPerspective?.inProgressOnly ?: false)
+    }
 
     val commitSave = {
         val cleanTitle = titleField.text.trim()
@@ -469,6 +472,7 @@ fun PerspectiveEditorDialog(
                     dueWindow = selectedDueWindow,
                     areaId = selectedAreaId,
                     actionableOnly = actionableOnly,
+                    inProgressOnly = inProgressOnly,
                     sortOrder = initialPerspective?.sortOrder ?: 0.0
                 )
             )
@@ -722,6 +726,42 @@ fun PerspectiveEditorDialog(
                                         actionableOnly = it
                                     },
                                     colors = SwitchDefaults.colors(checkedTrackColor = colors.thingsBlue)
+                                )
+                            }
+                        }
+
+                        // 7. In Progress Only Toggle
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = colors.tagPillBg.copy(alpha = 0.65f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    inProgressOnly = !inProgressOnly
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "◐ ${stringResource(R.string.v33_filter_in_progress_only)}",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = colors.primaryText,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Switch(
+                                    checked = inProgressOnly,
+                                    onCheckedChange = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        inProgressOnly = it
+                                    },
+                                    colors = SwitchDefaults.colors(checkedTrackColor = colors.somedayWarmAmber)
                                 )
                             }
                         }

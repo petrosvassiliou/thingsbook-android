@@ -832,9 +832,15 @@ public final class ThingsbookStore: ObservableObject {
         guard project.status == .active, !project.isDeleted, project.scheduleState != .someday else {
             return (false, false, false)
         }
+        if project.inProgressTaskCount > 0 {
+            return (false, false, false)
+        }
         var hasOpenNextAction = false
         var latestTaskActivityAt: Int64 = 0
         for t in allOpenTasks where t.projectId == project.id {
+            if t.status == .open && t.isInProgress {
+                return (false, false, false)
+            }
             hasOpenNextAction = true
             latestTaskActivityAt = max(latestTaskActivityAt, t.createdAt, t.updatedAt, t.completedAt ?? 0)
         }
@@ -1787,7 +1793,8 @@ public final class ThingsbookStore: ObservableObject {
             projectId: projId,
             areaId: areaId,
             tagIds: tagIds,
-            isMilestone: parsed.isMilestone
+            isMilestone: parsed.isMilestone,
+            isInProgress: parsed.isInProgress
         ) else {
             return nil
         }
@@ -1806,7 +1813,8 @@ public final class ThingsbookStore: ObservableObject {
         deadline: Int64? = nil,
         durationMinutes: Int? = nil,
         tagIds: [String] = [],
-        isMilestone: Bool = false
+        isMilestone: Bool = false,
+        isInProgress: Bool = false
     ) {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return }
@@ -1854,7 +1862,8 @@ public final class ThingsbookStore: ObservableObject {
             projectId: projId,
             areaId: areaId,
             tagIds: tagIds,
-            isMilestone: isMilestone
+            isMilestone: isMilestone,
+            isInProgress: isInProgress
         ) {
             NotificationReminderService.shared.syncTaskReminder(task, lang: preferences.language)
             showToast(tr("macos_quick_share_saved"))
@@ -2137,6 +2146,46 @@ public final class ThingsbookStore: ObservableObject {
         let candidates = (allOpenTasks + logbookTasks).filter { ids.contains($0.id) }
         let shouldMark = candidates.isEmpty ? true : !candidates.allSatisfy(\.isMilestone)
         setTasksMilestone(ids, isMilestone: shouldMark)
+    }
+
+    public func toggleTaskInProgress(_ task: TaskItem) {
+        flushModalDraftsIfNeeded()
+        let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        guard fresh.status == .open, !fresh.isDeleted else { return }
+        setTasksInProgress([fresh.id], isInProgress: !fresh.isInProgress)
+    }
+
+    public func setTasksInProgress(_ ids: [String], isInProgress: Bool) {
+        flushModalDraftsIfNeeded()
+        guard !ids.isEmpty else { return }
+        try? database.setTasksInProgress(ids, isInProgress: isInProgress)
+        reloadSnapshot()
+    }
+
+    public func toggleInProgressForSelectedTasks() {
+        flushModalDraftsIfNeeded()
+        let ids = Array(selectedTaskIds)
+        guard !ids.isEmpty else { return }
+        let candidates = allOpenTasks.filter { selectedTaskIds.contains($0.id) && $0.status == .open && !$0.isDeleted }
+        guard !candidates.isEmpty else { return }
+        let shouldMark = !candidates.allSatisfy(\.isInProgress)
+        setTasksInProgress(candidates.map(\.id), isInProgress: shouldMark)
+    }
+
+    public func toggleInProgressForSelectedOrExpandedTasks() {
+        flushModalDraftsIfNeeded()
+        let ids: [String]
+        if !selectedTaskIds.isEmpty {
+            ids = Array(selectedTaskIds)
+        } else if let exp = expandedTaskId {
+            ids = [exp]
+        } else {
+            return
+        }
+        let candidates = allOpenTasks.filter { ids.contains($0.id) && $0.status == .open && !$0.isDeleted }
+        guard !candidates.isEmpty else { return }
+        let shouldMark = !candidates.allSatisfy(\.isInProgress)
+        setTasksInProgress(candidates.map(\.id), isInProgress: shouldMark)
     }
 
     public func completeSelectedTasks() {
@@ -2576,6 +2625,10 @@ public final class ThingsbookStore: ObservableObject {
         flushActiveFocusMinutes(roundUpPartial: true)
         focusTimerCancellable?.invalidate()
         let fresh = self.taskIncludingTrash(byId: task.id) ?? task
+        if fresh.status == .open && !fresh.isDeleted {
+            try? database.setTasksInProgress([fresh.id], isInProgress: true)
+            reloadSnapshot()
+        }
         let title = fresh.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("macos_untitled_todo") : fresh.title
         let sessionMinutes = min(max(1, fresh.durationMinutes ?? 25), 120)
         let durationSeconds = sessionMinutes * 60

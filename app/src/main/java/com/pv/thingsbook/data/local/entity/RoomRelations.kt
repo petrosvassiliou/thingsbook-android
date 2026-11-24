@@ -35,6 +35,7 @@ data class ProjectWithProgressTuple(
     @Embedded val project: ProjectEntity,
     val totalTaskCount: Int,
     val completedTaskCount: Int,
+    val inProgressTaskCount: Int = 0,
     val lastTaskActivityAt: Long? = null
 )
 

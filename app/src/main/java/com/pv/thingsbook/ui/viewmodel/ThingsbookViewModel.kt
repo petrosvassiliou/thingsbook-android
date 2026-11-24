@@ -1063,6 +1063,7 @@ class ThingsbookViewModel @Inject constructor(
                 areaId = resolvedAreaId,
                 sortOrder = 500.0,
                 isMilestone = if (parsed.isMilestone) true else null,
+                isInProgress = if (parsed.isInProgress) true else null,
                 effortLevel = activePerspective?.effortLevel,
                 tagIds = mergedTagIds
             )
@@ -4182,6 +4183,20 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun setTaskInProgress(taskId: String, isInProgress: Boolean) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            repository.setTaskInProgress(taskId, isInProgress)
+        }
+    }
+
+    fun toggleTaskInProgress(taskId: String) {
+        if (taskId.isBlank()) return
+        safeVmScope.launch {
+            repository.toggleTaskInProgress(taskId)
+        }
+    }
+
     fun duplicateTask(taskId: String) {
         safeVmScope.launch {
             val copySuffix = getLocalizedString(R.string.v25_copy_suffix)
@@ -4264,6 +4279,11 @@ class ThingsbookViewModel @Inject constructor(
             isBreakMode = false
         )
         _focusTimerState.value = initial
+        if (taskId.isNotBlank()) {
+            safeVmScope.launch {
+                repository.setTaskInProgress(taskId, true)
+            }
+        }
         reminderScheduler.showOrUpdateFocusTimerNotification(taskId, taskTitle, totalSecs, false)
         startFocusTimerTicker()
     }
@@ -4471,6 +4491,7 @@ class ThingsbookViewModel @Inject constructor(
                 areaId = effectiveAreaId,
                 sortOrder = 500.0,
                 isMilestone = if (parsed.isMilestone) true else null,
+                isInProgress = if (parsed.isInProgress) true else null,
                 tagIds = parsed.matchedTagIds
             )
             when {

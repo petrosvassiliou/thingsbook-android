@@ -62,9 +62,9 @@ class V3Beta15MilestonesAndSelectionTest {
     fun `Room v7 MIGRATION_6_7, Asana Target Area preselection, and Milestone UI components are wired cleanly`() {
         val appSrcMain = sequenceOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
 
-        // 1. Room v8 + MIGRATION_6_7 / MIGRATION_7_8
+        // 1. Room v9 + MIGRATION_6_7 / MIGRATION_7_8 / MIGRATION_8_9
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
-        assertTrue(dbKt.contains("version = 8"))
+        assertTrue(dbKt.contains("version = 9"))
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
         assertTrue(appModuleKt.contains("val MIGRATION_6_7 = object : Migration(6, 7)"))
         assertTrue(appModuleKt.contains("ALTER TABLE tasks ADD COLUMN isMilestone INTEGER NOT NULL DEFAULT 0"))

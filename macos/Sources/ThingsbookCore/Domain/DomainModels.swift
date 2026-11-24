@@ -46,6 +46,7 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var viewMode: String?
     public var totalTaskCount: Int
     public var completedTaskCount: Int
+    public var inProgressTaskCount: Int
     public var createdAt: Int64
     public var updatedAt: Int64
     public var isDeleted: Bool
@@ -69,7 +70,8 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
         completedTaskCount: Int = 0,
         createdAt: Int64,
         updatedAt: Int64,
-        isDeleted: Bool = false
+        isDeleted: Bool = false,
+        inProgressTaskCount: Int = 0
     ) {
         self.id = id
         self.areaId = areaId
@@ -87,6 +89,7 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.viewMode = viewMode
         self.totalTaskCount = totalTaskCount
         self.completedTaskCount = completedTaskCount
+        self.inProgressTaskCount = max(0, inProgressTaskCount)
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.isDeleted = isDeleted
@@ -95,7 +98,7 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, areaId, title, notes, status, scheduleState, whenDate, deadline, completedAt
         case lastReviewedAt, sortOrder, tagIds, workspaceId, viewMode
-        case totalTaskCount, completedTaskCount, createdAt, updatedAt, isDeleted
+        case totalTaskCount, completedTaskCount, inProgressTaskCount, createdAt, updatedAt, isDeleted
     }
 
     public init(from decoder: Decoder) throws {
@@ -116,6 +119,7 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.viewMode = try c.decodeIfPresent(String.self, forKey: .viewMode)
         self.totalTaskCount = try c.decodeIfPresent(Int.self, forKey: .totalTaskCount) ?? 0
         self.completedTaskCount = try c.decodeIfPresent(Int.self, forKey: .completedTaskCount) ?? 0
+        self.inProgressTaskCount = max(0, try c.decodeIfPresent(Int.self, forKey: .inProgressTaskCount) ?? 0)
         self.createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         self.updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
         self.isDeleted = try c.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
@@ -124,6 +128,11 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var progress: Double {
         guard totalTaskCount > 0 else { return 0.0 }
         return min(1.0, max(0.0, Double(completedTaskCount) / Double(totalTaskCount)))
+    }
+
+    public var inProgressProgress: Double {
+        guard totalTaskCount > 0 else { return 0 }
+        return min(max(0, 1.0 - progress), max(0, Double(inProgressTaskCount) / Double(totalTaskCount)))
     }
 
     public var resolvedViewMode: ProjectViewMode {
@@ -349,6 +358,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     public var sortOrder: Double
     public var isPinned: Bool
     public var isMilestone: Bool
+    public var isInProgress: Bool
     public var effortLevel: String?
     public var blockedByTaskIds: [String]
     public var workspaceId: String?
@@ -389,7 +399,8 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         attachments: [TaskAttachment] = [],
         createdAt: Int64,
         updatedAt: Int64,
-        isDeleted: Bool = false
+        isDeleted: Bool = false,
+        isInProgress: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -410,6 +421,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.sortOrder = sortOrder
         self.isPinned = isPinned
         self.isMilestone = isMilestone
+        self.isInProgress = (status == .open && !isDeleted) ? isInProgress : false
         self.effortLevel = effortLevel
         self.blockedByTaskIds = blockedByTaskIds
         self.workspaceId = workspaceId
@@ -425,7 +437,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, title, notes, status, scheduleState, whenDate, deadline, reminderTime
         case scheduledStartMinutes, durationMinutes, actualMinutes, completedAt, projectId, headingId, areaId
-        case recurrenceRule, sortOrder, isPinned, isMilestone, effortLevel, blockedByTaskIds, workspaceId, assigneeId
+        case recurrenceRule, sortOrder, isPinned, isMilestone, isInProgress, effortLevel, blockedByTaskIds, workspaceId, assigneeId
         case checklistItems, tags, attachments, createdAt, updatedAt, isDeleted
     }
 
@@ -434,7 +446,9 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.id = try c.decode(String.self, forKey: .id)
         self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
         self.notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
-        self.status = try c.decodeIfPresent(TaskStatus.self, forKey: .status) ?? .open
+        let decodedStatus = try c.decodeIfPresent(TaskStatus.self, forKey: .status) ?? .open
+        let decodedIsDeleted = try c.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+        self.status = decodedStatus
         self.scheduleState = try c.decodeIfPresent(ScheduleState.self, forKey: .scheduleState) ?? .inbox
         self.whenDate = try c.decodeIfPresent(Int64.self, forKey: .whenDate)
         self.deadline = try c.decodeIfPresent(Int64.self, forKey: .deadline)
@@ -450,6 +464,8 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder) ?? 1000.0
         self.isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         self.isMilestone = try c.decodeIfPresent(Bool.self, forKey: .isMilestone) ?? false
+        let rawInProgress = try c.decodeIfPresent(Bool.self, forKey: .isInProgress) ?? false
+        self.isInProgress = (decodedStatus == .open && !decodedIsDeleted) ? rawInProgress : false
         self.effortLevel = try c.decodeIfPresent(String.self, forKey: .effortLevel)
         self.blockedByTaskIds = try c.decodeIfPresent([String].self, forKey: .blockedByTaskIds) ?? []
         self.workspaceId = try c.decodeIfPresent(String.self, forKey: .workspaceId)
@@ -459,7 +475,7 @@ public struct TaskItem: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.attachments = try c.decodeIfPresent([TaskAttachment].self, forKey: .attachments) ?? []
         self.createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         self.updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
-        self.isDeleted = try c.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+        self.isDeleted = decodedIsDeleted
     }
 
     public var tagIds: [String] {
@@ -1816,6 +1832,7 @@ public struct SavedPerspective: Codable, Identifiable, Equatable, Hashable, Send
     public var dueWindow: String
     public var areaId: String?
     public var actionableOnly: Bool
+    public var inProgressOnly: Bool
     public var sortOrder: Double
 
     public init(
@@ -1827,7 +1844,8 @@ public struct SavedPerspective: Codable, Identifiable, Equatable, Hashable, Send
         dueWindow: String = "ANY",
         areaId: String? = nil,
         actionableOnly: Bool = false,
-        sortOrder: Double = 0.0
+        sortOrder: Double = 0.0,
+        inProgressOnly: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -1837,11 +1855,12 @@ public struct SavedPerspective: Codable, Identifiable, Equatable, Hashable, Send
         self.dueWindow = dueWindow
         self.areaId = areaId
         self.actionableOnly = actionableOnly
+        self.inProgressOnly = inProgressOnly
         self.sortOrder = sortOrder
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, categoryIds, tagIds, effortLevel, maxDurationMinutes, dueWindow, areaId, actionableOnly, sortOrder
+        case id, title, categoryIds, tagIds, effortLevel, maxDurationMinutes, dueWindow, areaId, actionableOnly, inProgressOnly, sortOrder
     }
 
     public init(from decoder: Decoder) throws {
@@ -1860,6 +1879,7 @@ public struct SavedPerspective: Codable, Identifiable, Equatable, Hashable, Send
         self.dueWindow = (try? c.decodeIfPresent(String.self, forKey: .dueWindow)) ?? "ANY"
         self.areaId = try? c.decodeIfPresent(String.self, forKey: .areaId)
         self.actionableOnly = (try? c.decodeIfPresent(Bool.self, forKey: .actionableOnly)) ?? false
+        self.inProgressOnly = (try? c.decodeIfPresent(Bool.self, forKey: .inProgressOnly)) ?? false
         self.sortOrder = (try? c.decodeIfPresent(Double.self, forKey: .sortOrder)) ?? 0.0
     }
 
@@ -1873,6 +1893,7 @@ public struct SavedPerspective: Codable, Identifiable, Equatable, Hashable, Send
         try c.encode(dueWindow, forKey: .dueWindow)
         try c.encodeIfPresent(areaId, forKey: .areaId)
         try c.encode(actionableOnly, forKey: .actionableOnly)
+        try c.encode(inProgressOnly, forKey: .inProgressOnly)
         try c.encode(sortOrder, forKey: .sortOrder)
     }
 }
@@ -2280,6 +2301,7 @@ public struct QuickFindFilter: Equatable, Hashable, Sendable {
     public var dateFilter: QuickFindDateFilter
     public var hasDeadlineOnly: Bool
     public var hasChecklistOnly: Bool
+    public var inProgressOnly: Bool
     public var tagId: String?
     public var scope: QuickFindEntityScope
 
@@ -2289,12 +2311,14 @@ public struct QuickFindFilter: Equatable, Hashable, Sendable {
         hasDeadlineOnly: Bool = false,
         hasChecklistOnly: Bool = false,
         tagId: String? = nil,
-        scope: QuickFindEntityScope = .all
+        scope: QuickFindEntityScope = .all,
+        inProgressOnly: Bool = false
     ) {
         self.hideCompleted = hideCompleted
         self.dateFilter = dateFilter
         self.hasDeadlineOnly = hasDeadlineOnly
         self.hasChecklistOnly = hasChecklistOnly
+        self.inProgressOnly = inProgressOnly
         self.tagId = tagId
         self.scope = scope
     }
@@ -2304,6 +2328,7 @@ public struct QuickFindFilter: Equatable, Hashable, Sendable {
             || dateFilter != .all
             || hasDeadlineOnly
             || hasChecklistOnly
+            || inProgressOnly
             || tagId != nil
             || scope != .all
     }
@@ -2313,6 +2338,7 @@ public struct QuickFindFilter: Equatable, Hashable, Sendable {
               dateFilter == .all,
               !hasDeadlineOnly,
               !hasChecklistOnly,
+              !inProgressOnly,
               tagId == nil else {
             return false
         }
@@ -2330,6 +2356,7 @@ public struct QuickFindFilter: Equatable, Hashable, Sendable {
         guard !task.isDeleted else { return false }
         if scope == .projects { return false }
         if hideCompleted && task.status != .open { return false }
+        if inProgressOnly && !(task.status == .open && task.isInProgress) { return false }
         if hasDeadlineOnly && task.deadline == nil { return false }
         if hasChecklistOnly && task.checklistItems.isEmpty { return false }
         if let requiredTagId = tagId, !task.tags.contains(where: { $0.id == requiredTagId }) {
@@ -2356,6 +2383,7 @@ public struct QuickFindFilter: Equatable, Hashable, Sendable {
         if scope == .tasks { return false }
         if hasChecklistOnly { return false }
         if hideCompleted && project.status != .active { return false }
+        if inProgressOnly && project.inProgressTaskCount <= 0 { return false }
         if hasDeadlineOnly && project.deadline == nil { return false }
         if let requiredTagId = tagId, !project.tagIds.contains(requiredTagId) {
             return false
@@ -3167,6 +3195,11 @@ public enum TaskViewSorter {
             if lhs.isPinned != rhs.isPinned {
                 return lhs.isPinned && !rhs.isPinned
             }
+            let lhsInProgress = lhs.status == .open && lhs.isInProgress
+            let rhsInProgress = rhs.status == .open && rhs.isInProgress
+            if lhsInProgress != rhsInProgress {
+                return lhsInProgress && !rhsInProgress
+            }
             switch normalizedMode {
             case "deadline":
                 switch (lhs.deadline, rhs.deadline) {
@@ -3316,6 +3349,12 @@ public enum PerspectiveFilterEngine {
 
             if perspective.actionableOnly {
                 if TaskDependencyGraph.isActivelyBlocked(task, openTaskIds: openTaskIds) {
+                    return false
+                }
+            }
+
+            if perspective.inProgressOnly {
+                if !(task.status == .open && task.isInProgress) {
                     return false
                 }
             }
@@ -4454,6 +4493,7 @@ public enum ProjectRoadmapEngine {
     ) -> (project: Project, headings: [Heading], layout: ProjectRoadmapLayout) {
         let totalTasks = portfolioLayout.projectLanes.reduce(0) { $0 + $1.project.totalTaskCount }
         let doneTasks = portfolioLayout.projectLanes.reduce(0) { $0 + $1.project.completedTaskCount }
+        let inProgressTasks = portfolioLayout.projectLanes.reduce(0) { $0 + $1.project.inProgressTaskCount }
         let maxDeadline = portfolioLayout.projectLanes.compactMap(\.project.deadline).max()
         let startMillis = DateEpochConverter.startOfDayMillis(
             for: DateEpochConverter.date(fromEpochDay: portfolioLayout.startEpochDay, calendar: calendar),
@@ -4476,7 +4516,8 @@ public enum ProjectRoadmapEngine {
             totalTaskCount: totalTasks,
             completedTaskCount: doneTasks,
             createdAt: portfolioLayout.area.createdAt,
-            updatedAt: portfolioLayout.area.updatedAt
+            updatedAt: portfolioLayout.area.updatedAt,
+            inProgressTaskCount: inProgressTasks
         )
 
         var syntheticHeadings: [Heading] = []

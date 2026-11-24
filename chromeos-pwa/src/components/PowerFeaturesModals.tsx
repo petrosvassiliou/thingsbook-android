@@ -120,6 +120,7 @@ export interface QuickShareSavePayload {
   durationMinutes?: number | null;
   tagIds?: string[];
   isMilestone?: boolean;
+  isInProgress?: boolean;
   projectId: string | null;
   areaId: string | null;
 }
@@ -285,6 +286,7 @@ export const QuickShareModal: React.FC<{
       durationMinutes: parsedSmart.durationMinutes ?? null,
       tagIds: parsedSmart.matchedTagIds,
       isMilestone: parsedSmart.isMilestone ? true : undefined,
+      isInProgress: parsedSmart.isInProgress ? true : undefined,
       projectId: resolvedProjectId,
       areaId: resolvedAreaId
     });
@@ -416,6 +418,11 @@ export const QuickShareModal: React.FC<{
                     <span className="meta-badge milestone-badge">
                       <Diamond size={10} />
                       <span>{t.milestoneLabel}</span>
+                    </span>
+                  )}
+                  {parsedSmart.isInProgress && (
+                    <span className="meta-badge in-progress-badge">
+                      <span>◐ {t.v33InProgressBadge}</span>
                     </span>
                   )}
                   {parsedSmart.matchedProject && (

@@ -593,8 +593,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 120"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.0-beta.2\""))
+        assertTrue(buildGradleKt.contains("versionCode = 121"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.0\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()

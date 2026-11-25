@@ -24,6 +24,9 @@ import com.pv.thingsbook.domain.model.StalledProjectDetector
 import com.pv.thingsbook.domain.model.Tag
 import com.pv.thingsbook.domain.model.TaskItem
 import com.pv.thingsbook.domain.model.TaskStatus
+import com.pv.thingsbook.domain.model.allocateTaskWorkloadMinutesByEpochDay
+import com.pv.thingsbook.domain.model.computeDayCapacityBreakdown
+import com.pv.thingsbook.domain.model.computeMultiDayWorkloadForecast
 import com.pv.thingsbook.domain.model.filterTasksForPerspective
 import com.pv.thingsbook.domain.model.sortTasksForView
 import com.pv.thingsbook.domain.parser.SmartSyntaxParser
@@ -593,8 +596,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 121"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.0\""))
+        assertTrue(buildGradleKt.contains("versionCode = 122"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.1\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
@@ -798,5 +801,161 @@ class V33InProgressIndicatorTest {
         assertTrue(reconnectBody.contains("FirebaseFirestoreException.Code.UNAUTHENTICATED"))
         assertTrue(syncRepoSrc.contains("ensureFirestoreAuthReady("))
         assertTrue(syncRepoSrc.contains("localizedSessionExpiredError()"))
+    }
+
+    @Test
+    fun `multi-day task durations distribute across consecutive forecast days and compress cleanly against deadlines`() {
+        val zone = ZoneId.of("Europe/Berlin")
+        val monday = LocalDate.of(2026, 11, 23)
+        val thursday = LocalDate.of(2026, 11, 26)
+        val friday = LocalDate.of(2026, 11, 27)
+        val mondayEpoch = monday.toEpochDay()
+        val thuEpoch = thursday.toEpochDay()
+        val friEpoch = friday.toEpochDay()
+
+        fun dayStartMs(date: LocalDate): Long =
+            date.atStartOfDay(zone).toInstant().toEpochMilli()
+
+        // Pure helper checks
+        assertEquals(
+            listOf(thuEpoch to 480, friEpoch to 480),
+            allocateTaskWorkloadMinutesByEpochDay(960, thuEpoch, null, 480)
+        )
+        assertEquals(
+            listOf(thuEpoch to 960),
+            allocateTaskWorkloadMinutesByEpochDay(960, thuEpoch, thuEpoch, 480)
+        )
+        assertEquals(
+            listOf(thuEpoch to 720, friEpoch to 720),
+            allocateTaskWorkloadMinutesByEpochDay(1440, thuEpoch, friEpoch, 480)
+        )
+
+        // (a) 2d (960m) task + 15m task on Thursday (deadline = null) -> Thu 495m (+15m overload), Fri 480m (0 overload)
+        val twoDayThu = sampleTaskItem(
+            id = "t-2d-thu",
+            scheduleState = ScheduleState.UPCOMING,
+            durationMinutes = 960
+        ).copy(whenDate = dayStartMs(thursday), deadline = null)
+        val quick15Thu = sampleTaskItem(
+            id = "t-15m-thu",
+            scheduleState = ScheduleState.UPCOMING,
+            durationMinutes = 15
+        ).copy(whenDate = dayStartMs(thursday), deadline = null)
+
+        val forecastA = computeMultiDayWorkloadForecast(
+            todayTasks = emptyList(),
+            allOpenTasks = listOf(twoDayThu, quick15Thu),
+            todayCalendarEvents = emptyList(),
+            upcomingCalendarEventsByEpochDay = emptyMap(),
+            todayEpochDay = mondayEpoch,
+            daysCount = 7,
+            zoneId = zone
+        ).associateBy { it.epochDay }
+
+        assertEquals(495, forecastA.getValue(thuEpoch).plannedTaskMinutes)
+        assertEquals(15, forecastA.getValue(thuEpoch).overloadedByMinutes)
+        assertTrue(forecastA.getValue(thuEpoch).isOverloaded)
+        assertEquals(480, forecastA.getValue(friEpoch).plannedTaskMinutes)
+        assertEquals(0, forecastA.getValue(friEpoch).overloadedByMinutes)
+        assertFalse(forecastA.getValue(friEpoch).isOverloaded)
+
+        // (b) 2d (960m) task alone on Thursday (deadline = null) -> Thu 480m (not overloaded), Fri 480m (not overloaded)
+        val forecastB = computeMultiDayWorkloadForecast(
+            todayTasks = emptyList(),
+            allOpenTasks = listOf(twoDayThu),
+            todayCalendarEvents = emptyList(),
+            upcomingCalendarEventsByEpochDay = emptyMap(),
+            todayEpochDay = mondayEpoch,
+            daysCount = 7,
+            zoneId = zone
+        ).associateBy { it.epochDay }
+
+        assertEquals(480, forecastB.getValue(thuEpoch).plannedTaskMinutes)
+        assertFalse(forecastB.getValue(thuEpoch).isOverloaded)
+        assertEquals(480, forecastB.getValue(friEpoch).plannedTaskMinutes)
+        assertFalse(forecastB.getValue(friEpoch).isOverloaded)
+
+        // (c) 2d (960m) task with deadline on Thursday -> Thu 960m (overloadedByMinutes == 480)
+        val twoDayDueThu = twoDayThu.copy(id = "t-2d-due-thu", deadline = dayStartMs(thursday))
+        val forecastC = computeMultiDayWorkloadForecast(
+            todayTasks = emptyList(),
+            allOpenTasks = listOf(twoDayDueThu),
+            todayCalendarEvents = emptyList(),
+            upcomingCalendarEventsByEpochDay = emptyMap(),
+            todayEpochDay = mondayEpoch,
+            daysCount = 7,
+            zoneId = zone
+        ).associateBy { it.epochDay }
+
+        assertEquals(960, forecastC.getValue(thuEpoch).plannedTaskMinutes)
+        assertEquals(480, forecastC.getValue(thuEpoch).overloadedByMinutes)
+        assertEquals(0, forecastC.getValue(friEpoch).plannedTaskMinutes)
+
+        // (d) 3d (1440m) task starting Thursday with deadline on Friday -> Thu 720m, Fri 720m
+        val threeDayDueFri = sampleTaskItem(
+            id = "t-3d-due-fri",
+            scheduleState = ScheduleState.UPCOMING,
+            durationMinutes = 1440
+        ).copy(whenDate = dayStartMs(thursday), deadline = dayStartMs(friday))
+        val forecastD = computeMultiDayWorkloadForecast(
+            todayTasks = emptyList(),
+            allOpenTasks = listOf(threeDayDueFri),
+            todayCalendarEvents = emptyList(),
+            upcomingCalendarEventsByEpochDay = emptyMap(),
+            todayEpochDay = mondayEpoch,
+            daysCount = 7,
+            zoneId = zone
+        ).associateBy { it.epochDay }
+
+        assertEquals(720, forecastD.getValue(thuEpoch).plannedTaskMinutes)
+        assertEquals(720, forecastD.getValue(friEpoch).plannedTaskMinutes)
+
+        // Today single-day breakdown also counts Day 1 slice (480m) unless due today
+        val todayTwoDay = sampleTaskItem(
+            id = "t-today-2d",
+            scheduleState = ScheduleState.TODAY,
+            durationMinutes = 960
+        )
+        val (todayPlannedOpen, _, todayFreeOpen) = computeDayCapacityBreakdown(
+            tasks = listOf(todayTwoDay),
+            calendarEvents = emptyList(),
+            dayStartMillis = dayStartMs(monday),
+            dayEndMillis = dayStartMs(monday.plusDays(1)),
+            zoneId = zone
+        )
+        assertEquals(480, todayPlannedOpen)
+        assertEquals(0, todayFreeOpen)
+
+        val (todayPlannedDue, _, _) = computeDayCapacityBreakdown(
+            tasks = listOf(todayTwoDay.copy(deadline = dayStartMs(monday))),
+            calendarEvents = emptyList(),
+            dayStartMillis = dayStartMs(monday),
+            dayEndMillis = dayStartMs(monday.plusDays(1)),
+            zoneId = zone
+        )
+        assertEquals(960, todayPlannedDue)
+    }
+
+    @Test
+    fun `ThingsInProgressIcon and batch In-Progress multi-selection action are wired across Android UI`() {
+        val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
+        val appSrcMain = File(appRoot, "src/main")
+
+        val badgesKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsBadges.kt").readText()
+        val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
+        val inspectorKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/WorkspaceInspectorPanel.kt").readText()
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        val repoKt = File(appSrcMain, "java/com/pv/thingsbook/data/repository/ThingsRepository.kt").readText()
+        val viewModelKt = File(appSrcMain, "java/com/pv/thingsbook/ui/viewmodel/ThingsbookViewModel.kt").readText()
+
+        assertTrue(badgesKt.contains("fun ThingsInProgressIcon("))
+        assertTrue(cardKt.contains("ThingsInProgressIcon("))
+        assertTrue(inspectorKt.contains("ThingsInProgressIcon("))
+        assertTrue(smartViewKt.contains("ThingsInProgressIcon("))
+        assertTrue(smartViewKt.contains("onBatchInProgress"))
+        assertTrue(smartViewKt.contains("showBatchInProgress"))
+        assertTrue(smartViewKt.contains("isBatchInProgressActive"))
+        assertTrue(viewModelKt.contains("fun batchToggleInProgressSelectedTasks()"))
+        assertTrue(repoKt.contains("suspend fun setTasksInProgress("))
     }
 }

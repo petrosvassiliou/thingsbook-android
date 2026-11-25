@@ -3587,6 +3587,23 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    fun batchToggleInProgressSelectedTasks() {
+        val ids = _selectedTaskIds.value.toList()
+        if (ids.isEmpty()) return
+        safeVmScope.launch {
+            val openEntities = ids
+                .mapNotNull { repository.getTaskEntityById(it) }
+                .filter { !it.isDeleted && it.status == TaskStatus.OPEN }
+            if (openEntities.isEmpty()) {
+                clearTaskSelection()
+                return@launch
+            }
+            val targetInProgress = openEntities.any { !it.isInProgress }
+            repository.setTasksInProgress(openEntities.map { it.id }, targetInProgress)
+            clearTaskSelection()
+        }
+    }
+
     fun batchDuplicateSelectedTasks() {
         val ids = _selectedTaskIds.value.toList()
         if (ids.isEmpty()) return

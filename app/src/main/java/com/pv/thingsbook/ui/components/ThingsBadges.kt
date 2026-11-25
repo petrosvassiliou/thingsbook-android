@@ -120,6 +120,47 @@ fun ThingsMilestoneDiamondIcon(
 }
 
 @Composable
+fun ThingsInProgressIcon(
+    active: Boolean,
+    tint: Color,
+    size: Dp = 16.dp,
+    modifier: Modifier = Modifier
+) {
+    val strokeWidth = (size.value * 0.115f).coerceAtLeast(1.5f).dp
+    Canvas(modifier = modifier.size(size)) {
+        val dim = this.size.minDimension
+        val strokePx = strokeWidth.toPx().coerceAtMost(dim * 0.25f)
+        val outerDiameter = (dim - strokePx).coerceAtLeast(1f)
+        val center = Offset(this.size.width / 2f, this.size.height / 2f)
+        if (active) {
+            drawCircle(
+                color = tint.copy(alpha = (tint.alpha * 0.14f).coerceIn(0f, 1f)),
+                radius = outerDiameter / 2f,
+                center = center
+            )
+        }
+        drawCircle(
+            color = tint,
+            radius = outerDiameter / 2f,
+            center = center,
+            style = Stroke(width = strokePx)
+        )
+        val arcDiameter = (dim - strokePx * 1.15f).coerceAtLeast(1f)
+        drawArc(
+            color = tint,
+            startAngle = 90f,
+            sweepAngle = 180f,
+            useCenter = true,
+            topLeft = Offset(
+                (this.size.width - arcDiameter) / 2f,
+                (this.size.height - arcDiameter) / 2f
+            ),
+            size = Size(arcDiameter, arcDiameter)
+        )
+    }
+}
+
+@Composable
 fun ThisEveningHeaderBadge(
     modifier: Modifier = Modifier
 ) {

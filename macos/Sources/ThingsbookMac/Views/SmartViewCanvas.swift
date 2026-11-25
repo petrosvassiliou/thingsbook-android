@@ -576,23 +576,26 @@ public struct SmartViewCanvas: View {
     private var upcomingCanvas: some View {
         let filtered = store.filterTasksByActiveTag(store.upcomingTasks)
         let milestones = upcomingPhaseMilestones
-        let forecast = store.sevenDayWorkloadForecast()
+        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+        let groupedTasks = Dictionary(grouping: filtered) { task -> Int in
+            guard let w = task.whenDate ?? (task.isMilestone ? task.deadline : nil) else { return Int.max }
+            return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
+        }
+        let groupedMilestones = Dictionary(grouping: milestones, by: \.epochDay)
+        let sortedDays = Set(groupedTasks.keys).union(groupedMilestones.keys).sorted()
+        let maxGroupEpochDay = sortedDays.last(where: { $0 < Int.max }) ?? todayEpochDay
+        let clampedDaySpan = max(todayEpochDay, min(todayEpochDay + 365, maxGroupEpochDay)) - todayEpochDay + 1
+        let forecastDaysCount = max(7, min(366, clampedDaySpan))
+        let forecast = store.sevenDayWorkloadForecast(daysCount: forecastDaysCount)
         let workloadByEpochDay = Dictionary(forecast.map { ($0.epochDay, $0) }, uniquingKeysWith: { first, _ in first })
 
         if !forecast.isEmpty {
-            SevenDayWorkloadStripCard(store: store, forecast: forecast, compact: false)
+            SevenDayWorkloadStripCard(store: store, forecast: Array(forecast.prefix(7)), compact: false)
         }
 
         if filtered.isEmpty && milestones.isEmpty {
             emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
         } else {
-            let todayEpochDay = DateEpochConverter.epochDay(for: Date())
-            let groupedTasks = Dictionary(grouping: filtered) { task -> Int in
-                guard let w = task.whenDate ?? (task.isMilestone ? task.deadline : nil) else { return Int.max }
-                return max(todayEpochDay + 1, DateEpochConverter.epochDay(forMillis: w))
-            }
-            let groupedMilestones = Dictionary(grouping: milestones, by: \.epochDay)
-            let sortedDays = Set(groupedTasks.keys).union(groupedMilestones.keys).sorted()
 
             VStack(alignment: .leading, spacing: 22) {
                 ForEach(sortedDays, id: \.self) { epochDay in

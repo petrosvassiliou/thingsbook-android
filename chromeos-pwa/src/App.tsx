@@ -129,6 +129,7 @@ import { checkDueRemindersAndDigest } from './data/reminderRuntime';
 import { TRANSLATIONS, resolveLanguage } from './i18n/translations';
 import { AttachmentsStrip } from './components/AttachmentStrip';
 import { CalendarEventsBlock } from './components/CalendarEventsBlock';
+import { InProgressIcon } from './components/InProgressIcon';
 import {
   AreaManagerModal,
   CreateOrEditProjectModal,
@@ -1248,7 +1249,30 @@ export const App: React.FC = () => {
     ]
   );
 
-  const sevenDayWorkload = useMemo(
+  const upcomingForecastDaysCount = useMemo(() => {
+    const todayEpochDay = localEpochDayFromMs(endOfToday);
+    let maxTargetEpochDay = todayEpochDay + 6;
+    for (const tk of upcomingTasks) {
+      const startDay = localEpochDayFromMs(computeUpcomingTargetDate(tk));
+      const extraDays =
+        tk.durationMinutes != null && tk.durationMinutes > 480
+          ? Math.ceil(tk.durationMinutes / 480) - 1
+          : 0;
+      if (startDay + extraDays > maxTargetEpochDay) {
+        maxTargetEpochDay = startDay + extraDays;
+      }
+    }
+    for (const hd of snapshot.headings) {
+      if (hd.isDeleted || hd.isArchived || hd.endDate == null) continue;
+      const hdDay = localEpochDayFromMs(startOfDayEpoch(new Date(hd.endDate)));
+      if (hdDay > maxTargetEpochDay) {
+        maxTargetEpochDay = hdDay;
+      }
+    }
+    return Math.max(7, Math.min(366, maxTargetEpochDay - todayEpochDay + 1));
+  }, [upcomingTasks, snapshot.headings, endOfToday]);
+
+  const upcomingWorkloadForecast = useMemo(
     () =>
       computeMultiDayWorkloadForecast({
         todayTasks: [...todayDaytimeTasks, ...todayEveningTasks],
@@ -1258,7 +1282,7 @@ export const App: React.FC = () => {
           ? upcomingCalendarEventsByEpochDay
           : new Map(),
         todayStartMillis: todayStartMs,
-        daysCount: 7,
+        daysCount: upcomingForecastDaysCount,
         workdayStartMinutes: workdayBounds.startMinutes,
         workdayEndMinutes: workdayBounds.endMinutes
       }),
@@ -1270,14 +1294,20 @@ export const App: React.FC = () => {
       prefs.calendarEventsEnabled,
       upcomingCalendarEventsByEpochDay,
       todayStartMs,
+      upcomingForecastDaysCount,
       workdayBounds.startMinutes,
       workdayBounds.endMinutes
     ]
   );
 
-  const sevenDayWorkloadByEpochDay = useMemo(
-    () => new Map(sevenDayWorkload.map((d) => [d.epochDay, d])),
-    [sevenDayWorkload]
+  const sevenDayWorkload = useMemo(
+    () => upcomingWorkloadForecast.slice(0, 7),
+    [upcomingWorkloadForecast]
+  );
+
+  const upcomingWorkloadByEpochDay = useMemo(
+    () => new Map(upcomingWorkloadForecast.map((d) => [d.epochDay, d])),
+    [upcomingWorkloadForecast]
   );
 
   const maxUpcomingHorizonEpochDay = useMemo(() => {
@@ -4384,7 +4414,7 @@ export const App: React.FC = () => {
                             )
                           : [];
                         const dayWorkload =
-                          sevenDayWorkloadByEpochDay.get(targetEpochDay) ??
+                          upcomingWorkloadByEpochDay.get(targetEpochDay) ??
                           buildDayWorkloadSummary(
                             targetEpochDay,
                             dayEpoch,
@@ -6388,7 +6418,7 @@ export const App: React.FC = () => {
                     });
                   }}
                 >
-                  <span aria-hidden="true">◐</span>
+                  <InProgressIcon size={13.5} />
                   <span>
                     {allSelectedInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
                   </span>

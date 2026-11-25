@@ -1019,10 +1019,17 @@ private fun SelectedTaskInspectorContent(
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.5.dp, vertical = 4.5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
+                                ThingsInProgressIcon(
+                                    active = wipActive,
+                                    tint = if (wipActive) colors.somedayWarmAmber else colors.somedayWarmAmber.copy(alpha = 0.88f),
+                                    size = 14.dp
+                                )
                                 Text(
-                                    text = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
+                                    text = stringResource(
+                                        if (wipActive) R.string.v33_in_progress_badge else R.string.v33_mark_in_progress
+                                    ),
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = if (wipActive) colors.somedayWarmAmber else colors.secondaryText
                                 )

@@ -77,6 +77,7 @@ import type { TranslationStrings } from '../i18n/translations';
 import { extractDetectedLinksFromNotes } from '../domain/powerUtils';
 import { DetectedNotesLinksRow, MarkdownNotesField } from './MarkdownNotesField';
 import { AttachmentsStrip } from './AttachmentStrip';
+import { InProgressIcon } from './InProgressIcon';
 import { processAndAddAttachmentFile } from '../data/attachmentHelpers';
 import {
   attachMultiTaskDragPreview,
@@ -988,16 +989,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 }}
               >
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <span
-                    style={{
-                      color: 'var(--in-progress-amber-ring)',
-                      fontSize: 13.5,
-                      lineHeight: 1
-                    }}
-                    aria-hidden="true"
-                  >
-                    ◐
-                  </span>
+                  <InProgressIcon
+                    size={14}
+                    style={{ color: 'var(--in-progress-amber-ring)' }}
+                  />
                   <span>
                     {task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
                   </span>
@@ -1170,9 +1165,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   void localDb.toggleTaskInProgress(task.id);
                 }}
               >
-                <span style={{ fontSize: 14, lineHeight: 1 }} aria-hidden="true">
-                  ◐
-                </span>
+                <InProgressIcon
+                  size={16}
+                  style={
+                    !task.isInProgress
+                      ? { color: 'var(--in-progress-amber-ring)', opacity: 0.88 }
+                      : undefined
+                  }
+                />
               </button>
             )}
 
@@ -1638,16 +1638,14 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                           void localDb.toggleTaskInProgress(task.id);
                         }}
                       >
-                        <span
+                        <InProgressIcon
+                          size={13.5}
                           style={
                             !task.isInProgress
                               ? { color: 'var(--in-progress-amber-ring)', opacity: 0.9 }
                               : undefined
                           }
-                          aria-hidden="true"
-                        >
-                          ◐
-                        </span>
+                        />
                         <span>
                           {task.isInProgress ? t.v33InProgressBadge : t.v33MarkInProgress}
                         </span>
@@ -2131,16 +2129,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         }}
                       >
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          <span
-                            style={{
-                              color: 'var(--in-progress-amber-ring)',
-                              fontSize: 13.5,
-                              lineHeight: 1
-                            }}
-                            aria-hidden="true"
-                          >
-                            ◐
-                          </span>
+                          <InProgressIcon
+                            size={14}
+                            style={{ color: 'var(--in-progress-amber-ring)' }}
+                          />
                           <span>
                             {task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
                           </span>
@@ -3311,18 +3303,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     void localDb.toggleTaskInProgress(task.id);
                   }}
                 >
-                  <span
-                    style={{
-                      color: 'var(--in-progress-amber-ring)',
-                      fontSize: 13.5,
-                      width: 14,
-                      textAlign: 'center',
-                      lineHeight: 1
-                    }}
-                    aria-hidden="true"
-                  >
-                    ◐
-                  </span>
+                  <InProgressIcon
+                    size={14}
+                    style={{ color: 'var(--in-progress-amber-ring)' }}
+                  />
                   <span>
                     {task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
                   </span>

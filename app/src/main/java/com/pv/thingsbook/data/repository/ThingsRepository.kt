@@ -626,6 +626,41 @@ class ThingsRepository @Inject constructor(
         }
     }
 
+    suspend fun setTasksInProgress(taskIds: List<String>, inProgress: Boolean) {
+        val distinctIds = taskIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (distinctIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        var mutated = false
+        database.withTransaction {
+            val existingTasks = distinctIds.chunked(500).flatMap { chunk ->
+                database.taskDao().getByIds(chunk)
+            }
+            val updated = existingTasks.mapNotNull { task ->
+                if (task.isDeleted) {
+                    null
+                } else {
+                    val effectiveInProgress = if (task.status == TaskStatus.OPEN) inProgress else false
+                    if (task.isInProgress == effectiveInProgress) {
+                        null
+                    } else {
+                        task.copy(
+                            isInProgress = effectiveInProgress,
+                            updatedAt = maxOf(now, task.updatedAt + 1L),
+                            isDirty = true
+                        )
+                    }
+                }
+            }
+            if (updated.isNotEmpty()) {
+                database.taskDao().upsertAll(updated)
+                mutated = true
+            }
+        }
+        if (mutated) {
+            syncRepository.triggerBackgroundSync()
+        }
+    }
+
     suspend fun updateTaskEffortAndDuration(
         taskId: String,
         effortLevel: String? = null,

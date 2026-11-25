@@ -3462,25 +3462,53 @@ public enum TodayCapacityCalculator {
         return (safeStart, safeEnd)
     }
 
+    public static func allocateTaskWorkloadMinutesByEpochDay(
+        rawTaskMinutes: Int,
+        startEpochDay: Int,
+        deadlineEpochDay: Int?,
+        dailyUnitMinutes: Int
+    ) -> [(epochDay: Int, minutes: Int)] {
+        let unit = max(60, dailyUnitMinutes)
+        if rawTaskMinutes <= 0 {
+            return []
+        }
+        if rawTaskMinutes <= unit {
+            return [(epochDay: startEpochDay, minutes: rawTaskMinutes)]
+        }
+        let neededDays = (rawTaskMinutes + unit - 1) / unit
+        if let dl = deadlineEpochDay, dl <= startEpochDay {
+            return [(epochDay: startEpochDay, minutes: rawTaskMinutes)]
+        } else if let dl = deadlineEpochDay, (dl - startEpochDay + 1) < neededDays {
+            let availableDays = max(1, dl - startEpochDay + 1)
+            let base = rawTaskMinutes / availableDays
+            let rem = rawTaskMinutes % availableDays
+            return (0..<availableDays).compactMap { i in
+                let mins = base + (i < rem ? 1 : 0)
+                return mins > 0 ? (epochDay: startEpochDay + i, minutes: mins) : nil
+            }
+        } else {
+            var result: [(epochDay: Int, minutes: Int)] = []
+            var remaining = rawTaskMinutes
+            var dayOffset = 0
+            while remaining > 0 {
+                let slice = min(remaining, unit)
+                result.append((epochDay: startEpochDay + dayOffset, minutes: slice))
+                remaining -= slice
+                dayOffset += 1
+            }
+            return result
+        }
+    }
+
     public static func computeBreakdown(
         tasks: [TaskItem],
         calendarEvents: [CalendarEventItem],
         dayStartMillis: Int64,
         dayEndMillis: Int64,
         workdayStartMinutes: Int = defaultWorkdayStartMinutes,
-        workdayEndMinutes: Int = defaultWorkdayEndMinutes
+        workdayEndMinutes: Int = defaultWorkdayEndMinutes,
+        calendar: Calendar = .current
     ) -> (plannedMinutes: Int, busyMinutes: Int, freeMinutes: Int, totalWorkdayMinutes: Int) {
-        let plannedMinutes = tasks.reduce(0) { acc, task in
-            guard !task.isDeleted, task.status == .open else { return acc }
-            if let dur = task.durationMinutes, dur > 0 {
-                return acc + dur
-            }
-            if task.scheduledStartMinutes != nil {
-                return acc + task.effectiveDurationMinutes
-            }
-            return acc
-        }
-
         let (normStart, normEnd) = normalizeWorkdayBounds(
             startMinutes: workdayStartMinutes,
             endMinutes: workdayEndMinutes
@@ -3504,6 +3532,36 @@ public enum TodayCapacityCalculator {
             let rawEndMs = dayStartMillis + Int64(normEnd) * 60_000
             windowEndMs = dayEndMillis > windowStartMs ? min(dayEndMillis, rawEndMs) : rawEndMs
             totalWorkdayMinutes = max(0, min(24 * 60, Int((windowEndMs - windowStartMs) / 60_000)))
+        }
+
+        let unit = totalWorkdayMinutes > 0
+            ? max(60, min(TaskItem.MINUTES_PER_WORKDAY, totalWorkdayMinutes))
+            : TaskItem.MINUTES_PER_WORKDAY
+        let targetDayEpoch = DateEpochConverter.epochDay(forMillis: dayStartMillis, calendar: calendar)
+
+        let plannedMinutes = tasks.reduce(0) { acc, task in
+            guard !task.isDeleted, task.status == .open else { return acc }
+            let rawDur: Int
+            if let dur = task.durationMinutes, dur > 0 {
+                rawDur = dur
+            } else if task.scheduledStartMinutes != nil {
+                rawDur = task.effectiveDurationMinutes
+            } else {
+                rawDur = 0
+            }
+            guard rawDur > 0 else { return acc }
+            if rawDur > unit {
+                let dlEpoch = task.deadline.map { DateEpochConverter.epochDay(forMillis: $0, calendar: calendar) }
+                let slices = allocateTaskWorkloadMinutesByEpochDay(
+                    rawTaskMinutes: rawDur,
+                    startEpochDay: targetDayEpoch,
+                    deadlineEpochDay: dlEpoch,
+                    dailyUnitMinutes: unit
+                )
+                let daySlice = slices.first(where: { $0.epochDay == targetDayEpoch })?.minutes ?? 0
+                return acc + daySlice
+            }
+            return acc + rawDur
         }
 
         guard totalWorkdayMinutes > 0 else {
@@ -3546,7 +3604,8 @@ public enum TodayCapacityCalculator {
         dayStartMillis: Int64,
         dayEndMillis: Int64 = 0,
         workdayStartMinutes: Int = defaultWorkdayStartMinutes,
-        workdayEndMinutes: Int = defaultWorkdayEndMinutes
+        workdayEndMinutes: Int = defaultWorkdayEndMinutes,
+        calendar: Calendar = .current
     ) -> (plannedMinutes: Int, freeMinutes: Int) {
         let breakdown = computeBreakdown(
             tasks: tasks,
@@ -3554,7 +3613,8 @@ public enum TodayCapacityCalculator {
             dayStartMillis: dayStartMillis,
             dayEndMillis: dayEndMillis,
             workdayStartMinutes: workdayStartMinutes,
-            workdayEndMinutes: workdayEndMinutes
+            workdayEndMinutes: workdayEndMinutes,
+            calendar: calendar
         )
         return (plannedMinutes: breakdown.plannedMinutes, freeMinutes: breakdown.freeMinutes)
     }
@@ -3569,27 +3629,66 @@ public enum TodayCapacityCalculator {
         workdayEndMinutes: Int = defaultWorkdayEndMinutes,
         calendar: Calendar = .current
     ) -> [DayWorkloadSummary] {
-        let safeDays = min(30, max(1, daysCount))
+        let safeDays = min(366, max(1, daysCount))
         let (normStart, normEnd) = normalizeWorkdayBounds(
             startMinutes: workdayStartMinutes,
             endMinutes: workdayEndMinutes
         )
         let configuredWorkdayMinutes = max(60, normEnd - normStart)
+        let dailyUnitMinutes = configuredWorkdayMinutes > 0
+            ? max(60, min(TaskItem.MINUTES_PER_WORKDAY, configuredWorkdayMinutes))
+            : TaskItem.MINUTES_PER_WORKDAY
         let todayEpochDay = DateEpochConverter.epochDay(forMillis: todayMillis, calendar: calendar)
+        let endEpochDay = todayEpochDay + safeDays
 
-        var seenToday = Set<String>()
-        let deduplicatedToday = todayTasks.filter {
-            !$0.isDeleted && $0.status == .open && seenToday.insert($0.id).inserted
+        var todayTaskIds = Set<String>()
+        var scheduledEntries: [(task: TaskItem, startDay: Int)] = []
+
+        for task in todayTasks {
+            guard !task.isDeleted, task.status == .open else { continue }
+            guard todayTaskIds.insert(task.id).inserted else { continue }
+            scheduledEntries.append((task: task, startDay: todayEpochDay))
         }
 
-        var futureTasksByDay: [Int: [TaskItem]] = [:]
+        var seenOpenTaskIds = todayTaskIds
         for task in allOpenTasks {
             guard !task.isDeleted, task.status == .open else { continue }
+            guard !todayTaskIds.contains(task.id), seenOpenTaskIds.insert(task.id).inserted else { continue }
             if task.scheduleState == .today || task.scheduleState == .thisEvening { continue }
             guard let targetMs = task.whenDate ?? task.deadline else { continue }
-            let targetDay = DateEpochConverter.epochDay(forMillis: targetMs, calendar: calendar)
-            if targetDay > todayEpochDay && targetDay < todayEpochDay + safeDays {
-                futureTasksByDay[targetDay, default: []].append(task)
+            let startDay = DateEpochConverter.epochDay(forMillis: targetMs, calendar: calendar)
+            scheduledEntries.append((task: task, startDay: startDay))
+        }
+
+        var plannedMinutesByDay: [Int: Int] = [:]
+        var taskCountByDay: [Int: Int] = [:]
+
+        for entry in scheduledEntries {
+            let task = entry.task
+            let startDay = entry.startDay
+            let rawDur: Int
+            if let dur = task.durationMinutes, dur > 0 {
+                rawDur = dur
+            } else if task.scheduledStartMinutes != nil {
+                rawDur = task.effectiveDurationMinutes
+            } else {
+                rawDur = 0
+            }
+
+            if rawDur > 0 {
+                let dlEpoch = task.deadline.map { DateEpochConverter.epochDay(forMillis: $0, calendar: calendar) }
+                let slices = allocateTaskWorkloadMinutesByEpochDay(
+                    rawTaskMinutes: rawDur,
+                    startEpochDay: startDay,
+                    deadlineEpochDay: dlEpoch,
+                    dailyUnitMinutes: dailyUnitMinutes
+                )
+                for slice in slices where slice.epochDay >= todayEpochDay && slice.epochDay < endEpochDay {
+                    plannedMinutesByDay[slice.epochDay, default: 0] += slice.minutes
+                    taskCountByDay[slice.epochDay, default: 0] += 1
+                }
+            } else if startDay >= todayEpochDay && startDay < endEpochDay {
+                taskCountByDay[startDay, default: 0] += 1
             }
         }
 
@@ -3601,27 +3700,30 @@ public enum TodayCapacityCalculator {
                 ?? dayDate.addingTimeInterval(86_400)
             let dayEndMs = DateEpochConverter.startOfDayMillis(for: nextDayDate, calendar: calendar)
 
-            let dayTasks = offset == 0 ? deduplicatedToday : (futureTasksByDay[dayEpoch] ?? [])
             let dayEvents = calendarEvents.filter { ev in
                 !ev.isAllDay && ev.endMillis > dayStartMs && ev.startMillis < dayEndMs
             }
 
             let breakdown = computeBreakdown(
-                tasks: dayTasks,
+                tasks: [],
                 calendarEvents: dayEvents,
                 dayStartMillis: dayStartMs,
                 dayEndMillis: dayEndMs,
                 workdayStartMinutes: normStart,
-                workdayEndMinutes: normEnd
+                workdayEndMinutes: normEnd,
+                calendar: calendar
             )
+            let planned = plannedMinutesByDay[dayEpoch] ?? 0
+            let busy = breakdown.busyMinutes
+            let free = max(0, configuredWorkdayMinutes - busy - planned)
             return DayWorkloadSummary(
                 epochDay: dayEpoch,
                 dayStartMillis: dayStartMs,
-                plannedTaskMinutes: breakdown.plannedMinutes,
-                busyCalendarMinutes: breakdown.busyMinutes,
-                freeWorkdayMinutes: breakdown.freeMinutes,
+                plannedTaskMinutes: planned,
+                busyCalendarMinutes: busy,
+                freeWorkdayMinutes: free,
                 totalWorkdayMinutes: configuredWorkdayMinutes,
-                taskCount: dayTasks.count
+                taskCount: taskCountByDay[dayEpoch] ?? 0
             )
         }
     }

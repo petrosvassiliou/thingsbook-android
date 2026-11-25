@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -1528,13 +1529,32 @@ private fun CollapsedTaskInlineBadges(
                 text = wipTooltip,
                 enableTouchLongPress = false
             ) {
-                ThingsTagPill(
-                    title = "◐ ${stringResource(R.string.v33_in_progress_badge)}",
-                    containerColor = colors.somedayWarmAmber.copy(alpha = 0.16f),
-                    contentColor = colors.somedayWarmAmber,
-                    borderColor = colors.somedayWarmAmber.copy(alpha = 0.45f),
-                    onClick = onToggleInProgress
-                )
+                val pillShape = RoundedCornerShape(50)
+                Row(
+                    modifier = Modifier
+                        .clip(pillShape)
+                        .background(colors.somedayWarmAmber.copy(alpha = 0.16f))
+                        .border(
+                            width = 0.75.dp,
+                            color = colors.somedayWarmAmber.copy(alpha = 0.45f),
+                            shape = pillShape
+                        )
+                        .then(if (onToggleInProgress != null) Modifier.clickable(onClick = onToggleInProgress) else Modifier)
+                        .padding(horizontal = 8.dp, vertical = 2.5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ThingsInProgressIcon(
+                        active = true,
+                        tint = colors.somedayWarmAmber,
+                        size = 12.5.dp
+                    )
+                    Text(
+                        text = stringResource(R.string.v33_in_progress_badge),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = colors.somedayWarmAmber
+                    )
+                }
             }
         }
         if (task.isMilestone) {
@@ -2441,43 +2461,64 @@ private fun ExpandedTaskCardBody(
                 val wipLabel = stringResource(
                     if (task.isInProgress) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
                 )
+                val wipClickModifier = if (onToggleInProgress != null) {
+                    Modifier.clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onToggleInProgress()
+                    }
+                } else {
+                    Modifier
+                }
                 ThingsHoverTooltip(text = wipLabel) {
-                    Row(
-                        modifier = Modifier
-                            .height(32.dp)
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(
-                                if (task.isInProgress) colors.somedayWarmAmber.copy(alpha = 0.18f) else colors.tagPillBg.copy(alpha = 0.65f)
+                    if (task.isInProgress) {
+                        Row(
+                            modifier = Modifier
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(colors.somedayWarmAmber.copy(alpha = 0.18f))
+                                .border(
+                                    width = 0.75.dp,
+                                    color = colors.somedayWarmAmber.copy(alpha = 0.55f),
+                                    shape = RoundedCornerShape(9.dp)
+                                )
+                                .then(wipClickModifier)
+                                .padding(horizontal = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            ThingsInProgressIcon(
+                                active = true,
+                                tint = colors.somedayWarmAmber,
+                                size = 15.5.dp
                             )
-                            .border(
-                                width = 0.75.dp,
-                                color = if (task.isInProgress) colors.somedayWarmAmber.copy(alpha = 0.55f) else colors.hairlineDivider,
-                                shape = RoundedCornerShape(9.dp)
+                            Text(
+                                text = stringResource(R.string.v33_in_progress_badge),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.somedayWarmAmber,
+                                maxLines = 1
                             )
-                            .then(
-                                if (onToggleInProgress != null) {
-                                    Modifier.clickable {
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onToggleInProgress()
-                                    }
-                                } else {
-                                    Modifier
-                                }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 32.dp, minHeight = 32.dp)
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(colors.tagPillBg.copy(alpha = 0.65f))
+                                .border(
+                                    width = 0.75.dp,
+                                    color = colors.hairlineDivider,
+                                    shape = RoundedCornerShape(9.dp)
+                                )
+                                .then(wipClickModifier),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            ThingsInProgressIcon(
+                                active = false,
+                                tint = colors.somedayWarmAmber.copy(alpha = 0.85f),
+                                size = 16.dp
                             )
-                            .padding(horizontal = if (task.isInProgress) 9.dp else 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = if (task.isInProgress) {
-                                "◐ ${stringResource(R.string.v33_in_progress_badge)}"
-                            } else {
-                                "◐"
-                            },
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (task.isInProgress) colors.somedayWarmAmber else colors.secondaryText,
-                            maxLines = 1
-                        )
+                        }
                     }
                 }
             }
@@ -3646,10 +3687,10 @@ private fun ExpandedTaskCardBody(
                                         )
                                     },
                                     leadingIcon = {
-                                        Text(
-                                            text = "◐",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = colors.somedayWarmAmber
+                                        ThingsInProgressIcon(
+                                            active = task.isInProgress,
+                                            tint = colors.somedayWarmAmber,
+                                            size = 18.dp
                                         )
                                     },
                                     onClick = {
@@ -4111,10 +4152,10 @@ private fun TaskContextDropdownMenu(
                     )
                 },
                 leadingIcon = {
-                    Text(
-                        text = "◐",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = colors.somedayWarmAmber
+                    ThingsInProgressIcon(
+                        active = task.isInProgress,
+                        tint = colors.somedayWarmAmber,
+                        size = 18.dp
                     )
                 },
                 onClick = {

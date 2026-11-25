@@ -907,7 +907,7 @@ public struct MainWorkspaceView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "circle.lefthalf.filled")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 13.5, weight: .semibold))
                         Text(store.tr(allSelectedInProgress ? "v33_clear_in_progress" : "v33_in_progress_badge"))
                             .font(.system(size: 12, weight: .semibold))
                     }

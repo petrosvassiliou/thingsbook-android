@@ -263,6 +263,7 @@ import com.pv.thingsbook.ui.components.ThingsCelebrationSnackbarBanner
 import com.pv.thingsbook.ui.components.ThingsDeadlineBadge
 import com.pv.thingsbook.ui.components.ThingsEmptyTrashConfirmDialog
 import com.pv.thingsbook.ui.components.ThingsFocusTimerBanner
+import com.pv.thingsbook.ui.components.ThingsInProgressIcon
 import com.pv.thingsbook.ui.components.ThingsHoverTooltip
 import com.pv.thingsbook.ui.components.ThingsTopBarTooltipScope
 import com.pv.thingsbook.ui.components.ThingsInitialSetupBanner
@@ -1788,6 +1789,11 @@ fun ThingsSmartViewScreen(
 
         // Floating Multi-Task Selection Action Bar (shown ONLY in explicit multi-select mode or when >= 2 tasks selected)
         if (!isEffectiveTimelineFullScreen && showMultiSelectionBar) {
+            val selectedOpenIds = selectedTaskIds.filter { it in openTaskIds }
+            val showBatchInProgress = selectedOpenIds.isNotEmpty()
+            val isBatchInProgressActive = showBatchInProgress && selectedOpenIds.all { id ->
+                allVisibleViewTasks.firstOrNull { it.id == id }?.isInProgress == true
+            }
             ThingsMultiSelectionBar(
                 selectedCount = selectedTaskIds.size,
                 totalVisibleCount = allVisibleTaskIds.size,
@@ -1812,6 +1818,9 @@ fun ThingsSmartViewScreen(
                 },
                 onOpenBatchTags = { showBatchTagPickerDialog = true },
                 onBatchPin = { viewModel.batchTogglePinSelectedTasks() },
+                showBatchInProgress = showBatchInProgress,
+                isBatchInProgressActive = isBatchInProgressActive,
+                onBatchInProgress = { viewModel.batchToggleInProgressSelectedTasks() },
                 onBatchDuplicate = { viewModel.batchDuplicateSelectedTasks() },
                 onOpenBatchMove = { showBatchMoveDialog = true },
                 onBatchComplete = { viewModel.batchCompleteSelectedTasks() },
@@ -3076,6 +3085,10 @@ private fun ThingsMainTaskLazyList(
     val calendarEventsEnabled by viewModel.calendarEventsEnabled.collectAsState()
     val rawTodayCalendarEvents by viewModel.todayCalendarEvents.collectAsState()
     val upcomingCalendarEventsByDate by viewModel.upcomingCalendarEventsByDate.collectAsState()
+    val todayDaytimeTasksForForecast by viewModel.todayDaytimeTasks.collectAsState()
+    val thisEveningTasksForForecast by viewModel.thisEveningTasks.collectAsState()
+    val workdayStartMinutes by viewModel.workdayStartMinutes.collectAsState()
+    val workdayEndMinutes by viewModel.workdayEndMinutes.collectAsState()
     val todayCalendarEvents = remember(rawTodayCalendarEvents, currentEpochDay, calendarEventsEnabled) {
         if (!calendarEventsEnabled || rawTodayCalendarEvents.isEmpty()) {
             emptyList()
@@ -3826,12 +3839,39 @@ private fun ThingsMainTaskLazyList(
                 .groupBy({ it.first }, { it.second to it.third })
 
             val allUpcomingDates = (groupedUpcoming.keys + upcomingMilestonesByDate.keys).toSortedSet()
-            val workloadByEpochDay = sevenDayWorkload.associateBy { it.epochDay }
+            val maxUpcomingEpochDay = allUpcomingDates.lastOrNull()?.toEpochDay() ?: currentEpochDay
+            val neededUpcomingDays = ((maxUpcomingEpochDay - currentEpochDay) + 1L)
+                .coerceIn(7L, 366L)
+                .toInt()
+            val upcomingWorkloadForecast = if (neededUpcomingDays <= sevenDayWorkload.size) {
+                sevenDayWorkload
+            } else {
+                val combinedTodayForForecast = (todayDaytimeTasksForForecast + thisEveningTasksForForecast).distinctBy { it.id }
+                val activeTodayCal = if (calendarEventsEnabled) rawTodayCalendarEvents else emptyList()
+                val activeUpcomingCal = if (calendarEventsEnabled) {
+                    upcomingCalendarEventsByDate.mapKeys { it.key.toEpochDay() }
+                } else {
+                    emptyMap()
+                }
+                computeMultiDayWorkloadForecast(
+                    todayTasks = combinedTodayForForecast,
+                    allOpenTasks = allOpenTasks,
+                    todayCalendarEvents = activeTodayCal,
+                    upcomingCalendarEventsByEpochDay = activeUpcomingCal,
+                    todayEpochDay = currentEpochDay,
+                    daysCount = neededUpcomingDays,
+                    workdayStartMinutes = workdayStartMinutes,
+                    workdayEndMinutes = workdayEndMinutes,
+                    zoneId = zone
+                )
+            }
+            val workloadByEpochDay = upcomingWorkloadForecast.associateBy { it.epochDay }
+            val stripSevenDayForecast = sevenDayWorkload.take(7)
 
-            if (sevenDayWorkload.isNotEmpty()) {
+            if (stripSevenDayForecast.isNotEmpty()) {
                 item(key = "upcoming_7day_workload_strip") {
                     SevenDayWorkloadStripCard(
-                        forecast = sevenDayWorkload,
+                        forecast = stripSevenDayForecast,
                         locale = activeLocale,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
                     )
@@ -4998,6 +5038,9 @@ private fun ThingsMultiSelectionBar(
     onScheduleSomeday: () -> Unit = {},
     onOpenBatchTags: () -> Unit = {},
     onBatchPin: () -> Unit = {},
+    showBatchInProgress: Boolean = true,
+    isBatchInProgressActive: Boolean = false,
+    onBatchInProgress: () -> Unit = {},
     onBatchDuplicate: () -> Unit = {},
     onOpenBatchMove: () -> Unit,
     onBatchComplete: () -> Unit,
@@ -5101,7 +5144,11 @@ private fun ThingsMultiSelectionBar(
     }
 
     @Composable
-    fun BatchPropertyPillsContent() {
+    fun BatchPropertyPillsContent(
+        showBatchInProgress: Boolean = true,
+        isBatchInProgressActive: Boolean = false,
+        onBatchInProgress: () -> Unit = {}
+    ) {
         ThingsHoverTooltip(text = stringResource(R.string.view_today)) {
             ThingsTagPill(
                 title = "★ ${stringResource(R.string.view_today)}",
@@ -5152,6 +5199,56 @@ private fun ThingsMultiSelectionBar(
             )
         }
 
+        if (showBatchInProgress) {
+            val batchWipLabel = stringResource(
+                if (isBatchInProgressActive) R.string.v33_clear_in_progress else R.string.v33_in_progress_badge
+            )
+            val batchWipTooltip = stringResource(
+                if (isBatchInProgressActive) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
+            )
+            val pillShape = RoundedCornerShape(50)
+            ThingsHoverTooltip(text = batchWipTooltip) {
+                Row(
+                    modifier = Modifier
+                        .clip(pillShape)
+                        .background(
+                            if (isBatchInProgressActive) colors.somedayWarmAmber.copy(alpha = 0.18f) else colors.tagPillBg
+                        )
+                        .border(
+                            width = 0.75.dp,
+                            color = if (isBatchInProgressActive) colors.somedayWarmAmber.copy(alpha = 0.55f) else Color.Transparent,
+                            shape = pillShape
+                        )
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onBatchInProgress()
+                        }
+                        .padding(horizontal = 8.dp, vertical = 2.5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.5.dp)
+                ) {
+                    ThingsInProgressIcon(
+                        active = isBatchInProgressActive,
+                        tint = if (isBatchInProgressActive) {
+                            colors.somedayWarmAmber
+                        } else if (colors.isDark) {
+                            Color.White
+                        } else {
+                            colors.somedayWarmAmber
+                        },
+                        size = 14.dp
+                    )
+                    Text(
+                        text = batchWipLabel,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = if (isBatchInProgressActive) FontWeight.Bold else FontWeight.SemiBold
+                        ),
+                        color = if (isBatchInProgressActive) colors.somedayWarmAmber else colors.tagPillText
+                    )
+                }
+            }
+        }
+
         ThingsHoverTooltip(text = "${stringResource(R.string.v25_batch_duplicate)} (Ctrl+D)") {
             ThingsTagPill(
                 title = "⧉ ${stringResource(R.string.v25_batch_duplicate)}",
@@ -5192,7 +5289,11 @@ private fun ThingsMultiSelectionBar(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     SelectionCountAndSelectAllCluster()
-                    BatchPropertyPillsContent()
+                    BatchPropertyPillsContent(
+                        showBatchInProgress = showBatchInProgress,
+                        isBatchInProgressActive = isBatchInProgressActive,
+                        onBatchInProgress = onBatchInProgress
+                    )
                     TrailingPrimaryActionsCluster()
                 }
             } else {
@@ -5215,7 +5316,11 @@ private fun ThingsMultiSelectionBar(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        BatchPropertyPillsContent()
+                        BatchPropertyPillsContent(
+                            showBatchInProgress = showBatchInProgress,
+                            isBatchInProgressActive = isBatchInProgressActive,
+                            onBatchInProgress = onBatchInProgress
+                        )
                     }
                 }
             }

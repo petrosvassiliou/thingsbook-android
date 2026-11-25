@@ -249,13 +249,13 @@ public struct TaskBentoModalView: View {
                     store.toggleTaskInProgress(fresh)
                 } label: {
                     Image(systemName: "circle.lefthalf.filled")
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(
                             current.isInProgress
                                 ? ThingsMacPalette.somedayAmber
-                                : (isHoveringInProgress ? ThingsMacPalette.somedayAmber : .secondary)
+                                : (isHoveringInProgress ? ThingsMacPalette.somedayAmber : ThingsMacPalette.somedayAmber.opacity(0.85))
                         )
-                        .frame(width: 28, height: 28)
+                        .frame(width: 30, height: 30)
                         .background(
                             RoundedRectangle(cornerRadius: 7.5, style: .continuous)
                                 .fill(

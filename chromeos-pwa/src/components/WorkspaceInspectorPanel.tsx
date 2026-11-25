@@ -86,6 +86,7 @@ import { localDb } from '../data/localDb';
 import type { TranslationStrings } from '../i18n/translations';
 import { MarkdownNotesField } from './MarkdownNotesField';
 import { AttachmentsStrip } from './AttachmentStrip';
+import { InProgressIcon } from './InProgressIcon';
 
 const EMPTY_OPEN_ID_SET: ReadonlySet<string> = new Set();
 const EMPTY_TASKS_MAP: ReadonlyMap<string, TaskRecord> = new Map();
@@ -1265,16 +1266,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                           }}
                         >
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                            <span
-                              style={{
-                                color: 'var(--in-progress-amber-ring)',
-                                fontSize: 13.5,
-                                lineHeight: 1
-                              }}
-                              aria-hidden="true"
-                            >
-                              ◐
-                            </span>
+                            <InProgressIcon
+                              size={14}
+                              style={{ color: 'var(--in-progress-amber-ring)' }}
+                            />
                             <span>
                               {selectedTask.isInProgress
                                 ? t.v33ClearInProgress
@@ -1496,7 +1491,14 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                   }
                   onClick={() => void localDb.toggleTaskInProgress(selectedTask.id)}
                 >
-                  <span aria-hidden="true">◐</span>
+                  <InProgressIcon
+                    size={13.5}
+                    style={
+                      !selectedTask.isInProgress
+                        ? { color: 'var(--in-progress-amber-ring)', opacity: 0.9 }
+                        : undefined
+                    }
+                  />
                   <span>
                     {selectedTask.isInProgress ? t.v33InProgressBadge : t.v33MarkInProgress}
                   </span>

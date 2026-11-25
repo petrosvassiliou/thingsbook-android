@@ -497,37 +497,45 @@ fun normalizeWorkdayBounds(startMinutes: Int, endMinutes: Int): Pair<Int, Int> {
     return safeStart to safeEnd
 }
 
-fun computeDayCapacityBreakdown(
-    tasks: List<TaskItem>,
-    calendarEvents: List<CalendarEventItem>,
-    dayStartMillis: Long,
-    dayEndMillis: Long,
-    workdayStartMinutes: Int = DEFAULT_WORKDAY_START_MINUTES,
-    workdayEndMinutes: Int = DEFAULT_WORKDAY_END_MINUTES
-): Triple<Int, Int, Int> {
-    val (normStartMins, normEndMins) = normalizeWorkdayBounds(workdayStartMinutes, workdayEndMinutes)
-    val plannedTaskMinutes = tasks
-        .asSequence()
-        .filter { !it.isDeleted && it.status == TaskStatus.OPEN }
-        .sumOf { task ->
-            val explicitDur = task.durationMinutes?.takeIf { it > 0 }
-            when {
-                explicitDur != null -> explicitDur
-                task.scheduledStartMinutes != null -> 30
-                else -> 0
-            }
-        }
-        .coerceAtLeast(0)
-
-    val workdayStartMs = dayStartMillis + normStartMins.toLong() * 60_000L
-    val rawWorkdayEndMs = dayStartMillis + normEndMins.toLong() * 60_000L
-    val workdayEndMs = if (dayEndMillis > workdayStartMs) {
-        minOf(dayEndMillis, rawWorkdayEndMs)
-    } else {
-        rawWorkdayEndMs
+fun allocateTaskWorkloadMinutesByEpochDay(
+    rawTaskMinutes: Int,
+    startEpochDay: Long,
+    deadlineEpochDay: Long?,
+    dailyUnitMinutes: Int
+): List<Pair<Long, Int>> {
+    val unit = dailyUnitMinutes.coerceAtLeast(60)
+    if (rawTaskMinutes <= 0) return emptyList()
+    if (rawTaskMinutes <= unit) return listOf(startEpochDay to rawTaskMinutes)
+    val neededDays = (rawTaskMinutes + unit - 1) / unit
+    if (deadlineEpochDay != null && deadlineEpochDay <= startEpochDay) {
+        return listOf(startEpochDay to rawTaskMinutes)
     }
-    val totalWorkdayMinutes = ((workdayEndMs - workdayStartMs) / 60_000L).toInt().coerceIn(0, 24 * 60)
+    if (deadlineEpochDay != null && (deadlineEpochDay - startEpochDay + 1L) < neededDays.toLong()) {
+        val availableDays = (deadlineEpochDay - startEpochDay + 1L).toInt().coerceAtLeast(1)
+        val base = rawTaskMinutes / availableDays
+        val rem = rawTaskMinutes % availableDays
+        return (0 until availableDays).mapNotNull { i ->
+            val m = base + if (i < rem) 1 else 0
+            if (m > 0) (startEpochDay + i) to m else null
+        }
+    }
+    val slices = ArrayList<Pair<Long, Int>>(neededDays)
+    var remaining = rawTaskMinutes
+    var dayOffset = 0L
+    while (remaining > 0) {
+        val slice = minOf(remaining, unit)
+        slices.add((startEpochDay + dayOffset) to slice)
+        remaining -= slice
+        dayOffset += 1L
+    }
+    return slices
+}
 
+private fun computeClippedCalendarBusyMinutes(
+    calendarEvents: List<CalendarEventItem>,
+    workdayStartMs: Long,
+    workdayEndMs: Long
+): Int {
     val clippedIntervals = calendarEvents
         .asSequence()
         .filter { !it.isAllDay && it.endMillis > it.startMillis }
@@ -555,7 +563,59 @@ fun computeDayCapacityBreakdown(
         }
         busyCalendarMillis += (curEnd - curStart)
     }
-    val busyCalendarMinutes = (busyCalendarMillis / 60_000L).toInt().coerceAtLeast(0)
+    return (busyCalendarMillis / 60_000L).toInt().coerceAtLeast(0)
+}
+
+fun computeDayCapacityBreakdown(
+    tasks: List<TaskItem>,
+    calendarEvents: List<CalendarEventItem>,
+    dayStartMillis: Long,
+    dayEndMillis: Long,
+    workdayStartMinutes: Int = DEFAULT_WORKDAY_START_MINUTES,
+    workdayEndMinutes: Int = DEFAULT_WORKDAY_END_MINUTES,
+    zoneId: java.time.ZoneId = java.time.ZoneId.systemDefault()
+): Triple<Int, Int, Int> {
+    val (normStartMins, normEndMins) = normalizeWorkdayBounds(workdayStartMinutes, workdayEndMinutes)
+    val workdayStartMs = dayStartMillis + normStartMins.toLong() * 60_000L
+    val rawWorkdayEndMs = dayStartMillis + normEndMins.toLong() * 60_000L
+    val workdayEndMs = if (dayEndMillis > workdayStartMs) {
+        minOf(dayEndMillis, rawWorkdayEndMs)
+    } else {
+        rawWorkdayEndMs
+    }
+    val totalWorkdayMinutes = ((workdayEndMs - workdayStartMs) / 60_000L).toInt().coerceIn(0, 24 * 60)
+    val unit = if (totalWorkdayMinutes > 0) minOf(480, totalWorkdayMinutes).coerceAtLeast(60) else 480
+    val dayEpoch = java.time.Instant.ofEpochMilli(dayStartMillis).atZone(zoneId).toLocalDate().toEpochDay()
+
+    val plannedTaskMinutes = tasks
+        .asSequence()
+        .filter { !it.isDeleted && it.status == TaskStatus.OPEN }
+        .sumOf { task ->
+            val explicitDur = task.durationMinutes?.takeIf { it > 0 }
+            val rawDur = explicitDur ?: if (task.scheduledStartMinutes != null) 30 else 0
+            if (rawDur <= 0) {
+                0
+            } else if (rawDur > unit) {
+                val deadlineEpochDay = task.deadline?.let { dlMs ->
+                    java.time.Instant.ofEpochMilli(dlMs).atZone(zoneId).toLocalDate().toEpochDay()
+                }
+                allocateTaskWorkloadMinutesByEpochDay(
+                    rawTaskMinutes = rawDur,
+                    startEpochDay = dayEpoch,
+                    deadlineEpochDay = deadlineEpochDay,
+                    dailyUnitMinutes = unit
+                ).firstOrNull { it.first == dayEpoch }?.second ?: rawDur
+            } else {
+                rawDur
+            }
+        }
+        .coerceAtLeast(0)
+
+    val busyCalendarMinutes = computeClippedCalendarBusyMinutes(
+        calendarEvents = calendarEvents,
+        workdayStartMs = workdayStartMs,
+        workdayEndMs = workdayEndMs
+    )
     val freeWorkdayMinutes = (totalWorkdayMinutes - busyCalendarMinutes - plannedTaskMinutes).coerceAtLeast(0)
     return Triple(plannedTaskMinutes, busyCalendarMinutes, freeWorkdayMinutes)
 }
@@ -590,18 +650,59 @@ fun computeMultiDayWorkloadForecast(
     workdayEndMinutes: Int = DEFAULT_WORKDAY_END_MINUTES,
     zoneId: java.time.ZoneId = java.time.ZoneId.systemDefault()
 ): List<DayWorkloadSummary> {
-    val safeDays = daysCount.coerceIn(1, 30)
+    val safeDays = daysCount.coerceIn(1, 366)
+    val windowEndEpochDay = todayEpochDay + safeDays.toLong()
     val (normStartMins, normEndMins) = normalizeWorkdayBounds(workdayStartMinutes, workdayEndMinutes)
     val totalWorkdayMinutes = (normEndMins - normStartMins).coerceAtLeast(60)
+    val unit = if (totalWorkdayMinutes > 0) minOf(480, totalWorkdayMinutes).coerceAtLeast(60) else 480
 
-    val futureTasksByDay = HashMap<Long, MutableList<TaskItem>>()
+    val seenTaskIds = HashSet<String>()
+    val scheduledOpenTasks = ArrayList<Pair<TaskItem, Long>>()
+
+    for (task in todayTasks) {
+        if (task.isDeleted || task.status != TaskStatus.OPEN) continue
+        if (seenTaskIds.add(task.id)) {
+            scheduledOpenTasks.add(task to todayEpochDay)
+        }
+    }
+
     for (task in allOpenTasks) {
         if (task.isDeleted || task.status != TaskStatus.OPEN) continue
+        if (task.id in seenTaskIds) continue
         if (task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING) continue
         val targetMs = task.whenDate ?: task.deadline ?: continue
-        val targetDay = java.time.Instant.ofEpochMilli(targetMs).atZone(zoneId).toLocalDate().toEpochDay()
-        if (targetDay in (todayEpochDay + 1L) until (todayEpochDay + safeDays.toLong())) {
-            futureTasksByDay.getOrPut(targetDay) { mutableListOf() }.add(task)
+        val startDay = java.time.Instant.ofEpochMilli(targetMs).atZone(zoneId).toLocalDate().toEpochDay()
+        if (seenTaskIds.add(task.id)) {
+            scheduledOpenTasks.add(task to startDay)
+        }
+    }
+
+    val minutesByDay = HashMap<Long, Int>()
+    val taskCountByDay = HashMap<Long, Int>()
+
+    for ((task, startDay) in scheduledOpenTasks) {
+        val explicitDur = task.durationMinutes?.takeIf { it > 0 }
+        val rawDur = explicitDur ?: if (task.scheduledStartMinutes != null) 30 else 0
+        if (rawDur <= 0) {
+            if (startDay in todayEpochDay until windowEndEpochDay) {
+                taskCountByDay[startDay] = (taskCountByDay[startDay] ?: 0) + 1
+            }
+        } else {
+            val deadlineDay = task.deadline?.let { dlMs ->
+                java.time.Instant.ofEpochMilli(dlMs).atZone(zoneId).toLocalDate().toEpochDay()
+            }
+            val slices = allocateTaskWorkloadMinutesByEpochDay(
+                rawTaskMinutes = rawDur,
+                startEpochDay = startDay,
+                deadlineEpochDay = deadlineDay,
+                dailyUnitMinutes = unit
+            )
+            for ((day, mins) in slices) {
+                if (day in todayEpochDay until windowEndEpochDay) {
+                    minutesByDay[day] = (minutesByDay[day] ?: 0) + mins
+                    taskCountByDay[day] = (taskCountByDay[day] ?: 0) + 1
+                }
+            }
         }
     }
 
@@ -609,24 +710,22 @@ fun computeMultiDayWorkloadForecast(
         val dayEpoch = todayEpochDay + offset.toLong()
         val dayStartMs = java.time.LocalDate.ofEpochDay(dayEpoch).atStartOfDay(zoneId).toInstant().toEpochMilli()
         val dayEndMs = java.time.LocalDate.ofEpochDay(dayEpoch + 1L).atStartOfDay(zoneId).toInstant().toEpochMilli()
-        val dayTasks = if (offset == 0) {
-            todayTasks.filter { !it.isDeleted && it.status == TaskStatus.OPEN }
-        } else {
-            futureTasksByDay[dayEpoch].orEmpty()
-        }
+        val workdayStartMs = dayStartMillisForBounds(dayStartMs, normStartMins)
+        val rawWorkdayEndMs = dayStartMillisForBounds(dayStartMs, normEndMins)
+        val workdayEndMs = if (dayEndMs > workdayStartMs) minOf(dayEndMs, rawWorkdayEndMs) else rawWorkdayEndMs
+
         val dayEvents = if (offset == 0) {
             todayCalendarEvents
         } else {
             upcomingCalendarEventsByEpochDay[dayEpoch].orEmpty()
         }
-        val (planned, busy, free) = computeDayCapacityBreakdown(
-            tasks = dayTasks,
+        val planned = (minutesByDay[dayEpoch] ?: 0).coerceAtLeast(0)
+        val busy = computeClippedCalendarBusyMinutes(
             calendarEvents = dayEvents,
-            dayStartMillis = dayStartMs,
-            dayEndMillis = dayEndMs,
-            workdayStartMinutes = normStartMins,
-            workdayEndMinutes = normEndMins
+            workdayStartMs = workdayStartMs,
+            workdayEndMs = workdayEndMs
         )
+        val free = (totalWorkdayMinutes - busy - planned).coerceAtLeast(0)
         DayWorkloadSummary(
             epochDay = dayEpoch,
             dayStartMillis = dayStartMs,
@@ -634,10 +733,13 @@ fun computeMultiDayWorkloadForecast(
             busyCalendarMinutes = busy,
             freeWorkdayMinutes = free,
             totalWorkdayMinutes = totalWorkdayMinutes,
-            taskCount = dayTasks.size
+            taskCount = taskCountByDay[dayEpoch] ?: 0
         )
     }
 }
+
+private fun dayStartMillisForBounds(dayStartMs: Long, offsetMinutes: Int): Long =
+    dayStartMs + offsetMinutes.toLong() * 60_000L
 
 data class DeviceCalendarInfo(
     val id: String,

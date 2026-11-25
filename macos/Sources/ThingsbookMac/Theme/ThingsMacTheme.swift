@@ -521,8 +521,21 @@ public struct ThingsActionChipButton: View {
     public var body: some View {
         Button(action: action) {
             HStack(spacing: 5.5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11.5, weight: .semibold))
+                if systemImage == "circle.lefthalf.filled" {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isActive ? activeTint : activeTint.opacity(0.88))
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(
+                            isActive
+                                ? activeTint
+                                : (systemImage == "diamond"
+                                    ? activeTint.opacity(0.88)
+                                    : (isHovering ? Color.primary : Color.primary.opacity(0.88)))
+                        )
+                }
                 Text(title)
                     .font(.system(size: 12, weight: isActive ? .semibold : .medium))
                     .lineLimit(1)

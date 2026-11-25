@@ -18,7 +18,10 @@ import { ThingsLocalDb, normalizeTask } from '../src/data/localDb.ts';
 import {
   DEFAULT_QUICK_FIND_FILTER,
   STALLED_PROJECT_THRESHOLD_MS,
+  allocateTaskWorkloadMinutesByEpochDay,
   buildDailyTimeline,
+  computeDayCapacityBreakdown,
+  computeMultiDayWorkloadForecast,
   detectStalledProjects,
   evaluateProjectStalledStatus,
   filterTasksForPerspective,
@@ -34,6 +37,7 @@ import {
 import { TRANSLATIONS } from '../src/i18n/translations.ts';
 import {
   addDaysLocal,
+  localEpochDayFromMillis,
   startOfDayEpoch,
   type AreaRecord,
   type HeadingRecord,
@@ -724,4 +728,198 @@ test('v3.3.0-beta.2 Task Inspector Panel achieves 1:1 parity with Expanded Bento
     assert.ok(TRANSLATIONS[lang].actionCopyMarkdown.trim().length > 0);
     assert.ok(TRANSLATIONS[lang].copiedMarkdownToast.trim().length > 0);
   }
+});
+
+test('v3.3 allocateTaskWorkloadMinutesByEpochDay and multi-day workload forecast distribute multi-day tasks across consecutive days', () => {
+  // Wednesday 2026-05-13 -> Thursday 2026-05-14 (offset 1) -> Friday 2026-05-15 (offset 2)
+  const wedStart = startOfDayEpoch(new Date(2026, 4, 13));
+  const thuStart = addDaysLocal(wedStart, 1);
+  const friStart = addDaysLocal(wedStart, 2);
+  const thuEpoch = localEpochDayFromMillis(thuStart);
+  const friEpoch = localEpochDayFromMillis(friStart);
+
+  // Direct pure helper checks
+  assert.deepEqual(allocateTaskWorkloadMinutesByEpochDay(0, thuEpoch, null, 480), []);
+  assert.deepEqual(allocateTaskWorkloadMinutesByEpochDay(960, thuEpoch, null, 480), [
+    { epochDay: thuEpoch, minutes: 480 },
+    { epochDay: friEpoch, minutes: 480 }
+  ]);
+  assert.deepEqual(allocateTaskWorkloadMinutesByEpochDay(960, thuEpoch, thuEpoch, 480), [
+    { epochDay: thuEpoch, minutes: 960 }
+  ]);
+  assert.deepEqual(allocateTaskWorkloadMinutesByEpochDay(1440, thuEpoch, friEpoch, 480), [
+    { epochDay: thuEpoch, minutes: 720 },
+    { epochDay: friEpoch, minutes: 720 }
+  ]);
+
+  // 1. 2d (960m) + 15m on Thursday -> Do = 495m (+15m overload), Fr = 480m (0 overload)
+  const task2d = makeTask({
+    id: 'thu-2d',
+    title: 'Deep 2-day sprint',
+    scheduleState: 'UPCOMING',
+    whenDate: thuStart,
+    durationMinutes: 960
+  });
+  const task15m = makeTask({
+    id: 'thu-15m',
+    title: 'Quick check-in',
+    scheduleState: 'UPCOMING',
+    whenDate: thuStart,
+    durationMinutes: 15
+  });
+  const forecastWith15m = computeMultiDayWorkloadForecast({
+    todayTasks: [],
+    allOpenTasks: [task2d, task15m],
+    todayStartMillis: wedStart,
+    daysCount: 7
+  });
+  assert.equal(forecastWith15m[1].epochDay, thuEpoch);
+  assert.equal(forecastWith15m[1].plannedMinutes, 495);
+  assert.equal(forecastWith15m[1].overloadedByMinutes, 15);
+  assert.equal(forecastWith15m[1].isOverloaded, true);
+  assert.equal(forecastWith15m[1].taskCount, 2);
+
+  assert.equal(forecastWith15m[2].epochDay, friEpoch);
+  assert.equal(forecastWith15m[2].plannedMinutes, 480);
+  assert.equal(forecastWith15m[2].overloadedByMinutes, 0);
+  assert.equal(forecastWith15m[2].isOverloaded, false);
+  assert.equal(forecastWith15m[2].taskCount, 1);
+
+  // 2. 2d (960m) alone on Thursday -> 480m + 480m, zero overload
+  const forecastAlone = computeMultiDayWorkloadForecast({
+    todayTasks: [],
+    allOpenTasks: [task2d],
+    todayStartMillis: wedStart,
+    daysCount: 7
+  });
+  assert.equal(forecastAlone[1].plannedMinutes, 480);
+  assert.equal(forecastAlone[1].overloadedByMinutes, 0);
+  assert.equal(forecastAlone[1].isOverloaded, false);
+  assert.equal(forecastAlone[2].plannedMinutes, 480);
+  assert.equal(forecastAlone[2].overloadedByMinutes, 0);
+  assert.equal(forecastAlone[2].isOverloaded, false);
+
+  // Single-day computeDayCapacityBreakdown agrees with multi-day slice (480m when not due today, 960m when due today)
+  const singleDayNormal = computeDayCapacityBreakdown(
+    [task2d],
+    [],
+    thuStart,
+    addDaysLocal(thuStart, 1)
+  );
+  assert.equal(singleDayNormal.plannedMinutes, 480);
+
+  // 3. 2d (960m) due on Thursday -> 960m compressed onto Thursday
+  const task2dDueThu = makeTask({
+    id: 'thu-2d-due',
+    title: 'Urgent 2-day deliverable',
+    scheduleState: 'UPCOMING',
+    whenDate: thuStart,
+    deadline: thuStart,
+    durationMinutes: 960
+  });
+  const forecastDueSameDay = computeMultiDayWorkloadForecast({
+    todayTasks: [],
+    allOpenTasks: [task2dDueThu],
+    todayStartMillis: wedStart,
+    daysCount: 7
+  });
+  assert.equal(forecastDueSameDay[1].plannedMinutes, 960);
+  assert.equal(forecastDueSameDay[1].overloadedByMinutes, 480);
+  assert.equal(forecastDueSameDay[2].plannedMinutes, 0);
+
+  const singleDayDue = computeDayCapacityBreakdown(
+    [task2dDueThu],
+    [],
+    thuStart,
+    addDaysLocal(thuStart, 1)
+  );
+  assert.equal(singleDayDue.plannedMinutes, 960);
+
+  // 4. 3d (1440m) due in 2 days (Thursday..Friday) -> 720m + 720m
+  const task3dDueFri = makeTask({
+    id: 'thu-3d-due-fri',
+    title: '3-day release prep due Friday',
+    scheduleState: 'UPCOMING',
+    whenDate: thuStart,
+    deadline: friStart,
+    durationMinutes: 1440
+  });
+  const forecast3dIn2d = computeMultiDayWorkloadForecast({
+    todayTasks: [],
+    allOpenTasks: [task3dDueFri],
+    todayStartMillis: wedStart,
+    daysCount: 7
+  });
+  assert.equal(forecast3dIn2d[1].plannedMinutes, 720);
+  assert.equal(forecast3dIn2d[1].overloadedByMinutes, 240);
+  assert.equal(forecast3dIn2d[2].plannedMinutes, 720);
+  assert.equal(forecast3dIn2d[2].overloadedByMinutes, 240);
+  assert.equal(forecast3dIn2d[3].plannedMinutes, 0);
+
+  // 5. Beyond 7 days (e.g. day +10 spilling onto day +11) for Upcoming headers
+  const day10Start = addDaysLocal(wedStart, 10);
+  const taskBeyond7d = makeTask({
+    id: 'day10-2d',
+    title: 'Next-month 2d workshop prep',
+    scheduleState: 'UPCOMING',
+    whenDate: day10Start,
+    durationMinutes: 960
+  });
+  const longForecast = computeMultiDayWorkloadForecast({
+    todayTasks: [],
+    allOpenTasks: [taskBeyond7d],
+    todayStartMillis: wedStart,
+    daysCount: 15
+  });
+  assert.equal(longForecast.length, 15);
+  assert.equal(longForecast[10].plannedMinutes, 480);
+  assert.equal(longForecast[11].plannedMinutes, 480);
+});
+
+test('v3.3 InProgressIcon crisp SVG component is used in TaskItem, WorkspaceInspectorPanel, and App multi-select bar', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const iconSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/InProgressIcon.tsx'),
+    'utf8'
+  );
+  const taskItemSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/TaskItem.tsx'),
+    'utf8'
+  );
+  const inspectorSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/WorkspaceInspectorPanel.tsx'),
+    'utf8'
+  );
+  const appSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/App.tsx'),
+    'utf8'
+  );
+
+  assert.ok(iconSrc.includes('viewBox="0 0 16 16"'));
+  assert.ok(iconSrc.includes('M 8 1.65 A 6.35 6.35 0 0 0 8 14.35 Z'));
+
+  assert.ok(taskItemSrc.includes('<InProgressIcon'));
+  assert.match(
+    taskItemSrc,
+    /data-testid="task-in-progress-btn"[\s\S]*?<InProgressIcon[\s\S]*?size=\{16\}/
+  );
+  assert.match(
+    taskItemSrc,
+    /data-testid="task-in-progress-chip"[\s\S]*?<InProgressIcon[\s\S]*?size=\{13\.5\}/
+  );
+
+  assert.ok(inspectorSrc.includes('<InProgressIcon'));
+  assert.match(
+    inspectorSrc,
+    /data-testid="inspector-in-progress-btn"[\s\S]*?<InProgressIcon[\s\S]*?size=\{13\.5\}/
+  );
+
+  assert.ok(appSrc.includes('<InProgressIcon'));
+  assert.match(
+    appSrc,
+    /data-testid="multi-select-in-progress-btn"[\s\S]*?<InProgressIcon size=\{13\.5\} \/>/
+  );
+  assert.ok(appSrc.includes('upcomingWorkloadForecast'));
+  assert.ok(appSrc.includes('upcomingWorkloadByEpochDay'));
 });

@@ -454,7 +454,7 @@ public final class ThingsbookStore: ObservableObject {
         preferences = nextPrefs
     }
 
-    public func sevenDayWorkloadForecast() -> [DayWorkloadSummary] {
+    public func sevenDayWorkloadForecast(daysCount: Int = 7) -> [DayWorkloadSummary] {
         var seen = Set<String>()
         let todayTasks = (todayDaytimeTasks + thisEveningTasks).filter { seen.insert($0.id).inserted }
         let activeEvents = preferences.calendarEventsEnabled ? calendarEvents : []
@@ -464,7 +464,7 @@ public final class ThingsbookStore: ObservableObject {
             allOpenTasks: allOpenTasks,
             calendarEvents: activeEvents,
             todayMillis: todayMs,
-            daysCount: 7,
+            daysCount: daysCount,
             workdayStartMinutes: preferences.workdayStartMinutes,
             workdayEndMinutes: preferences.workdayEndMinutes
         )

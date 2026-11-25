@@ -449,7 +449,12 @@ public struct WorkspaceInspectorPanelView: View {
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "circle.lefthalf.filled")
-                                .font(.system(size: 10.5, weight: .semibold))
+                                .font(.system(size: 13.5, weight: .semibold))
+                                .foregroundStyle(
+                                    task.isInProgress
+                                        ? ThingsMacPalette.somedayAmber
+                                        : ThingsMacPalette.somedayAmber.opacity(0.85)
+                                )
                             Text(store.tr(task.isInProgress ? "v33_in_progress_badge" : "v33_mark_in_progress"))
                                 .font(.system(size: 11.5, weight: .semibold))
                                 .lineLimit(1)

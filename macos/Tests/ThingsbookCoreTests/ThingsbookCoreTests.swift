@@ -409,12 +409,12 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.0")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.0")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 121)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.1")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.1")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 122)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.0", current: "3.3.0-beta.2"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.0", current: "3.2.2"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.1", current: "3.3.0"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.1", current: "3.2.2"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -6221,6 +6221,7 @@ final class ThingsbookCoreTests: XCTestCase {
             status: .open,
             scheduleState: .upcoming,
             whenDate: sodMs + 86_400_000,
+            deadline: sodMs + 86_400_000,
             durationMinutes: 660, // 11h > 10h workday -> overloaded by 60m!
             createdAt: 1,
             updatedAt: 1
@@ -6961,5 +6962,145 @@ final class ThingsbookCoreTests: XCTestCase {
                 "WorkspaceInspectorPanelView.swift must wire \(token) for 1:1 TaskBentoModalView parity"
             )
         }
+    }
+
+    func testV331MultiDayWorkloadSpreadsEffortAcrossDaysAndEnlargesInProgressIcons() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        // 2026-04-13 is Monday; Thursday is +3d, Friday is +4d
+        let mondayDate = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 4, day: 13)))
+        let mondayMs = DateEpochConverter.startOfDayMillis(for: mondayDate, calendar: cal)
+        let thuMs = mondayMs + 3 * 86_400_000
+        let friMs = mondayMs + 4 * 86_400_000
+
+        // 1. 2d (960m) task + 15m task scheduled on Thursday (deadline: nil, default 480m workday)
+        let twoDayTask = TaskItem(
+            id: "t-2d",
+            title: "2-Day Implementation",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: thuMs,
+            deadline: nil,
+            durationMinutes: 960,
+            createdAt: 1,
+            updatedAt: 1
+        )
+        let quickTask = TaskItem(
+            id: "t-15m",
+            title: "Quick Sync",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: thuMs,
+            deadline: nil,
+            durationMinutes: 15,
+            createdAt: 2,
+            updatedAt: 2
+        )
+
+        let forecast1 = TodayCapacityCalculator.computeSevenDayForecast(
+            todayTasks: [],
+            allOpenTasks: [twoDayTask, quickTask],
+            calendarEvents: [],
+            todayMillis: mondayMs,
+            daysCount: 7,
+            calendar: cal
+        )
+        XCTAssertEqual(forecast1[3].plannedTaskMinutes, 495)
+        XCTAssertEqual(forecast1[3].overloadedByMinutes, 15)
+        XCTAssertTrue(forecast1[3].isOverloaded)
+        XCTAssertEqual(forecast1[4].plannedTaskMinutes, 480)
+        XCTAssertEqual(forecast1[4].overloadedByMinutes, 0)
+        XCTAssertFalse(forecast1[4].isOverloaded)
+
+        // 2. 2d (960m) task alone on Thursday (deadline: nil) -> Thu 480m, Fri 480m, neither overloaded
+        let forecast2 = TodayCapacityCalculator.computeSevenDayForecast(
+            todayTasks: [],
+            allOpenTasks: [twoDayTask],
+            calendarEvents: [],
+            todayMillis: mondayMs,
+            daysCount: 7,
+            calendar: cal
+        )
+        XCTAssertEqual(forecast2[3].plannedTaskMinutes, 480)
+        XCTAssertFalse(forecast2[3].isOverloaded)
+        XCTAssertEqual(forecast2[4].plannedTaskMinutes, 480)
+        XCTAssertFalse(forecast2[4].isOverloaded)
+
+        let singleDayCap = TodayCapacityCalculator.compute(
+            tasks: [twoDayTask],
+            calendarEvents: [],
+            dayStartMillis: thuMs,
+            dayEndMillis: friMs,
+            calendar: cal
+        )
+        XCTAssertEqual(singleDayCap.plannedMinutes, 480)
+        XCTAssertEqual(singleDayCap.freeMinutes, 0)
+
+        // 3. 2d (960m) task with deadline on Thursday -> compressed onto Thursday (960m, +480m overloaded)
+        var dueThuTask = twoDayTask
+        dueThuTask.deadline = thuMs
+        let forecast3 = TodayCapacityCalculator.computeSevenDayForecast(
+            todayTasks: [],
+            allOpenTasks: [dueThuTask],
+            calendarEvents: [],
+            todayMillis: mondayMs,
+            daysCount: 7,
+            calendar: cal
+        )
+        XCTAssertEqual(forecast3[3].plannedTaskMinutes, 960)
+        XCTAssertEqual(forecast3[3].overloadedByMinutes, 480)
+        XCTAssertEqual(forecast3[4].plannedTaskMinutes, 0)
+
+        // 4. 3d (1440m) task starting Thursday with deadline on Friday -> Thu 720m, Fri 720m
+        let threeDayCompressedTask = TaskItem(
+            id: "t-3d-fri",
+            title: "3-Day Sprint Due Friday",
+            status: .open,
+            scheduleState: .upcoming,
+            whenDate: thuMs,
+            deadline: friMs,
+            durationMinutes: 1440,
+            createdAt: 3,
+            updatedAt: 3
+        )
+        let forecast4 = TodayCapacityCalculator.computeSevenDayForecast(
+            todayTasks: [],
+            allOpenTasks: [threeDayCompressedTask],
+            calendarEvents: [],
+            todayMillis: mondayMs,
+            daysCount: 7,
+            calendar: cal
+        )
+        XCTAssertEqual(forecast4[3].plannedTaskMinutes, 720)
+        XCTAssertEqual(forecast4[4].plannedTaskMinutes, 720)
+        XCTAssertEqual(forecast4[5].plannedTaskMinutes, 0)
+
+        // Verify enlarged In-Progress icon fonts in macOS UI views
+        let macosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let modalSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/TaskBentoModalView.swift"),
+            encoding: .utf8
+        )
+        let themeSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Theme/ThingsMacTheme.swift"),
+            encoding: .utf8
+        )
+        let inspectorSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/WorkspaceInspectorPanelView.swift"),
+            encoding: .utf8
+        )
+        let workspaceSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/MainWorkspaceView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(modalSource.contains(".font(.system(size: 16, weight: .semibold))"))
+        XCTAssertTrue(modalSource.contains(".frame(width: 30, height: 30)"))
+        XCTAssertTrue(themeSource.contains(".font(.system(size: 14, weight: .semibold))"))
+        XCTAssertTrue(inspectorSource.contains(".font(.system(size: 13.5, weight: .semibold))"))
+        XCTAssertTrue(workspaceSource.contains(".font(.system(size: 13.5, weight: .semibold))"))
     }
 }

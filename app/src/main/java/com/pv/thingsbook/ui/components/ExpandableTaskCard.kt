@@ -59,15 +59,18 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.GridView
@@ -78,6 +81,7 @@ import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -179,6 +183,9 @@ import com.pv.thingsbook.domain.parser.SmartSyntaxParser
 import com.pv.thingsbook.ui.theme.ThingsTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -812,11 +819,6 @@ fun ExpandableTaskCard(
                     assignedProject = assignedProject,
                     assignedArea = assignedArea,
                     assignedHeading = assignedHeading,
-                    showQuickThisEveningPill = TaskCardInteractionRules.shouldShowQuickThisEveningPill(
-                        isTodayView = isTodayView,
-                        status = task.status,
-                        scheduleState = task.scheduleState
-                    ),
                     titleFocusRequester = titleFocusRequester,
                     editedTitleField = editedTitleField,
                     onTitleFieldChange = { newVal ->
@@ -892,10 +894,12 @@ fun ExpandableTaskCard(
                         }
                     },
                     onTriggerGeminiMagicBreakdown = onTriggerGeminiMagicBreakdown,
+                    onScheduleChange = { nextState, nextWhenDate ->
+                        flushPendingTitleNotesIfNeeded()
+                        flushPendingChecklistIfNeeded()
+                        onScheduleChange(nextState, nextWhenDate)
+                    },
                     onOpenWhenDialog = { showWhenDialog = true },
-                    onQuickThisEveningAndClose = if (onQuickThisEveningAndClose != null) {
-                        { onQuickThisEveningAndClose(editedTitleField.text, editedNotesField.text) }
-                    } else null,
                     onOpenDeadlineDialog = { showDeadlineDialog = true },
                     onOpenRepeatDialog = { showRepeatDialog = true },
                     onOpenTimeblockDialog = if (onUpdateTimeblock != null) ({ showTimeblockDialog = true }) else null,
@@ -2235,7 +2239,6 @@ private fun ExpandedTaskCardBody(
     assignedProject: Project?,
     assignedArea: Area?,
     assignedHeading: Heading? = null,
-    showQuickThisEveningPill: Boolean = false,
     titleFocusRequester: FocusRequester,
     editedTitleField: TextFieldValue,
     onTitleFieldChange: (TextFieldValue) -> Unit,
@@ -2263,8 +2266,8 @@ private fun ExpandedTaskCardBody(
     onShowMessage: ((String) -> Unit)? = null,
     onDictateTitleOrNotes: ((String) -> Unit)? = null,
     onTriggerGeminiMagicBreakdown: () -> Unit,
+    onScheduleChange: (ScheduleState, Long?) -> Unit,
     onOpenWhenDialog: () -> Unit,
-    onQuickThisEveningAndClose: (() -> Unit)? = null,
     onOpenDeadlineDialog: () -> Unit,
     onOpenRepeatDialog: () -> Unit,
     onOpenTimeblockDialog: (() -> Unit)? = null,
@@ -3074,48 +3077,126 @@ private fun ExpandedTaskCardBody(
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     contentAlignment = Alignment.TopStart
                 ) {
+                    val zone = ZoneId.systemDefault()
+                    val todayDate = LocalDate.now(zone)
+                    val tomorrowDate = todayDate.plusDays(1)
+                    val todayStartMillis = todayDate.atStartOfDay(zone).toInstant().toEpochMilli()
+                    val tomorrowStartMillis = tomorrowDate.atStartOfDay(zone).toInstant().toEpochMilli()
+                    val isScheduledTomorrow = remember(task.scheduleState, task.whenDate, tomorrowDate, zone) {
+                        task.scheduleState == ScheduleState.UPCOMING &&
+                            task.whenDate?.let { ms ->
+                                runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull() == tomorrowDate
+                            } == true
+                    }
+
                     SoftBentoPropertyGroup(
                         label = "${stringResource(R.string.action_when)} · ${stringResource(R.string.action_deadline)}"
                     ) {
-                        ThingsWhenBadge(
-                            scheduleState = task.scheduleState,
-                            whenDateEpochMillis = task.whenDate,
-                            locale = locale,
-                            onClick = onOpenWhenDialog
+                        InspectorWhenQuickPill(
+                            label = stringResource(R.string.view_today),
+                            icon = Icons.Outlined.WbSunny,
+                            isSelected = task.scheduleState == ScheduleState.TODAY,
+                            activeTint = colors.thingsBlue,
+                            activeBg = colors.thingsBlueSoft,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onScheduleChange(ScheduleState.TODAY, todayStartMillis)
+                            }
                         )
 
-                        if (showQuickThisEveningPill && onQuickThisEveningAndClose != null) {
-                            val eveningLabel = stringResource(R.string.view_this_evening)
-                            ThingsHoverTooltip(text = eveningLabel) {
-                                Row(
+                        InspectorWhenQuickPill(
+                            label = stringResource(R.string.view_this_evening),
+                            icon = Icons.Outlined.Bedtime,
+                            isSelected = task.scheduleState == ScheduleState.THIS_EVENING,
+                            activeTint = colors.eveningMoonIndigo,
+                            activeBg = colors.thingsBlueSoft,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onScheduleChange(ScheduleState.THIS_EVENING, todayStartMillis)
+                            }
+                        )
+
+                        InspectorWhenQuickPill(
+                            label = stringResource(R.string.date_tomorrow),
+                            icon = Icons.Outlined.CalendarMonth,
+                            isSelected = isScheduledTomorrow,
+                            activeTint = colors.upcomingCoralRed,
+                            activeBg = colors.thingsBlueSoft,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onScheduleChange(ScheduleState.UPCOMING, tomorrowStartMillis)
+                            }
+                        )
+
+                        InspectorWhenQuickPill(
+                            label = stringResource(R.string.view_anytime),
+                            icon = Icons.Outlined.Explore,
+                            isSelected = task.scheduleState == ScheduleState.ANYTIME && task.whenDate == null,
+                            activeTint = colors.anytimeTeal,
+                            activeBg = colors.thingsBlueSoft,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onScheduleChange(ScheduleState.ANYTIME, null)
+                            }
+                        )
+
+                        InspectorWhenQuickPill(
+                            label = stringResource(R.string.view_someday),
+                            icon = Icons.Outlined.Cloud,
+                            isSelected = task.scheduleState == ScheduleState.SOMEDAY,
+                            activeTint = colors.somedayWarmAmber,
+                            activeBg = colors.somedayWarmAmber.copy(alpha = 0.16f),
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onScheduleChange(ScheduleState.SOMEDAY, null)
+                            }
+                        )
+
+                        if (task.scheduleState == ScheduleState.UPCOMING &&
+                            task.whenDate != null &&
+                            !isScheduledTomorrow
+                        ) {
+                            ThingsWhenBadge(
+                                scheduleState = task.scheduleState,
+                                whenDateEpochMillis = task.whenDate,
+                                locale = locale,
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onOpenWhenDialog()
+                                }
+                            )
+                        } else {
+                            val pickDateLabel = stringResource(R.string.repeat_ends_pick_date)
+                            ThingsHoverTooltip(text = stringResource(R.string.context_when_date_reminder)) {
+                                Surface(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(colors.eveningMoonIndigo.copy(alpha = 0.14f))
-                                        .border(
-                                            width = 0.75.dp,
-                                            color = colors.eveningMoonIndigo.copy(alpha = 0.30f),
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
+                                        .clip(RoundedCornerShape(50))
                                         .clickable {
                                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            flushPendingChecklistIfNeeded()
-                                            onQuickThisEveningAndClose()
-                                        }
-                                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                            onOpenWhenDialog()
+                                        },
+                                    shape = RoundedCornerShape(50),
+                                    color = colors.tagPillBg,
+                                    border = BorderStroke(width = 0.75.dp, color = colors.hairlineDivider)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Bedtime,
-                                        contentDescription = eveningLabel,
-                                        tint = colors.eveningMoonIndigo,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = eveningLabel,
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = colors.eveningMoonIndigo
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.5.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CalendarToday,
+                                            contentDescription = pickDateLabel,
+                                            tint = colors.thingsBlue,
+                                            modifier = Modifier.size(13.5.dp)
+                                        )
+                                        Text(
+                                            text = pickDateLabel,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = colors.primaryText,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
                         }

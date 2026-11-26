@@ -546,9 +546,10 @@ public struct WorkspaceInspectorPanelView: View {
     }
 
     private func scheduleAndPropertiesCard(for task: TaskItem) -> some View {
-        let todayEpochDay = DateEpochConverter.epochDay(for: Date())
-        let isTomorrow = task.scheduleState == .upcoming
-            && task.whenDate.map { DateEpochConverter.epochDay(forMillis: $0) == todayEpochDay + 1 } == true
+        let isTomorrow: Bool = {
+            guard task.scheduleState == .upcoming, let w = task.whenDate else { return false }
+            return Calendar.current.isDateInTomorrow(DateEpochConverter.date(fromMillis: w))
+        }()
         let dlInfo = task.deadline.map { deadlineSummaryInfo(for: $0) }
         let currentEffort = task.resolvedEffort
         let currentDuration = (task.durationMinutes ?? 0) > 0 ? task.durationMinutes : nil
@@ -608,7 +609,7 @@ public struct WorkspaceInspectorPanelView: View {
                 quickWhenPill(
                     title: store.tr("view_anytime"),
                     icon: "safari.fill",
-                    isActive: task.scheduleState == .anytime,
+                    isActive: task.scheduleState == .anytime && task.whenDate == nil,
                     tint: ThingsMacPalette.anytimeTeal
                 ) {
                     draftSaveTask?.cancel()
@@ -633,29 +634,40 @@ public struct WorkspaceInspectorPanelView: View {
                     commitDraftEditsIfNeeded()
                     isWhenPopoverOpen = true
                 } label: {
-                    HStack(spacing: 4.5) {
-                        Image(systemName: "calendar.badge.clock")
-                            .font(.system(size: 10.5, weight: .semibold))
-                        if let customWhenDateLabel {
-                            Text(customWhenDateLabel)
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1)
-                        }
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(customWhenDateLabel != nil ? ThingsMacPalette.accentBlue : .secondary)
+                        Text(customWhenDateLabel ?? store.tr("repeat_ends_pick_date"))
+                            .font(.system(size: 11.5, weight: customWhenDateLabel != nil ? .semibold : .medium))
+                            .foregroundStyle(
+                                customWhenDateLabel != nil
+                                    ? ThingsMacPalette.accentBlue
+                                    : Color.primary.opacity(0.86)
+                            )
+                            .lineLimit(1)
                     }
-                    .foregroundStyle(customWhenDateLabel != nil ? ThingsMacPalette.accentBlue : .secondary)
-                    .padding(.horizontal, customWhenDateLabel != nil ? 8.5 : 7.5)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 9.5)
                     .padding(.vertical, 4.5)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(customWhenDateLabel != nil ? ThingsMacPalette.accentBlue.opacity(0.12) : ThingsMacPalette.subtleContainer)
+                            .fill(
+                                customWhenDateLabel != nil
+                                    ? ThingsMacPalette.accentBlue.opacity(0.14)
+                                    : ThingsMacPalette.subtleContainer
+                            )
                     )
                     .overlay(
                         Capsule(style: .continuous)
                             .strokeBorder(
-                                customWhenDateLabel != nil ? ThingsMacPalette.accentBlue.opacity(0.32) : Color.primary.opacity(0.08),
+                                customWhenDateLabel != nil
+                                    ? ThingsMacPalette.accentBlue.opacity(0.38)
+                                    : Color.primary.opacity(0.09),
                                 lineWidth: 0.75
                             )
                     )
+                    .contentShape(Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .thingsTooltip(store.tr("context_when_date_reminder"))
@@ -2250,7 +2262,7 @@ public struct WorkspaceInspectorPanelView: View {
         }
         let df = DateFormatter()
         df.locale = store.preferences.language.locale
-        df.dateStyle = .short
+        df.setLocalizedDateFormatFromTemplate("EEEdMMM")
         return df.string(from: DateEpochConverter.date(fromMillis: w))
     }
 

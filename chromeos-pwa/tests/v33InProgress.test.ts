@@ -923,3 +923,96 @@ test('v3.3 InProgressIcon crisp SVG component is used in TaskItem, WorkspaceInsp
   assert.ok(appSrc.includes('upcomingWorkloadForecast'));
   assert.ok(appSrc.includes('upcomingWorkloadByEpochDay'));
 });
+
+test('v3.3 Task Detail Modal and Task Inspector render unified 1-tap When presets and always-visible dedicated Calendar Pick date button', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const taskItemSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/TaskItem.tsx'),
+    'utf8'
+  );
+  const inspectorSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/WorkspaceInspectorPanel.tsx'),
+    'utf8'
+  );
+
+  // Extract task-bento-tile-when section in TaskItem.tsx
+  const modalTileStart = taskItemSrc.indexOf('data-testid="task-bento-tile-when"');
+  const modalDeadlineRepeatStart = taskItemSrc.indexOf(
+    'data-testid="task-bento-tile-deadline-repeat"',
+    modalTileStart
+  );
+  assert.ok(modalTileStart !== -1 && modalDeadlineRepeatStart > modalTileStart);
+  const modalWhenSlice = taskItemSrc.slice(modalTileStart, modalDeadlineRepeatStart);
+
+  // 1. TaskItem Modal renders all 5 direct 1-tap presets without calling onCollapse()
+  for (const tid of [
+    'task-when-today-chip',
+    'task-quick-this-evening-chip',
+    'task-when-tomorrow-chip',
+    'task-when-anytime-chip',
+    'task-when-someday-chip'
+  ]) {
+    assert.ok(modalWhenSlice.includes(`data-testid="${tid}"`), `Missing ${tid} in TaskItem modal`);
+  }
+  assert.ok(modalWhenSlice.includes("scheduleState: 'TODAY'"));
+  assert.ok(modalWhenSlice.includes("scheduleState: 'THIS_EVENING'"));
+  assert.ok(modalWhenSlice.includes("scheduleState: 'UPCOMING'"));
+  assert.ok(modalWhenSlice.includes("scheduleState: 'ANYTIME'"));
+  assert.ok(modalWhenSlice.includes("scheduleState: 'SOMEDAY'"));
+  assert.ok(
+    !modalWhenSlice.includes('onCollapse()'),
+    '1-tap When presets in TaskItem modal must not close the modal'
+  );
+  assert.ok(
+    !modalWhenSlice.includes('shouldShowQuickThisEveningPill'),
+    'This Evening preset in TaskItem modal must be unconditionally visible'
+  );
+
+  // 2. TaskItem Modal unconditionally renders dedicated Calendar date-picker button (task-when-chip) with t.repeatEndsOn fallback
+  assert.match(
+    modalWhenSlice,
+    /data-testid="task-when-chip"[\s\S]*?onOpenWhenModal\(task\.id\)[\s\S]*?<Calendar size=\{12\.5\} \/>[\s\S]*?:\s*t\.repeatEndsOn/
+  );
+
+  // 3. WorkspaceInspectorPanel renders all 5 direct 1-tap presets AND unconditionally renders inspector-when-custom-date with <Calendar size={12.5} /> and t.repeatEndsOn fallback
+  const inspectorGridStart = inspectorSrc.indexOf('className="inspector-quick-when-grid"');
+  const inspectorReminderWrapStart = inspectorSrc.indexOf(
+    'className="inspector-prop-pills-wrap"',
+    inspectorGridStart
+  );
+  assert.ok(inspectorGridStart !== -1 && inspectorReminderWrapStart > inspectorGridStart);
+  const inspectorWhenSlice = inspectorSrc.slice(inspectorGridStart, inspectorReminderWrapStart);
+
+  for (const tid of [
+    'inspector-when-today',
+    'inspector-when-evening',
+    'inspector-when-tomorrow',
+    'inspector-when-anytime',
+    'inspector-when-someday',
+    'inspector-when-custom-date'
+  ]) {
+    assert.ok(
+      inspectorWhenSlice.includes(`data-testid="${tid}"`),
+      `Missing ${tid} in WorkspaceInspectorPanel`
+    );
+  }
+  assert.ok(inspectorWhenSlice.includes("scheduleState: 'TODAY'"));
+  assert.ok(inspectorWhenSlice.includes("scheduleState: 'THIS_EVENING'"));
+  assert.ok(inspectorWhenSlice.includes("scheduleState: 'UPCOMING'"));
+  assert.ok(inspectorWhenSlice.includes("scheduleState: 'ANYTIME'"));
+  assert.ok(inspectorWhenSlice.includes("scheduleState: 'SOMEDAY'"));
+  assert.ok(
+    !inspectorWhenSlice.includes('isCustomUpcomingSelected && selectedTask.whenDate != null && ('),
+    'inspector-when-custom-date must be unconditionally visible'
+  );
+  assert.match(
+    inspectorWhenSlice,
+    /data-testid="inspector-when-custom-date"[\s\S]*?onOpenWhenModal\(selectedTask\.id\)[\s\S]*?<Calendar size=\{12\.5\} \/>[\s\S]*?:\s*t\.repeatEndsOn/
+  );
+
+  // Verify t.repeatEndsOn is non-empty across all 5 languages ("Pick date…" / "Datum wählen…")
+  for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
+    assert.ok(TRANSLATIONS[lang].repeatEndsOn.trim().length > 0);
+  }
+});

@@ -1627,21 +1627,23 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 <span>{t.viewSomeday}</span>
               </button>
 
-              {isCustomUpcomingSelected && selectedTask.whenDate != null && (
-                <button
-                  type="button"
-                  className="chip-btn active"
-                  data-testid="inspector-when-custom-date"
-                  title={t.ctxWhenReminder}
-                  onClick={() => {
-                    flushDraftsIfNeeded();
-                    onOpenWhenModal(selectedTask.id);
-                  }}
-                >
-                  <Calendar size={12} />
-                  <span>{formatShortDate(selectedTask.whenDate)}</span>
-                </button>
-              )}
+              <button
+                type="button"
+                className={`chip-btn ${isCustomUpcomingSelected ? 'active' : ''}`}
+                data-testid="inspector-when-custom-date"
+                title={t.ctxWhenReminder}
+                onClick={() => {
+                  flushDraftsIfNeeded();
+                  onOpenWhenModal(selectedTask.id);
+                }}
+              >
+                <Calendar size={12.5} />
+                <span>
+                  {isCustomUpcomingSelected && selectedTask.whenDate != null
+                    ? formatShortDate(selectedTask.whenDate)
+                    : t.repeatEndsOn}
+                </span>
+              </button>
             </div>
 
             <div className="inspector-prop-pills-wrap">

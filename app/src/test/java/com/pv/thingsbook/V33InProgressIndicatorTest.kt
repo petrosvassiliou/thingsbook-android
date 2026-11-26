@@ -596,8 +596,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 122"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.1\""))
+        assertTrue(buildGradleKt.contains("versionCode = 123"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.2\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
@@ -957,5 +957,56 @@ class V33InProgressIndicatorTest {
         assertTrue(smartViewKt.contains("isBatchInProgressActive"))
         assertTrue(viewModelKt.contains("fun batchToggleInProgressSelectedTasks()"))
         assertTrue(repoKt.contains("suspend fun setTasksInProgress("))
+    }
+
+    @Test
+    fun `ExpandedTaskCardBody and SelectedTaskInspectorContent both render all 5 direct 1-tap When presets and always-visible Pick date calendar trigger`() {
+        val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
+        val appSrcMain = File(appRoot, "src/main")
+
+        val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
+        val inspectorKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/WorkspaceInspectorPanel.kt").readText()
+
+        val expandedBodyChunk = cardKt
+            .substringAfter("private fun ExpandedTaskCardBody(")
+            .substringBefore("private fun TaskContextDropdownMenu(")
+        val selectedInspectorChunk = inspectorKt
+            .substringAfter("private fun SelectedTaskInspectorContent(")
+            .substringBefore("private fun InspectorEditableChecklistRow(")
+
+        val requiredSharedScheduleTokens = listOf(
+            "ScheduleState.TODAY, todayStartMillis",
+            "ScheduleState.THIS_EVENING, todayStartMillis",
+            "ScheduleState.UPCOMING, tomorrowStartMillis",
+            "ScheduleState.ANYTIME, null",
+            "ScheduleState.SOMEDAY, null",
+            "ScheduleState.ANYTIME &&",
+            ".whenDate == null",
+            "!isScheduledTomorrow",
+            "Icons.Outlined.WbSunny",
+            "Icons.Outlined.Bedtime",
+            "Icons.Outlined.CalendarMonth",
+            "Icons.Outlined.Explore",
+            "Icons.Outlined.Cloud",
+            "Icons.Outlined.CalendarToday",
+            "R.string.repeat_ends_pick_date",
+            "ThingsWhenBadge("
+        )
+
+        for (token in requiredSharedScheduleTokens) {
+            assertTrue("Missing '$token' in ExpandedTaskCardBody", expandedBodyChunk.contains(token))
+            assertTrue("Missing '$token' in SelectedTaskInspectorContent", selectedInspectorChunk.contains(token))
+        }
+
+        // ExpandedTaskCardBody must invoke onScheduleChange directly for 1-tap presets (without closing modal) and onOpenWhenDialog for Pick date…
+        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.TODAY, todayStartMillis)"))
+        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.THIS_EVENING, todayStartMillis)"))
+        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.UPCOMING, tomorrowStartMillis)"))
+        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.ANYTIME, null)"))
+        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.SOMEDAY, null)"))
+        assertFalse(
+            "ExpandedTaskCardBody must not use legacy morphing Evening-and-close pill",
+            expandedBodyChunk.contains("onQuickThisEveningAndClose")
+        )
     }
 }

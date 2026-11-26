@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Checklist
@@ -1174,7 +1175,7 @@ private fun SelectedTaskInspectorContent(
                 InspectorWhenQuickPill(
                     label = stringResource(R.string.view_anytime),
                     icon = Icons.Outlined.Explore,
-                    isSelected = selectedTask.scheduleState == ScheduleState.ANYTIME,
+                    isSelected = selectedTask.scheduleState == ScheduleState.ANYTIME && selectedTask.whenDate == null,
                     activeTint = colors.anytimeTeal,
                     activeBg = colors.thingsBlueSoft,
                     onClick = {
@@ -1202,7 +1203,10 @@ private fun SelectedTaskInspectorContent(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (selectedTask.scheduleState == ScheduleState.UPCOMING) {
+                if (selectedTask.scheduleState == ScheduleState.UPCOMING &&
+                    selectedTask.whenDate != null &&
+                    !isScheduledTomorrow
+                ) {
                     ThingsWhenBadge(
                         scheduleState = selectedTask.scheduleState,
                         whenDateEpochMillis = selectedTask.whenDate,
@@ -1213,14 +1217,39 @@ private fun SelectedTaskInspectorContent(
                         }
                     )
                 } else {
-                    ThingsTagPill(
-                        title = "📅 ${stringResource(R.string.when_pick_calendar_tab)}",
-                        tooltipText = stringResource(R.string.context_when_date_reminder),
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            showWhenDialog = true
+                    val pickDateLabel = stringResource(R.string.repeat_ends_pick_date)
+                    ThingsHoverTooltip(text = stringResource(R.string.context_when_date_reminder)) {
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showWhenDialog = true
+                                },
+                            shape = RoundedCornerShape(50),
+                            color = colors.tagPillBg,
+                            border = BorderStroke(width = 0.75.dp, color = colors.hairlineDivider)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CalendarToday,
+                                    contentDescription = pickDateLabel,
+                                    tint = colors.thingsBlue,
+                                    modifier = Modifier.size(13.5.dp)
+                                )
+                                Text(
+                                    text = pickDateLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primaryText,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                    )
+                    }
                 }
 
                 selectedTask.reminderTime?.let { rt ->
@@ -2338,7 +2367,7 @@ private fun InspectorEditableChecklistRow(
 }
 
 @Composable
-private fun InspectorWhenQuickPill(
+internal fun InspectorWhenQuickPill(
     label: String,
     icon: ImageVector,
     isSelected: Boolean,

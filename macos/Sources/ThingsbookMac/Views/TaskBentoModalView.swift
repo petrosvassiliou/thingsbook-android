@@ -808,7 +808,17 @@ public struct TaskBentoModalView: View {
 
     private var scheduleBentoCard: some View {
         let current = latestTask
-        let whenLabel = whenSummaryLabel(for: current)
+        let isTomorrow: Bool = {
+            guard current.scheduleState == .upcoming, let w = current.whenDate else { return false }
+            return Calendar.current.isDateInTomorrow(DateEpochConverter.date(fromMillis: w))
+        }()
+        let customDateLabel: String? = {
+            guard current.scheduleState == .upcoming, let w = current.whenDate, !isTomorrow else { return nil }
+            let df = DateFormatter()
+            df.locale = store.preferences.language.locale
+            df.setLocalizedDateFormatFromTemplate("EEEdMMM")
+            return df.string(from: DateEpochConverter.date(fromMillis: w))
+        }()
         let dlInfo = current.deadline.map { deadlineSummaryInfo(for: $0) }
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -819,14 +829,73 @@ public struct TaskBentoModalView: View {
 
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 ThingsActionChipButton(
-                    title: whenLabel ?? store.tr("action_when"),
-                    systemImage: current.scheduleState == .thisEvening
-                        ? "moon.stars.fill"
-                        : (current.scheduleState == .today ? "sun.max.fill" : "calendar"),
-                    isActive: whenLabel != nil || current.reminderTime != nil,
-                    activeTint: current.scheduleState == .thisEvening ? ThingsMacPalette.eveningPurple : ThingsMacPalette.accentBlue,
+                    title: store.tr("view_today"),
+                    systemImage: "sun.max.fill",
+                    isActive: current.scheduleState == .today,
+                    activeTint: ThingsMacPalette.todayYellow,
+                    helpText: store.tr("view_today")
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    store.scheduleTasks([current.id], to: .today)
+                }
+
+                ThingsActionChipButton(
+                    title: store.tr("view_this_evening"),
+                    systemImage: "moon.stars.fill",
+                    isActive: current.scheduleState == .thisEvening,
+                    activeTint: ThingsMacPalette.eveningPurple,
+                    helpText: store.tr("view_this_evening")
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    store.scheduleTasks([current.id], to: .thisEvening)
+                }
+
+                ThingsActionChipButton(
+                    title: store.tr("date_tomorrow"),
+                    systemImage: "sunrise.fill",
+                    isActive: isTomorrow,
+                    activeTint: ThingsMacPalette.upcomingRed,
+                    helpText: store.tr("date_tomorrow")
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    store.scheduleTasks([current.id], to: .upcoming)
+                }
+
+                ThingsActionChipButton(
+                    title: store.tr("view_anytime"),
+                    systemImage: "safari.fill",
+                    isActive: current.scheduleState == .anytime && current.whenDate == nil,
+                    activeTint: ThingsMacPalette.anytimeTeal,
+                    helpText: store.tr("view_anytime")
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    store.scheduleTasks([current.id], to: .anytime)
+                }
+
+                ThingsActionChipButton(
+                    title: store.tr("view_someday"),
+                    systemImage: "cloud.fill",
+                    isActive: current.scheduleState == .someday,
+                    activeTint: ThingsMacPalette.somedayAmber,
+                    helpText: store.tr("view_someday")
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    store.scheduleTasks([current.id], to: .someday)
+                }
+
+                ThingsActionChipButton(
+                    title: customDateLabel ?? store.tr("repeat_ends_pick_date"),
+                    systemImage: "calendar",
+                    isActive: customDateLabel != nil,
+                    activeTint: ThingsMacPalette.accentBlue,
                     helpText: whenButtonTooltip(for: current)
                 ) {
+                    draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     isWhenPopoverOpen = true
                 }
@@ -847,18 +916,6 @@ public struct TaskBentoModalView: View {
                     }
                 }
 
-                if showQuickThisEveningPill {
-                    ThingsActionChipButton(
-                        title: store.tr("view_this_evening"),
-                        systemImage: "moon.stars.fill",
-                        isActive: true,
-                        activeTint: ThingsMacPalette.eveningPurple,
-                        helpText: store.tr("view_this_evening")
-                    ) {
-                        quickMoveToThisEveningAndClose()
-                    }
-                }
-
                 if let rem = current.reminderTime {
                     ThingsActionChipButton(
                         title: shortTimeString(rem),
@@ -870,7 +927,12 @@ public struct TaskBentoModalView: View {
                         isWhenPopoverOpen = true
                     }
                 }
+            }
 
+            Divider()
+                .opacity(0.45)
+
+            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
                 ThingsActionChipButton(
                     title: current.scheduledStartMinutes != nil
                         ? (current.formattedTimeblockPill ?? store.tr("v2_timeblock_title"))
@@ -1542,22 +1604,6 @@ public struct TaskBentoModalView: View {
         store.deleteTask(target)
     }
 
-    private func quickMoveToThisEveningAndClose() {
-        didCommitAndDismiss = true
-        draftSaveTask?.cancel()
-        voiceController.stopRecording()
-        addPendingChecklistItem(commitDraftsFirst: false)
-        var copy = latestTask
-        copy.title = draftTitle
-        copy.notes = draftNotes
-        copy.scheduleState = .thisEvening
-        copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
-        store.updateTask(copy)
-        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-            store.expandedTaskId = nil
-        }
-    }
-
     private func toggleVoiceDictation() {
         if !voiceController.isRecording {
             dictationTargetsTitle = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1613,15 +1659,6 @@ public struct TaskBentoModalView: View {
     }
 
     // MARK: - Formatting & Display Helpers
-
-    private var showQuickThisEveningPill: Bool {
-        let current = latestTask
-        return TaskCardInteractionRules.shouldShowQuickThisEveningPill(
-            isTodayView: store.selectedDestination == .smartView(.today),
-            status: current.status,
-            scheduleState: current.scheduleState
-        )
-    }
 
     private func contextBreadcrumb(for target: TaskItem) -> String? {
         if let pid = target.projectId, let proj = store.project(byId: pid) {

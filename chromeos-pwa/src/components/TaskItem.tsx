@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Bell,
   Calendar,
+  CalendarDays,
   Camera,
   Check,
   CheckCircle2,
@@ -44,8 +45,10 @@ import {
   Zap
 } from 'lucide-react';
 import {
+  addDaysLocal,
   daysBetweenToday,
   formatRecurrenceShort,
+  localEpochDayFromMillis,
   type AreaRecord,
   type AttachmentRecord,
   type ChecklistItemRecord,
@@ -68,8 +71,7 @@ import {
   isTaskActivelyBlocked,
   parseClockToMinutes,
   parseCustomDurationMinutes,
-  shouldAutoFocusTitleOnExpand,
-  shouldShowQuickThisEveningPill
+  shouldAutoFocusTitleOnExpand
 } from '../domain/v2Utils';
 import { generateMagicChecklist } from '../data/geminiService';
 import { localDb } from '../data/localDb';
@@ -282,7 +284,6 @@ function nextCycledEffortLevel(cur: EffortLevel | null | undefined): EffortLevel
 export const TaskItem: React.FC<TaskItemProps> = ({
   task,
   isExpanded,
-  isTodayView = false,
   isSelected,
   isMultiSelectMode,
   showContextSubtitle,
@@ -1052,18 +1053,24 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
   // ==================== Unified Soft Bento Task Modal View ====================
   if (isExpanded) {
-    const whenChipText =
-      task.scheduleState === 'TODAY'
-        ? t.viewToday
-        : task.scheduleState === 'THIS_EVENING'
-          ? t.viewThisEvening
-          : task.scheduleState === 'SOMEDAY'
-            ? t.viewSomeday
-            : task.whenDate != null
-              ? formatShortDate(task.whenDate)
-              : task.scheduleState === 'ANYTIME'
-                ? t.viewAnytime
-                : t.actionWhen;
+    const now = new Date();
+    const todayStartMs = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
+      0
+    ).getTime();
+    const tomorrowStartMs = addDaysLocal(todayStartMs, 1);
+    const tomorrowEpochDay = localEpochDayFromMillis(tomorrowStartMs);
+    const taskWhenEpochDay =
+      task.whenDate != null ? localEpochDayFromMillis(task.whenDate) : null;
+    const isTomorrowSelected =
+      task.scheduleState === 'UPCOMING' && taskWhenEpochDay === tomorrowEpochDay;
+    const isCustomUpcomingSelected =
+      task.scheduleState === 'UPCOMING' && task.whenDate != null && !isTomorrowSelected;
 
     const dlMeta = task.deadline != null ? renderDeadlineMeta(task.deadline) : null;
     const currentDuration = task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES;
@@ -1464,70 +1471,127 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <div className="task-bento-prop-pills">
                   <button
                     type="button"
-                    data-testid="task-when-chip"
+                    data-testid="task-when-today-chip"
+                    className={`chip-btn ${task.scheduleState === 'TODAY' ? 'active' : ''}`}
+                    title={t.viewToday}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      void localDb.upsertTask({
+                        id: task.id,
+                        title: titleDraft,
+                        notes: notesDraft,
+                        scheduleState: 'TODAY',
+                        whenDate: todayStartMs
+                      });
+                    }}
+                  >
+                    <Sun size={12} style={{ color: 'var(--today-star)' }} />
+                    <span>{t.viewToday}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="task-quick-this-evening-chip"
                     className={`chip-btn ${
-                      task.scheduleState === 'TODAY' ||
-                      task.scheduleState === 'THIS_EVENING' ||
-                      task.whenDate != null
-                        ? 'active'
-                        : ''
+                      task.scheduleState === 'THIS_EVENING' ? 'evening-quick' : ''
                     }`}
+                    title={t.viewThisEvening}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      void localDb.upsertTask({
+                        id: task.id,
+                        title: titleDraft,
+                        notes: notesDraft,
+                        scheduleState: 'THIS_EVENING',
+                        whenDate: todayStartMs
+                      });
+                    }}
+                  >
+                    <Moon size={12} />
+                    <span>{t.viewThisEvening}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="task-when-tomorrow-chip"
+                    className={`chip-btn ${isTomorrowSelected ? 'active' : ''}`}
+                    title={t.dateTomorrow}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      void localDb.upsertTask({
+                        id: task.id,
+                        title: titleDraft,
+                        notes: notesDraft,
+                        scheduleState: 'UPCOMING',
+                        whenDate: tomorrowStartMs
+                      });
+                    }}
+                  >
+                    <CalendarDays size={12} />
+                    <span>{t.dateTomorrow}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="task-when-anytime-chip"
+                    className={`chip-btn ${
+                      task.scheduleState === 'ANYTIME' && task.whenDate == null ? 'active' : ''
+                    }`}
+                    title={t.viewAnytime}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      void localDb.upsertTask({
+                        id: task.id,
+                        title: titleDraft,
+                        notes: notesDraft,
+                        scheduleState: 'ANYTIME',
+                        whenDate: null,
+                        scheduledStartMinutes: null
+                      });
+                    }}
+                  >
+                    <Compass size={12} />
+                    <span>{t.viewAnytime}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="task-when-someday-chip"
+                    className={`chip-btn ${task.scheduleState === 'SOMEDAY' ? 'active' : ''}`}
+                    title={t.viewSomeday}
+                    onClick={() => {
+                      flushDraftsIfNeeded();
+                      void localDb.upsertTask({
+                        id: task.id,
+                        title: titleDraft,
+                        notes: notesDraft,
+                        scheduleState: 'SOMEDAY',
+                        whenDate: null,
+                        scheduledStartMinutes: null
+                      });
+                    }}
+                  >
+                    <Cloud size={12} />
+                    <span>{t.viewSomeday}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="task-when-chip"
+                    className={`chip-btn ${isCustomUpcomingSelected ? 'active' : ''}`}
                     title={t.ctxWhenReminder}
                     onClick={() => {
                       flushDraftsIfNeeded();
                       onOpenWhenModal(task.id);
                     }}
                   >
-                    {task.scheduleState === 'TODAY' ? (
-                      <Sun size={12} style={{ color: 'var(--today-star)' }} />
-                    ) : task.scheduleState === 'THIS_EVENING' ? (
-                      <Moon size={12} />
-                    ) : task.scheduleState === 'SOMEDAY' ? (
-                      <Cloud size={12} />
-                    ) : task.scheduleState === 'ANYTIME' && task.whenDate == null ? (
-                      <Compass size={12} />
-                    ) : (
-                      <Calendar size={12} />
-                    )}
-                    <span>{whenChipText}</span>
+                    <Calendar size={12.5} />
+                    <span>
+                      {isCustomUpcomingSelected && task.whenDate != null
+                        ? formatShortDate(task.whenDate)
+                        : t.repeatEndsOn}
+                    </span>
                   </button>
-
-                  {shouldShowQuickThisEveningPill({
-                    isTodayView,
-                    status: task.status,
-                    scheduleState: task.scheduleState
-                  }) && (
-                    <button
-                      type="button"
-                      data-testid="task-quick-this-evening-chip"
-                      className="chip-btn evening-quick"
-                      title={t.viewThisEvening}
-                      onClick={() => {
-                        flushPendingSubtaskIfNeeded();
-                        const now = new Date();
-                        const todayMidnight = new Date(
-                          now.getFullYear(),
-                          now.getMonth(),
-                          now.getDate(),
-                          0,
-                          0,
-                          0,
-                          0
-                        ).getTime();
-                        void localDb.upsertTask({
-                          id: task.id,
-                          title: titleDraft,
-                          notes: notesDraft,
-                          scheduleState: 'THIS_EVENING',
-                          whenDate: todayMidnight
-                        });
-                        onCollapse();
-                      }}
-                    >
-                      <Moon size={12} />
-                      <span>{t.viewThisEvening}</span>
-                    </button>
-                  )}
 
                   {task.reminderTime != null && (
                     <button

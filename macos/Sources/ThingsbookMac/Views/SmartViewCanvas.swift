@@ -60,63 +60,65 @@ public struct SmartViewCanvas: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: isAnyTimelineFullScreen ? 14 : 18) {
-                if !isAnyTimelineFullScreen {
-                    // App Update Banner
-                    if let update = store.availableUpdate {
-                        updateAvailableBanner(update)
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: isAnyTimelineFullScreen ? 14 : 18) {
+                    if !isAnyTimelineFullScreen {
+                        // App Update Banner
+                        if let update = store.availableUpdate {
+                            updateAvailableBanner(update)
+                        }
+
+                        // Initial Sample Data Setup Banner
+                        if store.hasSampleTasks && !store.preferences.hideSampleSetupBanner && store.syncSnapshot.userId == nil {
+                            initialSampleSetupBanner
+                        }
                     }
 
-                    // Initial Sample Data Setup Banner
-                    if store.hasSampleTasks && !store.preferences.hideSampleSetupBanner && store.syncSnapshot.userId == nil {
-                        initialSampleSetupBanner
+                    switch store.selectedDestination {
+                    case .smartView(let sv):
+                        smartViewContent(sv, scrollProxy: scrollProxy)
+                    case .project(let projId):
+                        if let project = store.project(byId: projId) {
+                            projectCanvas(project)
+                        } else {
+                            emptyPlaceholder(icon: "circle.dashed", text: store.tr("empty_view"))
+                        }
+                    case .area(let areaId):
+                        if let area = store.area(byId: areaId) {
+                            areaCanvas(area)
+                        } else {
+                            emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
+                        }
+                    case .perspective(let perspectiveId):
+                        if let perspective = store.perspective(byId: perspectiveId) {
+                            perspectiveCanvas(perspective)
+                        } else {
+                            emptyPlaceholder(icon: "line.3.horizontal.decrease.circle", text: store.tr("empty_view"))
+                        }
                     }
                 }
-
-                switch store.selectedDestination {
-                case .smartView(let sv):
-                    smartViewContent(sv)
-                case .project(let projId):
-                    if let project = store.project(byId: projId) {
-                        projectCanvas(project)
-                    } else {
-                        emptyPlaceholder(icon: "circle.dashed", text: store.tr("empty_view"))
-                    }
-                case .area(let areaId):
-                    if let area = store.area(byId: areaId) {
-                        areaCanvas(area)
-                    } else {
-                        emptyPlaceholder(icon: "folder", text: store.tr("empty_view"))
-                    }
-                case .perspective(let perspectiveId):
-                    if let perspective = store.perspective(byId: perspectiveId) {
-                        perspectiveCanvas(perspective)
-                    } else {
-                        emptyPlaceholder(icon: "line.3.horizontal.decrease.circle", text: store.tr("empty_view"))
-                    }
-                }
+                .padding(.horizontal, isAnyTimelineFullScreen ? 20 : 26)
+                .padding(.top, isAnyTimelineFullScreen ? 14 : 24)
+                .padding(.bottom, isAnyTimelineFullScreen ? 22 : 96)
+                .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen || isInspectorOpen) ? .infinity : 1360, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, isAnyTimelineFullScreen ? 20 : 26)
-            .padding(.top, isAnyTimelineFullScreen ? 14 : 24)
-            .padding(.bottom, isAnyTimelineFullScreen ? 22 : 96)
-            .frame(maxWidth: (isWideProjectWorkspace || isAnyTimelineFullScreen || isInspectorOpen) ? .infinity : 1360, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(ThingsMacPalette.canvasBackground)
-        .onPreferenceChange(MacMagicPlusSlotsPreferenceKey.self) { slots in
-            store.registeredMagicPlusSlots = slots
-        }
-        .onChange(of: store.selectedDestination) { _, _ in
-            store.registeredMagicPlusSlots = []
-        }
-        .onChange(of: store.newlyCreatedHeadingId, initial: true) { _, newId in
-            guard let headingId = newId else { return }
-            renamingHeadingId = headingId
-            renameHeadingText = ""
-            store.newlyCreatedHeadingId = nil
-            DispatchQueue.main.async {
-                isRenameHeadingFocused = true
+            .background(ThingsMacPalette.canvasBackground)
+            .onPreferenceChange(MacMagicPlusSlotsPreferenceKey.self) { slots in
+                store.registeredMagicPlusSlots = slots
+            }
+            .onChange(of: store.selectedDestination) { _, _ in
+                store.registeredMagicPlusSlots = []
+            }
+            .onChange(of: store.newlyCreatedHeadingId, initial: true) { _, newId in
+                guard let headingId = newId else { return }
+                renamingHeadingId = headingId
+                renameHeadingText = ""
+                store.newlyCreatedHeadingId = nil
+                DispatchQueue.main.async {
+                    isRenameHeadingFocused = true
+                }
             }
         }
     }
@@ -124,7 +126,7 @@ public struct SmartViewCanvas: View {
     // MARK: - Smart Views
 
     @ViewBuilder
-    private func smartViewContent(_ view: SmartView) -> some View {
+    private func smartViewContent(_ view: SmartView, scrollProxy: ScrollViewProxy) -> some View {
         if view == .today && store.todayViewMode == .timeline && store.isTimelineFullScreen {
             todayFullScreenHeaderBar
             todayCanvas
@@ -163,7 +165,7 @@ public struct SmartViewCanvas: View {
                 todayCanvas
 
             case .upcoming:
-                upcomingCanvas
+                upcomingCanvas(scrollProxy: scrollProxy)
 
             case .anytime:
                 let list = store.filterTasksByActiveTag(store.anytimeTasks)
@@ -573,7 +575,7 @@ public struct SmartViewCanvas: View {
     }
 
     @ViewBuilder
-    private var upcomingCanvas: some View {
+    private func upcomingCanvas(scrollProxy: ScrollViewProxy) -> some View {
         let filtered = store.filterTasksByActiveTag(store.upcomingTasks)
         let milestones = upcomingPhaseMilestones
         let todayEpochDay = DateEpochConverter.epochDay(for: Date())
@@ -589,65 +591,84 @@ public struct SmartViewCanvas: View {
         let forecast = store.sevenDayWorkloadForecast(daysCount: forecastDaysCount)
         let workloadByEpochDay = Dictionary(forecast.map { ($0.epochDay, $0) }, uniquingKeysWith: { first, _ in first })
 
-        if filtered.isEmpty && milestones.isEmpty {
-            emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
-        } else {
+        Group {
+            if filtered.isEmpty && milestones.isEmpty {
+                emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
+            } else {
+                VStack(alignment: .leading, spacing: 22) {
+                    ForEach(sortedDays, id: \.self) { epochDay in
+                        let dayTasks = TaskViewSorter.sort(groupedTasks[epochDay] ?? [], mode: store.preferences.viewSortMode)
+                        let dayMilestones = groupedMilestones[epochDay] ?? []
+                        let sampleMillis = dayTasks.first?.whenDate
+                            ?? dayTasks.first?.deadline
+                            ?? dayMilestones.first?.heading.endDate
+                        VStack(alignment: .leading, spacing: 8) {
+                            upcomingDayHeader(
+                                sampleMillis: sampleMillis,
+                                dayWorkload: workloadByEpochDay[epochDay]
+                            )
 
-            VStack(alignment: .leading, spacing: 22) {
-                ForEach(sortedDays, id: \.self) { epochDay in
-                    let dayTasks = TaskViewSorter.sort(groupedTasks[epochDay] ?? [], mode: store.preferences.viewSortMode)
-                    let dayMilestones = groupedMilestones[epochDay] ?? []
-                    let sampleMillis = dayTasks.first?.whenDate
-                        ?? dayTasks.first?.deadline
-                        ?? dayMilestones.first?.heading.endDate
-                    VStack(alignment: .leading, spacing: 8) {
-                        upcomingDayHeader(
-                            sampleMillis: sampleMillis,
-                            dayWorkload: workloadByEpochDay[epochDay]
-                        )
+                            let events = store.calendarEventsForEpochDay(
+                                epochDay,
+                                hasScheduledTasksOnDay: !dayTasks.isEmpty || !dayMilestones.isEmpty,
+                                upcomingOnly: epochDay > todayEpochDay
+                            )
+                            if !events.isEmpty {
+                                calendarEventsCard(events)
+                            }
 
-                        let events = store.calendarEventsForEpochDay(
-                            epochDay,
-                            hasScheduledTasksOnDay: !dayTasks.isEmpty || !dayMilestones.isEmpty,
-                            upcomingOnly: epochDay > todayEpochDay
-                        )
-                        if !events.isEmpty {
-                            calendarEventsCard(events)
-                        }
+                            if !dayMilestones.isEmpty {
+                                VStack(spacing: 6) {
+                                    ForEach(dayMilestones) { milestone in
+                                        upcomingPhaseMilestoneCard(milestone)
+                                    }
+                                }
+                            }
 
-                        if !dayMilestones.isEmpty {
-                            VStack(spacing: 6) {
-                                ForEach(dayMilestones) { milestone in
-                                    upcomingPhaseMilestoneCard(milestone)
+                            if !dayTasks.isEmpty {
+                                VStack(spacing: 3) {
+                                    ForEach(Array(dayTasks.enumerated()), id: \.element.id) { idx, task in
+                                        TaskRowCardView(store: store, task: task)
+                                            .thingsTaskDraggable(store: store, task: task)
+                                            .magicPlusDropSlot(
+                                                id: "utask_\(task.id)",
+                                                kind: .task(
+                                                    taskId: task.id,
+                                                    headingId: nil,
+                                                    prevOrder: idx > 0 ? dayTasks[idx - 1].sortOrder : nil,
+                                                    taskOrder: task.sortOrder,
+                                                    nextOrder: (idx + 1 < dayTasks.count) ? dayTasks[idx + 1].sortOrder : nil,
+                                                    epochDayOverride: epochDay == Int.max ? nil : epochDay,
+                                                    evening: false
+                                                ),
+                                                activeDrop: store.magicPlusActiveDrop,
+                                                newTodoLabel: store.tr("entity_new_todo"),
+                                                newHeadingLabel: store.tr("entity_new_heading")
+                                            )
+                                    }
                                 }
                             }
                         }
-
-                        if !dayTasks.isEmpty {
-                            VStack(spacing: 3) {
-                                ForEach(Array(dayTasks.enumerated()), id: \.element.id) { idx, task in
-                                    TaskRowCardView(store: store, task: task)
-                                        .thingsTaskDraggable(store: store, task: task)
-                                        .magicPlusDropSlot(
-                                            id: "utask_\(task.id)",
-                                            kind: .task(
-                                                taskId: task.id,
-                                                headingId: nil,
-                                                prevOrder: idx > 0 ? dayTasks[idx - 1].sortOrder : nil,
-                                                taskOrder: task.sortOrder,
-                                                nextOrder: (idx + 1 < dayTasks.count) ? dayTasks[idx + 1].sortOrder : nil,
-                                                epochDayOverride: epochDay == Int.max ? nil : epochDay,
-                                                evening: false
-                                            ),
-                                            activeDrop: store.magicPlusActiveDrop,
-                                            newTodoLabel: store.tr("entity_new_todo"),
-                                            newHeadingLabel: store.tr("entity_new_heading")
-                                        )
-                                }
-                            }
-                        }
+                        .id("upcoming-day-\(epochDay)")
                     }
                 }
+            }
+        }
+        .onAppear {
+            consumePendingUpcomingScroll(sortedDays: sortedDays, scrollProxy: scrollProxy)
+        }
+        .onChange(of: store.pendingUpcomingScrollEpochDay) { _, _ in
+            consumePendingUpcomingScroll(sortedDays: sortedDays, scrollProxy: scrollProxy)
+        }
+    }
+
+    private func consumePendingUpcomingScroll(sortedDays: [Int], scrollProxy: ScrollViewProxy) {
+        guard let target = store.pendingUpcomingScrollEpochDay else { return }
+        store.pendingUpcomingScrollEpochDay = nil
+        guard let resolvedDay = sortedDays.first(where: { $0 >= target }) ?? sortedDays.last else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                scrollProxy.scrollTo("upcoming-day-\(resolvedDay)", anchor: .top)
             }
         }
     }

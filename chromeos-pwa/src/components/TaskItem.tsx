@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Bell,
   Calendar,
+  CalendarDays,
   Camera,
   Check,
   CheckCircle2,
@@ -43,8 +44,11 @@ import {
   Zap
 } from 'lucide-react';
 import {
+  addDaysLocal,
   daysBetweenToday,
   formatRecurrenceShort,
+  localEpochDayFromMillis,
+  startOfDayEpoch,
   type AreaRecord,
   type AttachmentRecord,
   type ChecklistItemRecord,
@@ -280,6 +284,7 @@ function nextCycledEffortLevel(cur: EffortLevel | null | undefined): EffortLevel
 export const TaskItem: React.FC<TaskItemProps> = ({
   task,
   isExpanded,
+  isTodayView = false,
   isSelected,
   isMultiSelectMode,
   showContextSubtitle,
@@ -1153,7 +1158,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 type="button"
                 className={`icon-btn ${task.isInProgress ? 'in-progress-active' : ''}`}
                 data-testid="task-in-progress-btn"
-                title={task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                title={`${
+                  task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
+                } (Ctrl+Shift+I)`}
                 aria-label={task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
                 onClick={() => {
                   flushDraftsIfNeeded();
@@ -2205,6 +2212,20 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   }
 
   // ==================== Collapsed Row View ====================
+  const todaySodForRollover =
+    isTodayView &&
+    task.status === 'OPEN' &&
+    task.scheduleState === 'TODAY' &&
+    task.whenDate != null
+      ? startOfDayEpoch()
+      : null;
+  const rolloverDays = (() => {
+    if (todaySodForRollover == null || task.whenDate == null) return 0;
+    const todayEpochDay = localEpochDayFromMillis(todaySodForRollover);
+    const whenEpochDay = localEpochDayFromMillis(task.whenDate);
+    return whenEpochDay < todayEpochDay ? Math.max(1, todayEpochDay - whenEpochDay) : 0;
+  })();
+
   const showCollapsedSchedulePill =
     showScheduleBadgeInCollapsed &&
     task.status === 'OPEN' &&
@@ -2214,6 +2235,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       (task.scheduleState !== 'THIS_EVENING' && task.whenDate != null));
 
   const hasSecondRowBadges =
+    rolloverDays > 0 ||
     Boolean(task.status === 'OPEN' && task.isInProgress) ||
     Boolean(task.isMilestone) ||
     task.scheduleState === 'THIS_EVENING' ||
@@ -2561,6 +2583,29 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 >
                   <span>◐ {t.v33InProgressBadge}</span>
                 </span>
+              )}
+
+              {/* 0a-rollover. Subtle Today Rollover Badge (1-Tap Defer to Tomorrow) */}
+              {rolloverDays > 0 && todaySodForRollover != null && (
+                <button
+                  type="button"
+                  className="meta-badge interactive-badge rollover-badge"
+                  data-testid="task-row-rollover-badge"
+                  title={`${t.dateTomorrow} (↺ ${rolloverDays}d)`}
+                  aria-label={`${t.dateTomorrow} (↺ ${rolloverDays}d)`}
+                  onPointerDown={stopRowPropagation}
+                  onDoubleClick={stopRowPropagation}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void localDb.upsertTask({
+                      id: task.id,
+                      scheduleState: 'UPCOMING',
+                      whenDate: addDaysLocal(todaySodForRollover, 1)
+                    });
+                  }}
+                >
+                  <span>{`↺ ${rolloverDays}d`}</span>
+                </button>
               )}
 
               {/* 0. Milestone Badge */}
@@ -3196,6 +3241,28 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 <Calendar size={14} />
                 <span>{t.ctxWhenReminder}</span>
               </button>
+
+              {task.status === 'OPEN' &&
+                (isTodayView ||
+                  task.scheduleState === 'TODAY' ||
+                  task.scheduleState === 'THIS_EVENING') && (
+                  <button
+                    type="button"
+                    className="context-menu-item"
+                    data-testid="task-ctx-defer-tomorrow-btn"
+                    onClick={() => {
+                      setCtxMenu(null);
+                      void localDb.upsertTask({
+                        id: task.id,
+                        scheduleState: 'UPCOMING',
+                        whenDate: addDaysLocal(startOfDayEpoch(), 1)
+                      });
+                    }}
+                  >
+                    <CalendarDays size={14} />
+                    <span>{t.dateTomorrow}</span>
+                  </button>
+                )}
 
               {/* 4. Deadline */}
               <button

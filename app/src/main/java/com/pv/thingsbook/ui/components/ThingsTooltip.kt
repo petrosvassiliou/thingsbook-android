@@ -607,13 +607,12 @@ fun ThingsHoverTooltip(
 
     DisposableEffect(ownerId, hostState) {
         onDispose {
-            hostState?.hide(ownerId, allowWarmHandoff = false)
+            hostState.hide(ownerId, allowWarmHandoff = false)
         }
     }
 
     // Live 0ms text & bounds sync while this control already owns the visible tooltip
     LaunchedEffect(text, enabled, hostState) {
-        if (hostState == null) return@LaunchedEffect
         if (!enabled || text.isBlank()) {
             hostState.hide(ownerId, allowWarmHandoff = true)
         } else {
@@ -623,9 +622,9 @@ fun ThingsHoverTooltip(
 
     // Mouse / trackpad / stylus hover lifecycle (with 0ms warm handoff across adjacent controls)
     LaunchedEffect(effectiveHovered, enabled, hostState) {
-        if (hostState == null || !enabled || !effectiveHovered) {
+        if (!enabled || !effectiveHovered) {
             if (!isTouchDown) {
-                hostState?.hide(
+                hostState.hide(
                     ownerId,
                     allowWarmHandoff = true,
                     preserveIfReleasedTouch = true
@@ -645,9 +644,9 @@ fun ThingsHoverTooltip(
 
     // Stationary finger long-press tooltip preview on touchscreens
     LaunchedEffect(touchSessionId, isTouchDown, enabled, enableTouchLongPress, hostState) {
-        if (hostState == null || !enabled || !enableTouchLongPress || !isTouchDown) {
+        if (!enabled || !enableTouchLongPress || !isTouchDown) {
             if (!effectiveHovered && !isTouchDown) {
-                hostState?.hide(
+                hostState.hide(
                     ownerId,
                     allowWarmHandoff = true,
                     preserveIfReleasedTouch = true
@@ -674,11 +673,11 @@ fun ThingsHoverTooltip(
             .onGloballyPositioned { coords ->
                 val updated = coords.boundsInRoot().roundToIntRect()
                 boundsRef.rect = updated
-                hostState?.updateIfActive(ownerId, latestText, updated)
+                hostState.updateIfActive(ownerId, latestText, updated)
             }
             .hoverable(interactionSource = hoverInteractionSource, enabled = enabled)
-            .pointerInput(enabled, enableTouchLongPress, hostState != null) {
-                if (!enabled || hostState == null) return@pointerInput
+            .pointerInput(enabled, enableTouchLongPress, hostState) {
+                if (!enabled) return@pointerInput
                 val touchSlopPx = viewConfiguration.touchSlop
                 var touchOrigin = Offset.Zero
                 var touchExceededSlop = false

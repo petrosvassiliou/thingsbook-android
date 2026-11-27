@@ -253,7 +253,7 @@ public struct QuickFindOverlay: View {
                     title: store.tr("v33_cmd_toggle_in_progress"),
                     icon: "circle.lefthalf.filled",
                     tint: ThingsMacPalette.somedayAmber,
-                    shortcut: nil
+                    shortcut: "⇧⌘I"
                 ) {
                     store.toggleInProgressForSelectedOrExpandedTasks()
                     dismiss()

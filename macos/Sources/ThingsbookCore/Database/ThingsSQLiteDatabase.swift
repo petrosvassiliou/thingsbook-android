@@ -968,7 +968,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
 
                 let stmt2 = try prepareLocked("""
                     UPDATE tasks
-                    SET schedule_state = 'TODAY', when_date = ?
+                    SET schedule_state = 'TODAY', when_date = COALESCE(when_date, ?)
                     WHERE status = 'OPEN' AND is_deleted = 0
                       AND schedule_state = 'THIS_EVENING'
                       AND ((when_date IS NOT NULL AND when_date < ?) OR (when_date IS NULL AND updated_at < ?));
@@ -5614,7 +5614,7 @@ public final class ThingsSQLiteDatabase: @unchecked Sendable {
     }
 
     public func missingContainerFlags() throws -> (hasOrphanProject: Bool, hasOrphanArea: Bool, hasOrphanHeading: Bool) {
-        try queue.sync {
+        queue.sync {
             func exists(_ sql: String) -> Bool {
                 guard let stmt = try? prepareLocked(sql) else { return false }
                 defer { sqlite3_finalize(stmt) }

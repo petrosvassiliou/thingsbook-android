@@ -206,6 +206,8 @@ fun WorkspaceInspectorPanel(
     todayFreeMinutes: Int,
     completedTodayCount: Int,
     sevenDayWorkload: List<com.pv.thingsbook.domain.model.DayWorkloadSummary> = emptyList(),
+    dragController: ProjectDragDropController? = null,
+    onJumpToWorkloadDay: ((index: Int, day: com.pv.thingsbook.domain.model.DayWorkloadSummary) -> Unit)? = null,
     areas: List<Area>,
     projects: List<Project>,
     allHeadings: List<Heading> = emptyList(),
@@ -337,6 +339,8 @@ fun WorkspaceInspectorPanel(
                 todayFreeMinutes = todayFreeMinutes,
                 completedTodayCount = completedTodayCount,
                 sevenDayWorkload = sevenDayWorkload,
+                dragController = dragController,
+                onJumpToWorkloadDay = onJumpToWorkloadDay,
                 todayDate = todayDate,
                 locale = locale,
                 onCloseInspector = onCloseInspector,
@@ -996,9 +1000,9 @@ private fun SelectedTaskInspectorContent(
             ) {
                 if (selectedTask.status == TaskStatus.OPEN) {
                     val wipActive = selectedTask.isInProgress
-                    val wipTooltip = stringResource(
+                    val wipTooltip = "${stringResource(
                         if (wipActive) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
-                    )
+                    )} (Ctrl+Shift+I)"
                     ThingsHoverTooltip(text = wipTooltip) {
                         Surface(
                             modifier = Modifier
@@ -2402,6 +2406,8 @@ private fun WorkspaceOverviewInspectorContent(
     todayFreeMinutes: Int,
     completedTodayCount: Int,
     sevenDayWorkload: List<com.pv.thingsbook.domain.model.DayWorkloadSummary> = emptyList(),
+    dragController: ProjectDragDropController? = null,
+    onJumpToWorkloadDay: ((index: Int, day: com.pv.thingsbook.domain.model.DayWorkloadSummary) -> Unit)? = null,
     todayDate: LocalDate,
     locale: Locale,
     onCloseInspector: () -> Unit,
@@ -2626,7 +2632,9 @@ private fun WorkspaceOverviewInspectorContent(
             SevenDayWorkloadStripCard(
                 forecast = sevenDayWorkload,
                 locale = locale,
-                compact = true
+                compact = true,
+                dragController = dragController,
+                onDayClick = onJumpToWorkloadDay
             )
         }
 

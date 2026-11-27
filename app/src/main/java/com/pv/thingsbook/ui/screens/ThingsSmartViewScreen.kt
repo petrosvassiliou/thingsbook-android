@@ -763,6 +763,24 @@ fun ThingsSmartViewScreen(
                 viewModel.openWeeklyReviewModal()
                 true
             }
+            ctrlOrMeta && nativeEvent.isShiftPressed && !nativeEvent.isAltPressed &&
+                nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_I -> {
+                when {
+                    selectedTaskIds.size > 1 -> {
+                        viewModel.batchToggleInProgressSelectedTasks()
+                        true
+                    }
+                    selectedTaskIds.size == 1 -> {
+                        viewModel.toggleTaskInProgress(selectedTaskIds.first())
+                        true
+                    }
+                    expandedTaskId != null -> {
+                        viewModel.toggleTaskInProgress(expandedTaskId!!)
+                        true
+                    }
+                    else -> false
+                }
+            }
             ctrlOrMeta && nativeEvent.isShiftPressed && nativeEvent.keyCode == android.view.KeyEvent.KEYCODE_N -> {
                 triggerCreateProjectShortcut()
                 true
@@ -935,6 +953,23 @@ fun ThingsSmartViewScreen(
                             isMobileDrawerOpen = false
                             viewModel.openWeeklyReviewModal()
                             true
+                        }
+                        ctrlOrMeta && event.isShiftPressed && !event.isAltPressed && event.key == Key.I -> {
+                            when {
+                                selectedTaskIds.size > 1 -> {
+                                    viewModel.batchToggleInProgressSelectedTasks()
+                                    true
+                                }
+                                selectedTaskIds.size == 1 -> {
+                                    viewModel.toggleTaskInProgress(selectedTaskIds.first())
+                                    true
+                                }
+                                expandedTaskId != null -> {
+                                    viewModel.toggleTaskInProgress(expandedTaskId!!)
+                                    true
+                                }
+                                else -> false
+                            }
                         }
                         ctrlOrMeta && event.isShiftPressed && event.key == Key.N -> {
                             triggerCreateProjectShortcut()
@@ -1631,6 +1666,10 @@ fun ThingsSmartViewScreen(
                                     todayFreeMinutes = todayCapacitySummary.second,
                                     completedTodayCount = completedTodayCount,
                                     sevenDayWorkload = sevenDayWorkloadForecastTop,
+                                    dragController = projectDragController,
+                                    onJumpToWorkloadDay = { idx, day ->
+                                        viewModel.jumpToWorkloadDay(idx, day.epochDay)
+                                    },
                                     areas = areas,
                                     projects = activeProjects,
                                     allHeadings = allHeadingsTop,
@@ -2125,6 +2164,10 @@ fun ThingsSmartViewScreen(
                                         ctrlOrMeta && modalKeyEvent.isShiftPressed && modalKeyEvent.key == Key.D -> {
                                             externalDialogTriggerType = "DEADLINE"
                                             externalDialogTriggerToken++
+                                            true
+                                        }
+                                        ctrlOrMeta && modalKeyEvent.isShiftPressed && !modalKeyEvent.isAltPressed && modalKeyEvent.key == Key.I -> {
+                                            viewModel.toggleTaskInProgress(activeModalTask.id)
                                             true
                                         }
                                         ctrlOrMeta && modalKeyEvent.isShiftPressed && modalKeyEvent.key == Key.M -> {
@@ -3393,11 +3436,71 @@ private fun ThingsMainTaskLazyList(
         LazyListState(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0)
     }
     val handleEnsureVisibleRequest: (Boolean) -> Unit = remember { { _ -> } }
+    val pendingUpcomingFocusEpochDay by viewModel.pendingUpcomingFocusEpochDay.collectAsState()
 
     LaunchedEffect(navScopeKey) {
-        if (navTarget.shouldResetScrollToTop(expandedTaskId)) {
+        if (pendingUpcomingFocusEpochDay == null && navTarget.shouldResetScrollToTop(expandedTaskId)) {
             runCatching { listState.scrollToItem(0, 0) }
         }
+    }
+
+    LaunchedEffect(
+        navTarget,
+        pendingUpcomingFocusEpochDay,
+        primaryTasks,
+        allHeadings,
+        upcomingCalendarEventsByDate,
+        calendarEventsEnabled
+    ) {
+        val targetEpochDay = pendingUpcomingFocusEpochDay ?: return@LaunchedEffect
+        if (navTarget != ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING)) return@LaunchedEffect
+
+        val zone = ZoneId.systemDefault()
+        val todayDate = LocalDate.ofEpochDay(currentEpochDay)
+        val groupedUpcoming = primaryTasks.groupBy { task -> computeUpcomingTargetDate(task, todayDate, zone) }
+        val activeProjectById = activeProjects.associateBy { it.id }
+        val upcomingMilestonesByDate = allHeadings
+            .mapNotNull { heading ->
+                if (heading.isDeleted || heading.isArchived || heading.title.isBlank()) return@mapNotNull null
+                val endMillis = heading.endDate ?: return@mapNotNull null
+                val project = activeProjectById[heading.projectId] ?: return@mapNotNull null
+                val filterTag = selectedFilterTagId
+                if (filterTag != null && filterTag !in project.tagIds) return@mapNotNull null
+                val endLocalDate = runCatching {
+                    Instant.ofEpochMilli(endMillis).atZone(zone).toLocalDate()
+                }.getOrNull() ?: return@mapNotNull null
+                if (endLocalDate.isBefore(todayDate)) return@mapNotNull null
+                Triple(endLocalDate, heading, project)
+            }
+            .groupBy({ it.first }, { it.second to it.third })
+
+        val allUpcomingDates = (groupedUpcoming.keys + upcomingMilestonesByDate.keys).toSortedSet()
+        var itemIdx = 1 // index 0 is topScrollAnchorKey
+        val headerIndices = allUpcomingDates.map { d ->
+            val headerIdx = itemIdx
+            val dayTasksCount = groupedUpcoming[d].orEmpty().size
+            val dayMilestonesCount = upcomingMilestonesByDate[d].orEmpty().size
+            val dayEventsCount = if (calendarEventsEnabled && (dayTasksCount > 0 || dayMilestonesCount > 0)) {
+                DeviceCalendarRepository.filterActiveOrUpcomingEvents(
+                    events = upcomingCalendarEventsByDate[d].orEmpty(),
+                    forDate = d,
+                    todayDate = todayDate,
+                    nowMillis = System.currentTimeMillis(),
+                    upcomingOnly = true
+                ).size
+            } else {
+                0
+            }
+            itemIdx += 1 + (if (dayEventsCount > 0) 1 else 0) + dayMilestonesCount + dayTasksCount
+            d.toEpochDay() to headerIdx
+        }
+
+        androidx.compose.runtime.withFrameNanos { }
+        val match = headerIndices.firstOrNull { it.first >= targetEpochDay } ?: headerIndices.lastOrNull()
+        if (match != null) {
+            runCatching { listState.scrollToItem(match.second, 0) }
+        }
+        viewModel.consumePendingUpcomingFocusEpochDay()
     }
 
     val isGeneralManualFlatList = !isProjectView &&
@@ -5191,9 +5294,9 @@ private fun ThingsMultiSelectionBar(
             val batchWipLabel = stringResource(
                 if (isBatchInProgressActive) R.string.v33_clear_in_progress else R.string.v33_in_progress_badge
             )
-            val batchWipTooltip = stringResource(
+            val batchWipTooltip = "${stringResource(
                 if (isBatchInProgressActive) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
-            )
+            )} (Ctrl+Shift+I)"
             val pillShape = RoundedCornerShape(50)
             ThingsHoverTooltip(text = batchWipTooltip) {
                 Row(
@@ -6612,10 +6715,9 @@ private fun ViewTitleHeader(
             .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 14.dp)
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val isCompactSmartViewHeader = maxWidth < 600.dp && navTarget is ActiveNavigationTarget.SmartView
             val isWideProjectHeader = maxWidth >= 600.dp
 
-            if (isCompactSmartViewHeader && navTarget is ActiveNavigationTarget.SmartView) {
+            if (maxWidth < 600.dp && navTarget is ActiveNavigationTarget.SmartView) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -8369,7 +8471,7 @@ private fun InlineQuickFindSection(
                 add(
                     PaletteQuickActionItem(
                         id = "toggle_in_progress",
-                        label = "◐ $toggleInProgressCmdLabel$suffix",
+                        label = "◐ $toggleInProgressCmdLabel$suffix (Ctrl+Shift+I)",
                         icon = Icons.Outlined.Schedule,
                         onTrigger = onToggleSelectedTaskInProgress
                     )

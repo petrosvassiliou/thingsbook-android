@@ -776,7 +776,7 @@ fun PerspectiveEditorDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (isEditing && initialPerspective != null && onDelete != null) {
+                        if (initialPerspective != null && onDelete != null) {
                             TextButton(
                                 onClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)

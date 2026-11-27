@@ -198,7 +198,7 @@ public struct ThingsCommandMenus: Commands {
                 guard !isCommandBlocked else { return }
                 store.importBackupInteractively()
             }
-            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .keyboardShortcut("i", modifiers: [.command, .option, .shift])
             .disabled(isCommandBlocked)
         }
 
@@ -255,6 +255,7 @@ public struct ThingsCommandMenus: Commands {
                 guard !isShortcutBlocked() else { return }
                 store.toggleInProgressForSelectedOrExpandedTasks()
             }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
             .disabled(isCommandBlocked || openInProgressTargetTasks.isEmpty)
 
             Button(store.tr("action_duplicate_todo")) {

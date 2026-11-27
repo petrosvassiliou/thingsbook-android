@@ -617,7 +617,11 @@ export const App: React.FC = () => {
                   ? tr.v31RoadmapRescheduledUndo
                   : ev.kind === 'day_plan_applied'
                     ? tr.v31GeminiPlanDayAppliedUndo(ev.count)
-                    : tr.undoTaskDeleted(fallbackTitle);
+                    : ev.kind === 'task_scheduled'
+                      ? ev.count > 1
+                        ? tr.dropMovedFeedback(ev.count)
+                        : `${fallbackTitle} · ${tr.actionWhen}`
+                      : tr.undoTaskDeleted(fallbackTitle);
       setUndoBanner({ id: Date.now(), message: msg });
     });
 
@@ -2751,11 +2755,29 @@ export const App: React.FC = () => {
           return;
         }
 
+        // Ctrl+Shift+I / Cmd+Shift+I -> Toggle In Progress on expanded or selected OPEN To-Dos
+        if (e.shiftKey && !e.altKey && lower === 'i') {
+          e.preventDefault();
+          const wipTargets = expandedTaskId ? [expandedTaskId] : selectedTaskIds;
+          const openIds = wipTargets.filter(
+            (id) => tasksByIdMap.get(id)?.status === 'OPEN'
+          );
+          if (openIds.length === 1) {
+            void localDb.toggleTaskInProgress(openIds[0]);
+          } else if (openIds.length > 1) {
+            const allWip = openIds.every((id) =>
+              Boolean(tasksByIdMap.get(id)?.isInProgress)
+            );
+            void localDb.batchUpdateTasks(openIds, { isInProgress: !allWip });
+          }
+          return;
+        }
+
         // Ctrl+<TagShortcut> toggles tag on expanded or selected tasks when not typing in an input!
         const targetIds = expandedTaskId
           ? [expandedTaskId]
           : selectedTaskIds;
-        if (!inInput && targetIds.length > 0 && lower.length === 1) {
+        if (!inInput && !e.shiftKey && !e.altKey && targetIds.length > 0 && lower.length === 1) {
           const matchedTag = snapshot.tags.find(
             (tg) =>
               !tg.isDeleted &&
@@ -2830,7 +2852,8 @@ export const App: React.FC = () => {
     defaultAreaIdForNewProject,
     orderedVisibleTaskIds,
     snapshot.tags,
-    snapshot.tasks
+    snapshot.tasks,
+    tasksByIdMap
   ]);
 
   const orderedSelectedDragIds = useMemo(
@@ -4416,6 +4439,7 @@ export const App: React.FC = () => {
                             key={dayEpoch}
                             className="group-section"
                             data-magic-when-date={dayEpoch}
+                            data-upcoming-epoch-day={targetEpochDay}
                           >
                             <div
                               className="upcoming-day-header"
@@ -6258,6 +6282,8 @@ export const App: React.FC = () => {
             attachments={snapshot.attachments}
             openTaskIdSet={openTaskIdSet}
             tasksByIdMap={tasksByIdMap}
+            selectedTaskIds={selectedTaskIds}
+            orderedVisibleTaskIds={orderedVisibleTaskIds}
             areasMap={areasMap}
             projectsMap={allNonDeletedProjectsMap}
             tagsMap={tagsMap}
@@ -6265,6 +6291,38 @@ export const App: React.FC = () => {
             geminiApiKey={prefs.geminiApiKey}
             t={t}
             onToast={showToast}
+            onJumpToWorkloadDay={(day, isToday) => {
+              if (isToday) {
+                handleSelectNav({ kind: 'smart', view: 'TODAY' });
+                return;
+              }
+              handleSelectNav({ kind: 'smart', view: 'UPCOMING' });
+              window.requestAnimationFrame(() => {
+                window.setTimeout(() => {
+                  const exact = document.querySelector<HTMLElement>(
+                    `[data-upcoming-epoch-day="${day.epochDay}"]`
+                  );
+                  const targetEl =
+                    exact ??
+                    Array.from(
+                      document.querySelectorAll<HTMLElement>(
+                        '.group-section[data-upcoming-epoch-day]'
+                      )
+                    ).find(
+                      (el) =>
+                        Number(el.getAttribute('data-upcoming-epoch-day')) >= day.epochDay
+                    ) ??
+                    null;
+                  targetEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 40);
+              });
+            }}
+            onDropTasksOnWorkloadDay={(taskIds, day, isToday) => {
+              void localDb.batchUpdateTasks(taskIds, {
+                scheduleState: isToday ? 'TODAY' : 'UPCOMING',
+                whenDate: day.dayStartMillis
+              });
+            }}
             onSelectTaskFromInspector={handleSelectTaskFromInspector}
             onOpenTaskEditor={(taskId) => {
               setSelectedTaskIds([]);
@@ -6398,7 +6456,9 @@ export const App: React.FC = () => {
                   type="button"
                   className={`chip-btn ${allSelectedInProgress ? 'in-progress-active' : ''}`}
                   data-testid="multi-select-in-progress-btn"
-                  title={allSelectedInProgress ? t.v33ClearInProgress : t.v33MarkInProgress}
+                  title={`${
+                    allSelectedInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
+                  } (Ctrl+Shift+I)`}
                   onClick={() => {
                     void localDb.batchUpdateTasks(openSelectedIds, {
                       isInProgress: !allSelectedInProgress

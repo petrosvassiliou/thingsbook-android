@@ -299,6 +299,7 @@ public struct SettingsWindowView: View {
                         shortcutRow(title: store.tr("entity_new_project"), keys: "⌥⌘N")
                         shortcutRow(title: store.tr("entity_new_area"), keys: "⌃⌘N")
                         shortcutRow(title: store.tr("action_complete"), keys: "⌘.")
+                        shortcutRow(title: store.tr("v33_mark_in_progress"), keys: "⇧⌘I")
                         shortcutRow(title: store.tr("action_duplicate_todo"), keys: "⌘D")
                         shortcutRow(title: store.tr("view_today"), keys: "⌘T")
                         shortcutRow(title: store.tr("view_this_evening"), keys: "⌘E")

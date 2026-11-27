@@ -84,6 +84,7 @@ import type { TranslationStrings } from '../i18n/translations';
 import { MarkdownNotesField } from './MarkdownNotesField';
 import { AttachmentsStrip } from './AttachmentStrip';
 import { InProgressIcon } from './InProgressIcon';
+import { extractDraggedTaskIds, hasDraggedTaskMime } from '../domain/v30Roadmap';
 
 const EMPTY_OPEN_ID_SET: ReadonlySet<string> = new Set();
 const EMPTY_TASKS_MAP: ReadonlyMap<string, TaskRecord> = new Map();
@@ -227,14 +228,28 @@ export interface SevenDayWorkloadCardProps {
   lang: SupportedLang;
   t: TranslationStrings;
   compact?: boolean;
+  selectedTaskIds?: readonly string[];
+  orderedVisibleTaskIds?: readonly string[];
+  onJumpToWorkloadDay?: (day: DayWorkloadSummary, isToday: boolean) => void;
+  onDropTasksOnWorkloadDay?: (
+    taskIds: string[],
+    day: DayWorkloadSummary,
+    isToday: boolean
+  ) => void;
 }
 
 export const SevenDayWorkloadCard: React.FC<SevenDayWorkloadCardProps> = ({
   forecast,
   lang,
   t,
-  compact = false
+  compact = false,
+  selectedTaskIds,
+  orderedVisibleTaskIds,
+  onJumpToWorkloadDay,
+  onDropTasksOnWorkloadDay
 }) => {
+  const [dragOverEpochDay, setDragOverEpochDay] = useState<number | null>(null);
+
   if (forecast.length === 0) return null;
 
   const weekdayShortFmt = new Intl.DateTimeFormat(lang, { weekday: compact ? 'narrow' : 'short' });
@@ -280,6 +295,8 @@ export const SevenDayWorkloadCard: React.FC<SevenDayWorkloadCardProps> = ({
 
       <div className={`v31-workload-bars-grid ${compact ? 'compact' : ''}`}>
         {forecast.map((day, idx) => {
+          const isToday = idx === 0;
+          const isDragOver = dragOverEpochDay === day.epochDay;
           const dObj = new Date(day.dayStartMillis);
           const totalUsed = day.plannedMinutes + day.busyCalendarMinutes;
           const cap = Math.max(60, day.totalCapacityMinutes);
@@ -306,10 +323,47 @@ export const SevenDayWorkloadCard: React.FC<SevenDayWorkloadCardProps> = ({
           return (
             <div
               key={day.epochDay}
-              className={`v31-workload-day-col ${idx === 0 ? 'today' : ''} ${
+              data-testid={`workload-day-col-${idx}`}
+              role="button"
+              tabIndex={0}
+              className={`v31-workload-day-col ${isToday ? 'today' : ''} ${
                 day.isOverloaded ? 'overloaded' : ''
-              }`}
+              } ${isDragOver ? 'drag-over' : ''}`}
               title={tip}
+              aria-label={tip}
+              onClick={() => onJumpToWorkloadDay?.(day, isToday)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onJumpToWorkloadDay?.(day, isToday);
+                }
+              }}
+              onDragOver={(e) => {
+                if (hasDraggedTaskMime(e.dataTransfer)) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverEpochDay !== day.epochDay) {
+                    setDragOverEpochDay(day.epochDay);
+                  }
+                }
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  setDragOverEpochDay((cur) => (cur === day.epochDay ? null : cur));
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverEpochDay(null);
+                const ids = extractDraggedTaskIds(
+                  e.dataTransfer,
+                  [...(selectedTaskIds ?? [])],
+                  [...(orderedVisibleTaskIds ?? [])]
+                );
+                if (ids.length > 0) {
+                  onDropTasksOnWorkloadDay?.(ids, day, isToday);
+                }
+              }}
             >
               <span className="v31-workload-day-top">{topText}</span>
               <div className="v31-workload-bar-track" aria-hidden="true">
@@ -357,6 +411,8 @@ export interface WorkspaceInspectorPanelProps {
   attachments?: readonly AttachmentRecord[];
   openTaskIdSet?: ReadonlySet<string>;
   tasksByIdMap?: ReadonlyMap<string, TaskRecord>;
+  selectedTaskIds?: readonly string[];
+  orderedVisibleTaskIds?: readonly string[];
   areasMap: Map<string, AreaRecord>;
   projectsMap: Map<string, ProjectRecord>;
   tagsMap: Map<string, TagRecord>;
@@ -364,6 +420,12 @@ export interface WorkspaceInspectorPanelProps {
   geminiApiKey?: string;
   t: TranslationStrings;
   onToast?: (msg: string) => void;
+  onJumpToWorkloadDay?: (day: DayWorkloadSummary, isToday: boolean) => void;
+  onDropTasksOnWorkloadDay?: (
+    taskIds: string[],
+    day: DayWorkloadSummary,
+    isToday: boolean
+  ) => void;
   onSelectTaskFromInspector: (task: TaskRecord) => void;
   onOpenTaskEditor: (taskId: string) => void;
   onClearSelection: () => void;
@@ -429,6 +491,8 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
   attachments = EMPTY_ATTACHMENTS,
   openTaskIdSet = EMPTY_OPEN_ID_SET,
   tasksByIdMap = EMPTY_TASKS_MAP,
+  selectedTaskIds,
+  orderedVisibleTaskIds,
   areasMap,
   projectsMap,
   tagsMap,
@@ -436,6 +500,8 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
   geminiApiKey = '',
   t,
   onToast = NOOP_TOAST,
+  onJumpToWorkloadDay,
+  onDropTasksOnWorkloadDay,
   onSelectTaskFromInspector,
   onOpenTaskEditor,
   onClearSelection,
@@ -1470,9 +1536,9 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                     selectedTask.isInProgress ? 'in-progress-active' : 'ghost'
                   }`}
                   data-testid="inspector-in-progress-btn"
-                  title={
+                  title={`${
                     selectedTask.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
-                  }
+                  } (Ctrl+Shift+I)`}
                   aria-label={
                     selectedTask.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
                   }
@@ -2342,6 +2408,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
           lang={lang}
           t={t}
           compact
+          selectedTaskIds={selectedTaskIds}
+          orderedVisibleTaskIds={orderedVisibleTaskIds}
+          onJumpToWorkloadDay={onJumpToWorkloadDay}
+          onDropTasksOnWorkloadDay={onDropTasksOnWorkloadDay}
         />
 
         {/* 2. Today's Schedule Mini-Timeline Card */}

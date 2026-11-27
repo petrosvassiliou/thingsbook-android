@@ -258,6 +258,7 @@ export function updatePreferences(patch: Partial<AppPreferences>): AppPreference
 export type UndoEventKind =
   | 'task_completed'
   | 'task_deleted'
+  | 'task_scheduled'
   | 'project_completed'
   | 'project_deleted'
   | 'tasks_updated'
@@ -459,7 +460,7 @@ export class ThingsLocalDb {
         updates.push({
           ...t,
           scheduleState: 'TODAY',
-          whenDate: startOfToday
+          whenDate: t.whenDate ?? startOfToday
         });
       }
     }
@@ -1056,6 +1057,28 @@ export class ThingsLocalDb {
         entityTitle: record.title,
         count: 1
       });
+    } else if (
+      !params.suppressUndo &&
+      existing &&
+      !existing.isDeleted &&
+      existing.status === 'OPEN' &&
+      status === 'OPEN' &&
+      (params.scheduleState !== undefined || params.whenDate !== undefined) &&
+      (scheduleState !== existing.scheduleState || whenDate !== existing.whenDate)
+    ) {
+      this.lastUndoSnapshot = {
+        tasks: [{ ...existing }],
+        checklistItems: [],
+        projects: [],
+        headings: [],
+        attachments: [],
+        spawnedTaskIds: []
+      };
+      this.emitUndoEvent({
+        kind: 'task_scheduled',
+        entityTitle: existing.title,
+        count: 1
+      });
     }
 
     return record;
@@ -1177,11 +1200,19 @@ export class ThingsLocalDb {
     return this.enqueueWrite(async () => {
       const db = await this.getDb();
       const priorOpenTasks: TaskRecord[] = [];
-      if (patch.status === 'COMPLETED') {
+      const scheduleCandidateTasks: TaskRecord[] = [];
+      const trackScheduleUndo =
+        patch.status !== 'COMPLETED' &&
+        (patch.scheduleState !== undefined || patch.whenDate !== undefined);
+      if (patch.status === 'COMPLETED' || trackScheduleUndo) {
         for (const id of taskIds) {
           const existing = (await db.get('tasks', id)) as TaskRecord | undefined;
           if (existing && !existing.isDeleted && existing.status === 'OPEN') {
-            priorOpenTasks.push({ ...existing });
+            if (patch.status === 'COMPLETED') {
+              priorOpenTasks.push({ ...existing });
+            } else {
+              scheduleCandidateTasks.push({ ...existing });
+            }
           }
         }
       }
@@ -1213,6 +1244,33 @@ export class ThingsLocalDb {
           entityTitle: priorOpenTasks[0].title,
           count: priorOpenTasks.length
         });
+      } else if (scheduleCandidateTasks.length > 0) {
+        const priorScheduleTasks: TaskRecord[] = [];
+        for (const before of scheduleCandidateTasks) {
+          const after = (await db.get('tasks', before.id)) as TaskRecord | undefined;
+          if (
+            after &&
+            (after.scheduleState !== before.scheduleState ||
+              after.whenDate !== before.whenDate)
+          ) {
+            priorScheduleTasks.push(before);
+          }
+        }
+        if (priorScheduleTasks.length > 0) {
+          this.lastUndoSnapshot = {
+            tasks: priorScheduleTasks,
+            checklistItems: [],
+            projects: [],
+            headings: [],
+            attachments: [],
+            spawnedTaskIds: []
+          };
+          this.emitUndoEvent({
+            kind: 'task_scheduled',
+            entityTitle: priorScheduleTasks[0].title,
+            count: priorScheduleTasks.length
+          });
+        }
       }
 
       await this.refreshSnapshot();

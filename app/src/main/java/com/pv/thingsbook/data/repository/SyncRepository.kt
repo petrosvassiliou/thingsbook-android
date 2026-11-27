@@ -1864,7 +1864,7 @@ class SyncRepository @Inject constructor(
                             }
                             if (streamLine.message.isNotBlank()) {
                                 val batch = CloudDeltaBatchPayload.decodeWithHints(streamLine.message, json)
-                                if (batch != null && batch.userId.isNotBlank()) {
+                                if (batch.userId.isNotBlank()) {
                                     result += batch
                                 }
                             }
@@ -1929,7 +1929,7 @@ class SyncRepository @Inject constructor(
                                 if (raw.isEmpty()) continue
                                 val streamLine = runCatching { json.decodeFromString<NtfyStreamLine>(raw) }.getOrNull() ?: continue
                                 if (streamLine.event != "message" || streamLine.message.isBlank()) continue
-                                val batch = CloudDeltaBatchPayload.decodeWithHints(streamLine.message, json) ?: continue
+                                val batch = CloudDeltaBatchPayload.decodeWithHints(streamLine.message, json)
                                 if (batch.userId != userId || batch.deviceId == localDeviceId) continue
 
                                 if (batch.wakeOnly) {

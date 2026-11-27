@@ -201,6 +201,7 @@ function upgradeNativeTitlesInLineage(target: EventTarget | null): void {
   }
 }
 
+// oxlint-disable-next-line react/only-export-components
 export function resolveTooltipAnchor(
   target: EventTarget | null,
   pointerContext?: TooltipPointerContext

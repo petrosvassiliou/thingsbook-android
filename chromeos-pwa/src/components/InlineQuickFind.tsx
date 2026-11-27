@@ -216,6 +216,7 @@ export const InlineQuickFind: React.FC<InlineQuickFindProps> = ({
             ◐
           </span>
         ),
+        shortcut: 'Ctrl+Shift+I',
         onRun: () => {
           onToggleSelectedTaskInProgress();
           onClose();

@@ -141,6 +141,12 @@ sealed interface WorkspaceDragDropDestination {
     data class CurrentListReorder(
         val dropIndex: Int
     ) : WorkspaceDragDropDestination
+
+    data class WorkloadDayTarget(
+        val dayIndex: Int,
+        val dayStartMillis: Long,
+        val displayTitle: String
+    ) : WorkspaceDragDropDestination
 }
 
 data class RegisteredDropZone(
@@ -865,6 +871,7 @@ fun BoxScope.WorkspaceDragFloatingOverlay(controller: ProjectDragDropController)
         is WorkspaceDragDropDestination.BoardColumn -> {
             dest.headingTitle ?: stringResource(R.string.v30_board_ungrouped_column)
         }
+        is WorkspaceDragDropDestination.WorkloadDayTarget -> "📅 ${dest.displayTitle}"
         else -> null
     }
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUpRight,
@@ -1413,9 +1413,11 @@ export const ProjectRoadmapWorkspace: React.FC<ProjectRoadmapWorkspaceProps> = (
   const suppressNextBarClickRef = useRef<boolean>(false);
   const dayWidth = ZOOM_DAY_WIDTH_PX[zoom];
   const dayWidthRef = useRef<number>(dayWidth);
-  dayWidthRef.current = dayWidth;
   const layoutRef = useRef<ProjectRoadmapLayout>(layout);
-  layoutRef.current = layout;
+  useLayoutEffect(() => {
+    dayWidthRef.current = dayWidth;
+    layoutRef.current = layout;
+  }, [dayWidth, layout]);
   const timelineWidthPx = layout.totalDays * dayWidth;
 
   const beginBarDrag = useCallback((target: HTMLElement, next: BarDragState) => {
@@ -3657,9 +3659,11 @@ export const AreaPortfolioRoadmapWorkspace: React.FC<AreaPortfolioRoadmapWorkspa
 
   const dayWidth = ZOOM_DAY_WIDTH_PX[zoom];
   const dayWidthRef = useRef(dayWidth);
-  dayWidthRef.current = dayWidth;
   const layoutRef = useRef(layout);
-  layoutRef.current = layout;
+  useLayoutEffect(() => {
+    dayWidthRef.current = dayWidth;
+    layoutRef.current = layout;
+  }, [dayWidth, layout]);
   const timelineWidthPx = layout.totalDays * dayWidth;
 
   const beginPortfolioBarDrag = useCallback(
@@ -3897,7 +3901,7 @@ export const AreaPortfolioRoadmapWorkspace: React.FC<AreaPortfolioRoadmapWorkspa
       window.removeEventListener('blur', abortDrag);
       scrollEl?.removeEventListener('scroll', cancelIfUnarmed);
     };
-  }, [activeSessionKey, isFullScreen, clearPortfolioBarDrag, t.entityHeading]);
+  }, [activeSessionKey, barDrag, isFullScreen, clearPortfolioBarDrag, t.entityHeading]);
 
   const cascadePreviewByProject = useMemo(() => {
     const map = new Map<string, number>();

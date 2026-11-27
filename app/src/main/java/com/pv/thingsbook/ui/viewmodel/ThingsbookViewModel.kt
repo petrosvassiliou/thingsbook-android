@@ -672,6 +672,22 @@ class ThingsbookViewModel @Inject constructor(
         .catch { emit(emptyList()) }
         .stateIn(safeVmScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _pendingUpcomingFocusEpochDay = MutableStateFlow<Long?>(null)
+    val pendingUpcomingFocusEpochDay: StateFlow<Long?> = _pendingUpcomingFocusEpochDay.asStateFlow()
+
+    fun jumpToWorkloadDay(dayIndex: Int, epochDay: Long) {
+        if (dayIndex == 0) {
+            selectSmartView(SmartViewType.TODAY)
+        } else {
+            _pendingUpcomingFocusEpochDay.value = epochDay
+            selectSmartView(SmartViewType.UPCOMING)
+        }
+    }
+
+    fun consumePendingUpcomingFocusEpochDay() {
+        _pendingUpcomingFocusEpochDay.value = null
+    }
+
     fun selectSmartView(viewType: SmartViewType) {
         _expandedTaskId.value = null
         _isTimelineFullScreen.value = false
@@ -1080,13 +1096,51 @@ class ThingsbookViewModel @Inject constructor(
         }
     }
 
+    private fun localizedMoveFeedback(
+        count: Int,
+        newState: ScheduleState,
+        newWhenDate: Long?
+    ): String {
+        val zone = ZoneId.systemDefault()
+        val destLabel = when (newState) {
+            ScheduleState.INBOX -> getLocalizedString(R.string.view_inbox)
+            ScheduleState.TODAY -> getLocalizedString(R.string.view_today)
+            ScheduleState.THIS_EVENING -> getLocalizedString(R.string.view_this_evening)
+            ScheduleState.ANYTIME -> getLocalizedString(R.string.view_anytime)
+            ScheduleState.SOMEDAY -> getLocalizedString(R.string.view_someday)
+            ScheduleState.UPCOMING -> {
+                if (newWhenDate != null) {
+                    val targetLocalDate = java.time.Instant.ofEpochMilli(newWhenDate).atZone(zone).toLocalDate()
+                    val tomorrowDate = LocalDate.now(zone).plusDays(1)
+                    if (targetLocalDate == tomorrowDate) {
+                        getLocalizedString(R.string.date_tomorrow)
+                    } else {
+                        val locale = com.pv.thingsbook.ui.theme.resolveEffectiveAppLocale(_appLanguageTag.value)
+                        java.time.format.DateTimeFormatter.ofPattern("d MMM", locale).format(targetLocalDate)
+                    }
+                } else {
+                    getLocalizedString(R.string.view_upcoming)
+                }
+            }
+        }
+        val baseMsg = getLocalizedString(R.string.v30_drop_moved_feedback, count.coerceAtLeast(1))
+        return if (destLabel.isNotBlank()) "$baseMsg · $destLabel" else baseMsg
+    }
+
     fun updateTaskSchedule(task: TaskItem, newState: ScheduleState, newWhenDate: Long?) {
         safeVmScope.launch {
+            val beforeSnapshots = repository.captureTaskDropSnapshots(listOf(task.id))
+            val changed = beforeSnapshots.any { it.scheduleState != newState || it.whenDate != newWhenDate }
             repository.updateTaskSchedule(
                 taskId = task.id,
                 newState = newState,
                 newWhenDate = newWhenDate
             )
+            if (changed) {
+                registerUndoAction(localizedMoveFeedback(beforeSnapshots.size, newState, newWhenDate)) {
+                    repository.restoreTaskDropSnapshots(beforeSnapshots)
+                }
+            }
         }
     }
 
@@ -1097,6 +1151,12 @@ class ThingsbookViewModel @Inject constructor(
         newDeadline: Long? = null
     ) {
         safeVmScope.launch {
+            val beforeSnapshots = repository.captureTaskDropSnapshots(listOf(task.id))
+            val changed = beforeSnapshots.any { snap ->
+                snap.scheduleState != newState ||
+                    snap.whenDate != newWhenDate ||
+                    (newDeadline != null && snap.deadline != newDeadline)
+            }
             if (newDeadline != null) {
                 repository.updateTaskScheduleAndDeadline(
                     taskId = task.id,
@@ -1110,6 +1170,11 @@ class ThingsbookViewModel @Inject constructor(
                     newState = newState,
                     newWhenDate = newWhenDate
                 )
+            }
+            if (changed) {
+                registerUndoAction(localizedMoveFeedback(beforeSnapshots.size, newState, newWhenDate)) {
+                    repository.restoreTaskDropSnapshots(beforeSnapshots)
+                }
             }
         }
     }
@@ -1573,6 +1638,23 @@ class ThingsbookViewModel @Inject constructor(
                 currentNav != ActiveNavigationTarget.AreaDetail(destination.areaId)
             is WorkspaceDragDropDestination.ProjectTarget ->
                 currentNav != ActiveNavigationTarget.ProjectDetail(destination.projectId)
+            is WorkspaceDragDropDestination.WorkloadDayTarget -> {
+                if (destination.dayIndex == 0) {
+                    currentNav == ActiveNavigationTarget.SmartView(SmartViewType.INBOX) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.UPCOMING) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+                } else {
+                    currentNav == ActiveNavigationTarget.SmartView(SmartViewType.INBOX) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TODAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.ANYTIME) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.SOMEDAY) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.TRASH) ||
+                        currentNav == ActiveNavigationTarget.SmartView(SmartViewType.LOGBOOK)
+                }
+            }
             else -> false
         }
 
@@ -1633,6 +1715,13 @@ class ThingsbookViewModel @Inject constructor(
                     } else {
                         destination.projectTitle
                     }
+                }
+                is WorkspaceDragDropDestination.WorkloadDayTarget -> {
+                    val targetState = if (destination.dayIndex == 0) ScheduleState.TODAY else ScheduleState.UPCOMING
+                    orderedIds.forEach { id ->
+                        repository.updateTaskSchedule(id, targetState, destination.dayStartMillis)
+                    }
+                    destination.displayTitle
                 }
                 else -> ""
             }
@@ -2594,12 +2683,23 @@ class ThingsbookViewModel @Inject constructor(
         newReminderTime: Long?
     ) {
         safeVmScope.launch {
+            val beforeSnapshots = repository.captureTaskDropSnapshots(listOf(task.id))
+            val changed = beforeSnapshots.any { snap ->
+                snap.scheduleState != newState ||
+                    snap.whenDate != newWhenDate ||
+                    snap.reminderTime != newReminderTime
+            }
             repository.updateTaskScheduleWithReminder(
                 taskId = task.id,
                 newState = newState,
                 newWhenDate = newWhenDate,
                 newReminderTime = newReminderTime
             )
+            if (changed) {
+                registerUndoAction(localizedMoveFeedback(beforeSnapshots.size, newState, newWhenDate)) {
+                    repository.restoreTaskDropSnapshots(beforeSnapshots)
+                }
+            }
         }
     }
 
@@ -3531,10 +3631,19 @@ class ThingsbookViewModel @Inject constructor(
         val ids = _selectedTaskIds.value.toList()
         if (ids.isEmpty()) return
         safeVmScope.launch {
+            val beforeSnapshots = repository.captureTaskDropSnapshots(ids)
+            val changed = beforeSnapshots.any { snap ->
+                snap.scheduleState != newState || snap.whenDate != newWhenDate
+            }
             ids.forEach { id ->
                 repository.updateTaskSchedule(id, newState, newWhenDate)
             }
             clearTaskSelection()
+            if (changed) {
+                registerUndoAction(localizedMoveFeedback(beforeSnapshots.size, newState, newWhenDate)) {
+                    repository.restoreTaskDropSnapshots(beforeSnapshots)
+                }
+            }
         }
     }
 

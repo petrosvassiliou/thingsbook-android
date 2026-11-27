@@ -82,6 +82,7 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material.icons.outlined.WbTwilight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -186,6 +187,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -1060,6 +1062,50 @@ fun ExpandableTaskCard(
                                     .padding(top = 3.dp)
                             )
 
+                            if (isTodayView &&
+                                task.status == TaskStatus.OPEN &&
+                                task.scheduleState == ScheduleState.TODAY &&
+                                task.whenDate != null &&
+                                !isCompletingAnim
+                            ) {
+                                val zone = ZoneId.systemDefault()
+                                val todayDate = LocalDate.now(zone)
+                                val whenLocalDate = Instant.ofEpochMilli(task.whenDate).atZone(zone).toLocalDate()
+                                if (whenLocalDate.isBefore(todayDate)) {
+                                    val rolloverDays = ChronoUnit.DAYS.between(whenLocalDate, todayDate).coerceAtLeast(1L)
+                                    val tomorrowStartMillis = todayDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    ThingsHoverTooltip(
+                                        text = "${stringResource(R.string.date_tomorrow)} (↺ ${rolloverDays}d)",
+                                        enableTouchLongPress = false
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .padding(top = 2.dp)
+                                                .clip(RoundedCornerShape(50))
+                                                .clickable {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    onScheduleChange(ScheduleState.UPCOMING, tomorrowStartMillis)
+                                                },
+                                            shape = RoundedCornerShape(50),
+                                            color = colors.somedayWarmAmber.copy(alpha = 0.14f),
+                                            border = BorderStroke(0.75.dp, colors.somedayWarmAmber.copy(alpha = 0.38f))
+                                        ) {
+                                            Text(
+                                                text = "↺ ${rolloverDays}d",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = colors.somedayWarmAmber,
+                                                maxLines = 1,
+                                                modifier = Modifier.padding(horizontal = 6.5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
                             if (task.isPinned && !isCompletingAnim) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 val pinnedTooltip = if (onTogglePin != null) {
@@ -1295,11 +1341,13 @@ fun ExpandableTaskCard(
         if (showContextMenu && !suppressCustomContextMenu) {
             TaskContextDropdownMenu(
                 task = task,
+                isTodayView = isTodayView,
                 isSelected = isSelected,
                 offset = contextMenuOffsetDp,
                 onOpenDetails = if (!isCompletingAnim) ({ onExpandToggle() }) else null,
                 onToggleSelection = onToggleSelection,
                 onStatusChange = handleStatusRequest,
+                onScheduleChange = onScheduleChange,
                 onOpenWhenDialog = { showWhenDialog = true },
                 onOpenDeadlineDialog = { showDeadlineDialog = true },
                 onOpenMoveDialog = { showMoveDialog = true },
@@ -2461,9 +2509,9 @@ private fun ExpandedTaskCardBody(
 
             if (task.status == TaskStatus.OPEN && (onToggleInProgress != null || task.isInProgress)) {
                 Spacer(modifier = Modifier.width(8.dp))
-                val wipLabel = stringResource(
+                val wipLabel = "${stringResource(
                     if (task.isInProgress) R.string.v33_clear_in_progress else R.string.v33_mark_in_progress
-                )
+                )} (Ctrl+Shift+I)"
                 val wipClickModifier = if (onToggleInProgress != null) {
                     Modifier.clickable {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -3977,11 +4025,13 @@ private fun ExpandedTaskCardBody(
 @Composable
 private fun TaskContextDropdownMenu(
     task: TaskItem,
+    isTodayView: Boolean = false,
     isSelected: Boolean,
     offset: DpOffset,
     onOpenDetails: (() -> Unit)? = null,
     onToggleSelection: (() -> Unit)?,
     onStatusChange: (TaskStatus) -> Unit,
+    onScheduleChange: (ScheduleState, Long?) -> Unit = { _, _ -> },
     onOpenWhenDialog: () -> Unit,
     onOpenDeadlineDialog: () -> Unit,
     onOpenMoveDialog: () -> Unit,
@@ -4109,6 +4159,37 @@ private fun TaskContextDropdownMenu(
                 onOpenWhenDialog()
             }
         )
+
+        // 3b. 1-Click Tomorrow (Today / This Evening quick defer)
+        if (task.status == TaskStatus.OPEN &&
+            (isTodayView || task.scheduleState == ScheduleState.TODAY || task.scheduleState == ScheduleState.THIS_EVENING)
+        ) {
+            val zone = ZoneId.systemDefault()
+            val tomorrowStartMillis = LocalDate.now(zone).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            DropdownMenuItem(
+                modifier = compactItemModifier,
+                contentPadding = compactItemPadding,
+                text = {
+                    Text(
+                        text = stringResource(R.string.date_tomorrow),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.primaryText
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.WbTwilight,
+                        contentDescription = null,
+                        tint = colors.somedayWarmAmber,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismiss()
+                    onScheduleChange(ScheduleState.UPCOMING, tomorrowStartMillis)
+                }
+            )
+        }
 
         // 4. Deadline
         DropdownMenuItem(

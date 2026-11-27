@@ -446,7 +446,7 @@ public struct WorkspaceInspectorPanelView: View {
                         systemImage: "circle.lefthalf.filled",
                         isActive: task.isInProgress,
                         activeTint: ThingsMacPalette.somedayAmber,
-                        helpText: store.tr(task.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")
+                        helpText: "\(store.tr(task.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")) (⇧⌘I)"
                     ) {
                         draftSaveTask?.cancel()
                         commitDraftEditsIfNeeded()

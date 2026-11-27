@@ -1063,3 +1063,175 @@ test('v3.3.3 Task Detail Modal and Task Inspector streamline When row to 3 contr
     'WorkspaceInspectorPanel Overview retains SevenDayWorkloadCard'
   );
 });
+
+test('v3.3.5 task_scheduled Undo snapshot & performUndo restore single and batch schedule moves without altering batchMoveOrReorderTasksInContainer', async () => {
+  const { opener } = createInMemoryIdb();
+  const db = new ThingsLocalDb(opener);
+  await db.initialize('en');
+
+  const undoEvents: Array<{ kind: string; entityTitle: string; count: number }> = [];
+  const unsub = db.subscribeUndo((ev) => undoEvents.push(ev));
+
+  const todaySod = startOfDayEpoch();
+  const tomorrowSod = addDaysLocal(todaySod, 1);
+  const nextWeekSod = addDaysLocal(todaySod, 7);
+
+  // Creating a new task does NOT emit task_scheduled
+  const t1 = await db.upsertTask({
+    title: 'Prepare sprint demo',
+    scheduleState: 'TODAY',
+    whenDate: todaySod
+  });
+  const t2 = await db.upsertTask({
+    title: 'Review design tokens',
+    scheduleState: 'ANYTIME',
+    whenDate: null
+  });
+  assert.equal(undoEvents.length, 0);
+
+  // 1. Single-task schedule move emits task_scheduled and performUndo() restores original scheduleState & whenDate
+  await db.upsertTask({
+    id: t1.id,
+    scheduleState: 'UPCOMING',
+    whenDate: tomorrowSod
+  });
+  assert.equal(undoEvents.length, 1);
+  assert.equal(undoEvents[0].kind, 'task_scheduled');
+  assert.equal(undoEvents[0].count, 1);
+  assert.equal(undoEvents[0].entityTitle, 'Prepare sprint demo');
+
+  const movedSingle = db.getSnapshot().tasks.find((x) => x.id === t1.id)!;
+  assert.equal(movedSingle.scheduleState, 'UPCOMING');
+  assert.equal(movedSingle.whenDate, tomorrowSod);
+
+  const undoneSingle = await db.performUndo();
+  assert.equal(undoneSingle, true);
+  const restoredSingle = db.getSnapshot().tasks.find((x) => x.id === t1.id)!;
+  assert.equal(restoredSingle.scheduleState, 'TODAY');
+  assert.equal(restoredSingle.whenDate, todaySod);
+
+  // No-op schedule update (same scheduleState & whenDate) does NOT emit task_scheduled
+  await db.upsertTask({
+    id: t1.id,
+    scheduleState: 'TODAY',
+    whenDate: todaySod
+  });
+  assert.equal(undoEvents.length, 1);
+
+  // 2. Batch schedule move emits task_scheduled for changed tasks and performUndo() restores both
+  await db.batchUpdateTasks([t1.id, t2.id], {
+    scheduleState: 'UPCOMING',
+    whenDate: nextWeekSod
+  });
+  assert.equal(undoEvents.length, 2);
+  assert.equal(undoEvents[1].kind, 'task_scheduled');
+  assert.equal(undoEvents[1].count, 2);
+
+  assert.equal(db.getSnapshot().tasks.find((x) => x.id === t1.id)?.whenDate, nextWeekSod);
+  assert.equal(db.getSnapshot().tasks.find((x) => x.id === t2.id)?.whenDate, nextWeekSod);
+
+  const undoneBatch = await db.performUndo();
+  assert.equal(undoneBatch, true);
+  assert.equal(db.getSnapshot().tasks.find((x) => x.id === t1.id)?.scheduleState, 'TODAY');
+  assert.equal(db.getSnapshot().tasks.find((x) => x.id === t1.id)?.whenDate, todaySod);
+  assert.equal(db.getSnapshot().tasks.find((x) => x.id === t2.id)?.scheduleState, 'ANYTIME');
+  assert.equal(db.getSnapshot().tasks.find((x) => x.id === t2.id)?.whenDate, null);
+
+  // 3. batchMoveOrReorderTasksInContainer still emits tasks_updated
+  await db.batchMoveOrReorderTasksInContainer([t1.id], {
+    scheduleState: 'UPCOMING',
+    whenDate: tomorrowSod
+  });
+  assert.equal(undoEvents[undoEvents.length - 1].kind, 'tasks_updated');
+
+  unsub();
+});
+
+test('v3.3.5 THIS_EVENING rollover preserves original past whenDate < startOfToday', async () => {
+  const { opener, stores } = createInMemoryIdb();
+  const todaySod = startOfDayEpoch();
+  const twoDaysAgo = addDaysLocal(todaySod, -2);
+
+  // Seed raw tasks before db.initialize() runs rolloverDueTasksUnlocked
+  const eveningWithPastDate = makeTask({
+    id: 'eve-past',
+    title: 'Evening task from 2 days ago',
+    scheduleState: 'THIS_EVENING',
+    whenDate: twoDaysAgo,
+    updatedAt: twoDaysAgo
+  });
+  const eveningWithoutDate = makeTask({
+    id: 'eve-nodate',
+    title: 'Legacy evening task without date',
+    scheduleState: 'THIS_EVENING',
+    whenDate: null,
+    updatedAt: twoDaysAgo
+  });
+  stores.get('tasks')!.set(eveningWithPastDate.id, eveningWithPastDate);
+  stores.get('tasks')!.set(eveningWithoutDate.id, eveningWithoutDate);
+
+  const db = new ThingsLocalDb(opener);
+  await db.initialize('en');
+
+  const rolledWithPast = db.getSnapshot().tasks.find((t) => t.id === 'eve-past')!;
+  assert.equal(rolledWithPast.scheduleState, 'TODAY');
+  assert.equal(
+    rolledWithPast.whenDate,
+    twoDaysAgo,
+    'Rolling over THIS_EVENING must preserve existing past whenDate for rollover age indicator'
+  );
+
+  const rolledWithoutDate = db.getSnapshot().tasks.find((t) => t.id === 'eve-nodate')!;
+  assert.equal(rolledWithoutDate.scheduleState, 'TODAY');
+  assert.equal(rolledWithoutDate.whenDate, todaySod);
+});
+
+test('v3.3.5 interactive SevenDayWorkloadCard, Ctrl+Shift+I shortcut, and Today rollover + 1-click Tomorrow wiring', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const inspectorSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/WorkspaceInspectorPanel.tsx'),
+    'utf8'
+  );
+  const taskItemSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/TaskItem.tsx'),
+    'utf8'
+  );
+  const quickFindSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/components/InlineQuickFind.tsx'),
+    'utf8'
+  );
+  const appSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/App.tsx'),
+    'utf8'
+  );
+
+  // 1. Interactive SevenDayWorkloadCard click & drag-drop rescheduling in WorkspaceInspectorPanel + App
+  assert.ok(!appSrc.includes('SevenDayWorkloadCard'));
+  assert.ok(inspectorSrc.includes('onJumpToWorkloadDay'));
+  assert.ok(inspectorSrc.includes('onDropTasksOnWorkloadDay'));
+  assert.ok(inspectorSrc.includes('workload-day-col-'));
+  assert.ok(inspectorSrc.includes('extractDraggedTaskIds'));
+  assert.ok(inspectorSrc.includes('hasDraggedTaskMime'));
+  assert.ok(appSrc.includes('data-upcoming-epoch-day={targetEpochDay}'));
+  assert.ok(appSrc.includes('onJumpToWorkloadDay='));
+  assert.ok(appSrc.includes('onDropTasksOnWorkloadDay='));
+
+  // 2. Ctrl+Shift+I global shortcut + tag-shortcut Shift/Alt guard + shortcut surfacing
+  assert.match(appSrc, /e\.shiftKey && !e\.altKey && lower === 'i'/);
+  assert.match(
+    appSrc,
+    /!inInput && !e\.shiftKey && !e\.altKey && targetIds\.length > 0 && lower\.length === 1/
+  );
+  assert.match(quickFindSrc, /id:\s*'toggle-in-progress'[\s\S]*?shortcut:\s*'Ctrl\+Shift\+I'/);
+  assert.ok(taskItemSrc.includes('(Ctrl+Shift+I)'));
+  assert.ok(inspectorSrc.includes('(Ctrl+Shift+I)'));
+  assert.ok(appSrc.includes('(Ctrl+Shift+I)'));
+
+  // 3. Task scheduled undo toast handling in App.tsx
+  assert.ok(appSrc.includes("ev.kind === 'task_scheduled'"));
+
+  // 4. Subtle Today rollover badge & 1-click Tomorrow in context menu
+  assert.ok(taskItemSrc.includes('data-testid="task-row-rollover-badge"'));
+  assert.ok(taskItemSrc.includes('data-testid="task-ctx-defer-tomorrow-btn"'));
+});

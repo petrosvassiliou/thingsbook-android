@@ -805,9 +805,9 @@ class V2UpgradeAndFeaturesTest {
 
     @Test
     fun `v2_0_0 BuildConfig and all 5 localized strings_xml files verify final non_beta version, project deletion prompt and topbar_tooltip keys`() {
-        assertEquals(125, BuildConfig.VERSION_CODE)
-        assertEquals("3.3.4", BuildConfig.VERSION_NAME)
-        assertFalse("3.3.4 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(126, BuildConfig.VERSION_CODE)
+        assertEquals("3.3.5", BuildConfig.VERSION_NAME)
+        assertFalse("3.3.5 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
 
         val resRoot = sequenceOf(
             File("src/main/res"),
@@ -2864,6 +2864,7 @@ class V2UpgradeAndFeaturesTest {
         assertFalse(kanbanMenuChunk.contains("gemini_magic_breakdown"))
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Test
     fun `v3_2_1 google_services_json registers com_pv_thingsbook App ID + SHA1 and SyncRepository Web OAuth fallback handles INVALID_APP_ID`() {
         val gsFile = sequenceOf(

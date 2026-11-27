@@ -596,8 +596,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 125"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.4\""))
+        assertTrue(buildGradleKt.contains("versionCode = 126"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.5\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
@@ -1046,5 +1046,82 @@ class V33InProgressIndicatorTest {
             "WorkspaceInspectorPanel Overview retains SevenDayWorkloadStripCard",
             inspectorKt.contains("SevenDayWorkloadStripCard(")
         )
+    }
+
+    @Test
+    fun `v3_3_5 interactive workload strip, Ctrl+Shift+I shortcut, schedule undo, and Today rollover indicator are wired cleanly`() {
+        val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
+        val appSrcMain = File(appRoot, "src/main")
+
+        val dragDropKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ProjectDragAndDrop.kt").readText()
+        val workspaceViewsKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ProjectWorkspaceViews.kt").readText()
+        val inspectorKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/WorkspaceInspectorPanel.kt").readText()
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        val viewModelKt = File(appSrcMain, "java/com/pv/thingsbook/ui/viewmodel/ThingsbookViewModel.kt").readText()
+        val daosKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/dao/ThingsDaos.kt").readText()
+        val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
+
+        // 1. Interactive SevenDayWorkloadStripCard (click to jump + drop task on bar to reschedule)
+        assertFalse(
+            "SevenDayWorkloadStripCard must NEVER be rendered or imported in ThingsSmartViewScreen",
+            smartViewKt.contains("SevenDayWorkloadStripCard")
+        )
+        assertTrue(dragDropKt.contains("data class WorkloadDayTarget("))
+        val workloadTarget = com.pv.thingsbook.ui.components.WorkspaceDragDropDestination.WorkloadDayTarget(
+            dayIndex = 1,
+            dayStartMillis = 1_750_000_000_000L,
+            displayTitle = "Tomorrow"
+        )
+        assertEquals(1, workloadTarget.dayIndex)
+        assertEquals("Tomorrow", workloadTarget.displayTitle)
+        assertTrue(workspaceViewsKt.contains("onDayClick: ((index: Int, day: com.pv.thingsbook.domain.model.DayWorkloadSummary) -> Unit)? = null"))
+        assertTrue(workspaceViewsKt.contains("inspector_workload_day_"))
+        assertTrue(workspaceViewsKt.contains("WorkspaceDragDropDestination.WorkloadDayTarget("))
+        assertTrue(inspectorKt.contains("onJumpToWorkloadDay"))
+        assertTrue(viewModelKt.contains("fun jumpToWorkloadDay("))
+        assertTrue(viewModelKt.contains("fun consumePendingUpcomingFocusEpochDay()"))
+        assertTrue(viewModelKt.contains("is WorkspaceDragDropDestination.WorkloadDayTarget"))
+        assertTrue(smartViewKt.contains("viewModel.jumpToWorkloadDay("))
+        assertTrue(smartViewKt.contains("viewModel.consumePendingUpcomingFocusEpochDay()"))
+
+        // 2. Hardware Keyboard Shortcut Ctrl+Shift+I / Meta+Shift+I for In Progress across all 3 handlers + tooltips
+        assertTrue(smartViewKt.contains("android.view.KeyEvent.KEYCODE_I"))
+        val keyICount = Regex("""\.key\s*==\s*Key\.I\b""").findAll(smartViewKt).count()
+        assertTrue("Expected Key.I in both root Box and Task Modal preview key handlers (found $keyICount)", keyICount >= 2)
+        assertTrue(smartViewKt.contains("(Ctrl+Shift+I)"))
+        assertTrue(cardKt.contains("(Ctrl+Shift+I)"))
+        assertTrue(inspectorKt.contains("(Ctrl+Shift+I)"))
+
+        // 3. Undo (Ctrl+Z / Snackbar) for Schedule Changes in ThingsbookViewModel
+        val updateScheduleChunk = viewModelKt
+            .substringAfter("fun updateTaskSchedule(")
+            .substringBefore("fun openTaskFromWeeklyReview(")
+        assertTrue(updateScheduleChunk.contains("captureTaskDropSnapshots"))
+        assertTrue(updateScheduleChunk.contains("registerUndoAction("))
+        assertTrue(updateScheduleChunk.contains("restoreTaskDropSnapshots"))
+
+        val updateWithReminderChunk = viewModelKt
+            .substringAfter("fun updateTaskScheduleWithReminder(")
+            .substringBefore("fun setTagManagerOpen(")
+        assertTrue(updateWithReminderChunk.contains("captureTaskDropSnapshots"))
+        assertTrue(updateWithReminderChunk.contains("registerUndoAction("))
+        assertTrue(updateWithReminderChunk.contains("restoreTaskDropSnapshots"))
+
+        val batchScheduleChunk = viewModelKt
+            .substringAfter("fun batchScheduleSelectedTasks(")
+            .substringBefore("fun batchMoveSelectedTasks(")
+        assertTrue(batchScheduleChunk.contains("captureTaskDropSnapshots"))
+        assertTrue(batchScheduleChunk.contains("registerUndoAction("))
+        assertTrue(batchScheduleChunk.contains("restoreTaskDropSnapshots"))
+
+        // 4. Subtle Rollover Indicator & 1-Click Tomorrow in Today view + COALESCE in evening rollover DAO
+        assertTrue(daosKt.contains("SET scheduleState = 'TODAY', whenDate = COALESCE(whenDate, :startOfTodayMillis)"))
+        assertTrue(cardKt.contains("val rolloverDays = ChronoUnit.DAYS.between(whenLocalDate, todayDate).coerceAtLeast(1L)"))
+        assertTrue(cardKt.contains("↺ \${rolloverDays}d"))
+        val taskContextMenuChunk = cardKt
+            .substringAfter("private fun TaskContextDropdownMenu(")
+            .substringBefore("private fun TaskCardDialogsHost(")
+        assertTrue(taskContextMenuChunk.contains("R.string.date_tomorrow"))
+        assertTrue(taskContextMenuChunk.contains("onScheduleChange(ScheduleState.UPCOMING, tomorrowStartMillis)"))
     }
 }

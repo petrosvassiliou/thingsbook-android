@@ -1093,6 +1093,9 @@ private struct KanbanTaskCardView: View {
             Button(store.tr("view_today")) {
                 store.scheduleSelectedTasks(.today)
             }
+            Button(store.tr("date_tomorrow")) {
+                store.scheduleSelectedTasks(.upcoming)
+            }
             Button(store.tr("v25_batch_someday")) {
                 store.scheduleSelectedTasks(.someday)
             }
@@ -1153,6 +1156,11 @@ private struct KanbanTaskCardView: View {
                     store.scheduleTasks([latestTask.id], to: .thisEvening)
                 } label: {
                     Label(store.tr("view_this_evening"), systemImage: "moon.stars.fill")
+                }
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .upcoming)
+                } label: {
+                    Label(store.tr("date_tomorrow"), systemImage: "sun.horizon.fill")
                 }
                 Button {
                     store.scheduleTasks([latestTask.id], to: .someday)
@@ -2754,6 +2762,9 @@ public struct ProjectRoadmapWorkspaceView: View {
             Button(store.tr("view_today")) {
                 store.scheduleSelectedTasks(.today)
             }
+            Button(store.tr("date_tomorrow")) {
+                store.scheduleSelectedTasks(.upcoming)
+            }
             Button(store.tr("v25_batch_someday")) {
                 store.scheduleSelectedTasks(.someday)
             }
@@ -2832,6 +2843,11 @@ public struct ProjectRoadmapWorkspaceView: View {
                     store.updateTask(copy)
                 } label: {
                     Label(store.tr("view_this_evening"), systemImage: "moon.stars.fill")
+                }
+                Button {
+                    store.scheduleTasks([latest.id], to: .upcoming)
+                } label: {
+                    Label(store.tr("date_tomorrow"), systemImage: "sun.horizon.fill")
                 }
                 Button {
                     var copy = latest
@@ -3993,6 +4009,8 @@ public struct SevenDayWorkloadStripCard: View {
     public let forecast: [DayWorkloadSummary]
     public var compact: Bool = false
 
+    @State private var hoveredEpochDay: Int? = nil
+
     public init(store: ThingsbookStore, forecast: [DayWorkloadSummary], compact: Bool = false) {
         self.store = store
         self.forecast = forecast
@@ -4071,6 +4089,8 @@ public struct SevenDayWorkloadStripCard: View {
             return "\(weekdayStr): \(store.trf("v30_today_capacity_summary", plannedStr, freeStr))"
         }()
 
+        let isHovered = hoveredEpochDay == day.epochDay
+
         return VStack(spacing: 3) {
             Text(plannedLabel)
                 .font(.system(size: compact ? 9.0 : 9.5, weight: day.isOverloaded ? .bold : .medium, design: .rounded))
@@ -4080,7 +4100,7 @@ public struct SevenDayWorkloadStripCard: View {
 
             ZStack(alignment: .bottom) {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(ThingsMacPalette.subtleContainer)
+                    .fill(isHovered ? ThingsMacPalette.accentBlue.opacity(0.14) : ThingsMacPalette.subtleContainer)
                     .frame(height: maxBarHeight)
 
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -4091,11 +4111,34 @@ public struct SevenDayWorkloadStripCard: View {
 
             Text(weekdayStr)
                 .font(.system(size: compact ? 9.5 : 10, weight: isToday ? .heavy : .medium))
-                .foregroundStyle(isToday ? ThingsMacPalette.accentBlue : .secondary)
+                .foregroundStyle((isToday || isHovered) ? ThingsMacPalette.accentBlue : .secondary)
                 .lineLimit(1)
         }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 1.5)
         .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isHovered ? ThingsMacPalette.accentBlue.opacity(0.08) : Color.clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .onHover { hovering in
+            if hovering {
+                hoveredEpochDay = day.epochDay
+                NSCursor.pointingHand.set()
+            } else {
+                if hoveredEpochDay == day.epochDay {
+                    hoveredEpochDay = nil
+                }
+                NSCursor.arrow.set()
+            }
+        }
+        .onTapGesture {
+            store.jumpToWorkloadDay(epochDay: day.epochDay, isToday: isToday)
+        }
+        .thingsDropTarget(cornerRadius: 6) { payloads in
+            store.dropTasksOntoWorkloadDay(payloads, epochDay: day.epochDay, isToday: isToday)
+        }
         .thingsTooltip(tooltipText)
     }
 

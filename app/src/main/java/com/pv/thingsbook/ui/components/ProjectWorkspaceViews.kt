@@ -5940,11 +5940,16 @@ fun SevenDayWorkloadStripCard(
     forecast: List<com.pv.thingsbook.domain.model.DayWorkloadSummary>,
     locale: Locale,
     compact: Boolean = false,
+    dragController: ProjectDragDropController? = null,
+    onDayClick: ((index: Int, day: com.pv.thingsbook.domain.model.DayWorkloadSummary) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (forecast.isEmpty()) return
     val colors = ThingsTheme.colors
     val dowFmt = remember(locale) { DateTimeFormatter.ofPattern("EE", locale) }
+    val dayDisplayFmt = remember(locale) { DateTimeFormatter.ofPattern("EEE d MMM", locale) }
+    val todayLabel = stringResource(R.string.view_today)
+    val tomorrowLabel = stringResource(R.string.date_tomorrow)
     val overloadedDays = remember(forecast) { forecast.filter { it.isOverloaded } }
     val maxOverloadMins = remember(overloadedDays) { overloadedDays.maxOfOrNull { it.overloadedByMinutes } ?: 0 }
 
@@ -6026,9 +6031,53 @@ fun SevenDayWorkloadStripCard(
                     } else {
                         "0m"
                     }
+                    val label = when (idx) {
+                        0 -> todayLabel
+                        1 -> tomorrowLabel
+                        else -> date.format(dayDisplayFmt)
+                    }
+                    val dropZoneKey = "inspector_workload_day_${day.epochDay}"
+                    val isDropHovered = dragController?.session?.kind == ProjectDragKind.MOVE_TASK &&
+                        dragController.session?.hoveredZoneKey == dropZoneKey
 
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .then(
+                                if (isDropHovered) {
+                                    Modifier
+                                        .background(colors.thingsBlueSoft.copy(alpha = 0.55f))
+                                        .border(1.dp, colors.thingsBlue, RoundedCornerShape(6.dp))
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .then(
+                                if (onDayClick != null) {
+                                    Modifier.clickable { onDayClick(idx, day) }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .then(
+                                if (dragController != null) {
+                                    Modifier.workspaceDropTarget(
+                                        controller = dragController,
+                                        key = dropZoneKey,
+                                        destination = WorkspaceDragDropDestination.WorkloadDayTarget(
+                                            dayIndex = idx,
+                                            dayStartMillis = day.dayStartMillis,
+                                            displayTitle = label
+                                        ),
+                                        cornerRadius = 6.dp,
+                                        priority = 20
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {

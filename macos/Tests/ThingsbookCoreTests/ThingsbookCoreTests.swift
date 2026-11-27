@@ -409,12 +409,12 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.4")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.4")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 125)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.5")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.5")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 126)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.4", current: "3.3.3"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.4", current: "3.3.2"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.5", current: "3.3.4"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.5", current: "3.3.3"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -7216,5 +7216,175 @@ final class ThingsbookCoreTests: XCTestCase {
             inspectorSource.contains("SevenDayWorkloadStripCard("),
             "WorkspaceInspectorPanelView Overview retains SevenDayWorkloadStripCard"
         )
+    }
+
+    func testV335InteractiveWorkloadShortcutScheduleUndoRolloverAndZeroWarnings() throws {
+        // 1. performMidnightRollover preserves original whenDate on THIS_EVENING rollover via COALESCE(when_date, ?)
+        let db = try ThingsSQLiteDatabase(path: ":memory:")
+        let cal = Calendar.current
+        let now = Date()
+        let sodToday = DateEpochConverter.startOfDayMillis(for: now, calendar: cal)
+        let twoDaysAgo = try XCTUnwrap(cal.date(byAdding: .day, value: -2, to: now))
+        let twoDaysAgoSod = DateEpochConverter.startOfDayMillis(for: twoDaysAgo, calendar: cal)
+
+        let eveningWithPastWhen = try db.createTask(
+            title: "Evening Task Two Days Ago",
+            scheduleState: .thisEvening,
+            whenDate: twoDaysAgoSod
+        )
+        let eveningWithoutWhen = try db.createTask(
+            title: "Evening Task Null When",
+            scheduleState: .thisEvening,
+            whenDate: nil
+        )
+        // Simulate stale updated_at before sodToday for null-whenDate evening task
+        let nextDayRef = try XCTUnwrap(cal.date(byAdding: .day, value: 1, to: now))
+        let nextDaySod = DateEpochConverter.startOfDayMillis(for: nextDayRef, calendar: cal)
+        _ = eveningWithoutWhen // updated_at is < nextDaySod
+
+        let promoted = try db.performMidnightRollover(referenceDate: nextDayRef, calendar: cal)
+        XCTAssertGreaterThanOrEqual(promoted, 2)
+
+        let snap = try db.loadWorkspaceSnapshot()
+        let rolledWithWhen = try XCTUnwrap(snap.todayDaytimeTasks.first(where: { $0.id == eveningWithPastWhen.id }))
+        XCTAssertEqual(rolledWithWhen.scheduleState, .today)
+        XCTAssertEqual(
+            rolledWithWhen.whenDate,
+            twoDaysAgoSod,
+            "COALESCE(when_date, ?) must preserve original when_date < sodToday for rolled-over evening tasks"
+        )
+
+        let rolledNullWhen = try XCTUnwrap(snap.todayDaytimeTasks.first(where: { $0.id == eveningWithoutWhen.id }))
+        XCTAssertEqual(rolledNullWhen.scheduleState, .today)
+        XCTAssertEqual(
+            rolledNullWhen.whenDate,
+            nextDaySod,
+            "COALESCE(when_date, ?) must populate sodToday when original when_date was nil"
+        )
+        _ = sodToday
+
+        // Verify schedule move snapshot restoration via restoreTaskPlacements
+        var scheduledOriginal = try db.createTask(
+            title: "Timeblocked Today Task",
+            scheduleState: .today,
+            whenDate: sodToday
+        )
+        scheduledOriginal.scheduledStartMinutes = 570
+        scheduledOriginal.reminderTime = sodToday + 9 * 3_600_000
+        try db.updateTask(scheduledOriginal)
+
+        let preMoveSnapshot = TaskPlacementSnapshot(
+            task: scheduledOriginal,
+            tagIds: scheduledOriginal.tagIds,
+            wasDeleted: false
+        )
+        var movedToSomeday = scheduledOriginal
+        movedToSomeday.scheduleState = .someday
+        movedToSomeday.whenDate = nil
+        movedToSomeday.reminderTime = nil
+        movedToSomeday.scheduledStartMinutes = nil
+        try db.updateTask(movedToSomeday)
+
+        try db.restoreTaskPlacements([preMoveSnapshot])
+        let restoredSnap = try db.loadWorkspaceSnapshot()
+        let restoredTask = try XCTUnwrap(restoredSnap.todayDaytimeTasks.first(where: { $0.id == scheduledOriginal.id }))
+        XCTAssertEqual(restoredTask.scheduleState, .today)
+        XCTAssertEqual(restoredTask.whenDate, sodToday)
+        XCTAssertEqual(restoredTask.scheduledStartMinutes, 570)
+        XCTAssertEqual(restoredTask.reminderTime, sodToday + 9 * 3_600_000)
+
+        // 2. Source contracts for v3.3.5 interactive workload, ⇧⌘I shortcut, schedule undo, rollover pill, and 0-warning fixes
+        let macosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let menusSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Menus/ThingsCommandMenus.swift"),
+            encoding: .utf8
+        )
+        let settingsSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/SettingsWindowView.swift"),
+            encoding: .utf8
+        )
+        let quickFindSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/QuickFindOverlay.swift"),
+            encoding: .utf8
+        )
+        let storeSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/State/ThingsbookStore.swift"),
+            encoding: .utf8
+        )
+        let boardSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/ProjectBoardAndRoadmapView.swift"),
+            encoding: .utf8
+        )
+        let smartCanvasSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/SmartViewCanvas.swift"),
+            encoding: .utf8
+        )
+        let rowSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/TaskRowCardView.swift"),
+            encoding: .utf8
+        )
+        let modalSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/TaskBentoModalView.swift"),
+            encoding: .utf8
+        )
+        let inspectorSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/WorkspaceInspectorPanelView.swift"),
+            encoding: .utf8
+        )
+        let mainWorkspaceSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/MainWorkspaceView.swift"),
+            encoding: .utf8
+        )
+
+        // Shortcut ⇧⌘I on In Progress & ⌥⇧⌘I on Restore Backup
+        let restoreRange = try XCTUnwrap(menusSource.range(of: "backup_restore_button"))
+        let undoGroupRange = try XCTUnwrap(menusSource.range(of: "CommandGroup(replacing: .undoRedo)"))
+        let restoreSlice = String(menusSource[restoreRange.lowerBound..<undoGroupRange.lowerBound])
+        XCTAssertTrue(restoreSlice.contains(".keyboardShortcut(\"i\", modifiers: [.command, .option, .shift])"))
+
+        let inProgressMenuRange = try XCTUnwrap(menusSource.range(of: "toggleInProgressForSelectedOrExpandedTasks()"))
+        let duplicateMenuRange = try XCTUnwrap(menusSource.range(of: "action_duplicate_todo"))
+        let inProgressMenuSlice = String(menusSource[inProgressMenuRange.lowerBound..<duplicateMenuRange.lowerBound])
+        XCTAssertTrue(inProgressMenuSlice.contains(".keyboardShortcut(\"i\", modifiers: [.command, .shift])"))
+
+        XCTAssertTrue(settingsSource.contains("shortcutRow(title: store.tr(\"v33_mark_in_progress\"), keys: \"⇧⌘I\")"))
+        XCTAssertTrue(quickFindSource.contains("shortcut: \"⇧⌘I\""))
+        XCTAssertTrue(modalSource.contains("(⇧⌘I)"))
+        XCTAssertTrue(inspectorSource.contains("(⇧⌘I)"))
+        XCTAssertTrue(mainWorkspaceSource.contains("(⇧⌘I)"))
+
+        // Interactive SevenDayWorkloadStripCard + ScrollViewReader jump + schedule undo
+        let workloadCardStart = try XCTUnwrap(boardSource.range(of: "public struct SevenDayWorkloadStripCard: View")?.lowerBound)
+        let areaPortfolioStart = try XCTUnwrap(boardSource.range(of: "public struct AreaPortfolioRoadmapWorkspaceView: View")?.lowerBound)
+        let workloadCardSlice = String(boardSource[workloadCardStart..<areaPortfolioStart])
+        XCTAssertTrue(workloadCardSlice.contains("jumpToWorkloadDay("))
+        XCTAssertTrue(workloadCardSlice.contains("dropTasksOntoWorkloadDay("))
+        XCTAssertTrue(workloadCardSlice.contains(".thingsDropTarget(cornerRadius: 6)"))
+
+        XCTAssertTrue(storeSource.contains("pendingUpcomingScrollEpochDay"))
+        XCTAssertTrue(storeSource.contains("public func jumpToWorkloadDay(epochDay: Int, isToday: Bool)"))
+        XCTAssertTrue(storeSource.contains("public func dropTasksOntoWorkloadDay(_ payloads: [String], epochDay: Int, isToday: Bool) -> Bool"))
+        XCTAssertTrue(storeSource.contains("recordScheduleUndo: Bool = true"))
+        XCTAssertTrue(storeSource.contains("MainActor.assumeIsolated"))
+
+        XCTAssertTrue(smartCanvasSource.contains("ScrollViewReader { scrollProxy in"))
+        XCTAssertTrue(smartCanvasSource.contains("upcoming-day-\\(epochDay)"))
+        XCTAssertFalse(
+            smartCanvasSource.contains("SevenDayWorkloadStripCard"),
+            "SmartViewCanvas.swift must never render or reference SevenDayWorkloadStripCard"
+        )
+
+        // Subtle rollover pill & 1-click Tomorrow in context menus
+        XCTAssertTrue(rowSource.contains("rolloverDays"))
+        XCTAssertTrue(rowSource.contains("arrow.counterclockwise"))
+        XCTAssertTrue(rowSource.contains("↺ \\(rolloverDays)d"))
+        XCTAssertTrue(rowSource.contains("store.scheduleTasks([task.id], to: .upcoming)"))
+        XCTAssertTrue(rowSource.contains("Label(store.tr(\"date_tomorrow\"), systemImage: \"sun.horizon.fill\")"))
+        XCTAssertTrue(rowSource.contains("store.scheduleSelectedTasks(.upcoming)"))
+        XCTAssertTrue(boardSource.contains("Label(store.tr(\"date_tomorrow\"), systemImage: \"sun.horizon.fill\")"))
     }
 }

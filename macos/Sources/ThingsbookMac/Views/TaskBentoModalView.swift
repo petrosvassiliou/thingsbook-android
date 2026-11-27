@@ -280,7 +280,7 @@ public struct TaskBentoModalView: View {
                         isHoveringInProgress = hovering
                     }
                 }
-                .thingsTooltip(store.tr(current.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"))
+                .thingsTooltip("\(store.tr(current.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")) (⇧⌘I)")
             }
 
             // Milestone Diamond Button

@@ -494,7 +494,7 @@ interface TaskDao {
     @Query(
         """
         UPDATE tasks
-        SET scheduleState = 'TODAY', whenDate = :startOfTodayMillis
+        SET scheduleState = 'TODAY', whenDate = COALESCE(whenDate, :startOfTodayMillis)
         WHERE isDeleted = 0
           AND status = 'OPEN'
           AND scheduleState = 'THIS_EVENING'

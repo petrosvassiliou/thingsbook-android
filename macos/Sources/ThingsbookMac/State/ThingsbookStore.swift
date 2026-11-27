@@ -139,6 +139,7 @@ public final class ThingsbookStore: ObservableObject {
     @Published public var collapsedHeadingIds: Set<String> = []
     @Published public var magicPlusActiveDrop: MacMagicPlusResolvedDrop? = nil
     @Published public var newlyCreatedHeadingId: String? = nil
+    @Published public var pendingUpcomingScrollEpochDay: Int? = nil
     public var registeredMagicPlusSlots: [MacMagicPlusSlotGeometry] = []
     public var flushOpenTaskModalDrafts: (() -> Void)? = nil
     public var flushOpenTaskModalToken: UUID? = nil
@@ -281,16 +282,17 @@ public final class ThingsbookStore: ObservableObject {
         setupCloudSyncLifecycleObservers()
         setupBackgroundUpdateObserver()
 
-        Task {
-            await cloudSync.setObserver { [weak self] snap in
+        Task { [weak self] in
+            guard let self else { return }
+            await self.cloudSync.setObserver { [weak self] snap in
                 Task { @MainActor [weak self] in
                     self?.syncSnapshot = snap
                 }
             }
-            await cloudSync.restoreSessionIfAvailable(localOnlyMode: prefs.localOnlyDbMode)
-            await refreshCalendarEvents()
+            await self.cloudSync.restoreSessionIfAvailable(localOnlyMode: prefs.localOnlyDbMode)
+            await self.refreshCalendarEvents()
             if prefs.autoUpdateCheckEnabled {
-                await checkForAppUpdatesSilently()
+                await self.checkForAppUpdatesSilently()
             }
         }
     }
@@ -1469,6 +1471,90 @@ public final class ThingsbookStore: ObservableObject {
         return true
     }
 
+    public func jumpToWorkloadDay(epochDay: Int, isToday: Bool) {
+        if isToday {
+            selectedDestination = .smartView(.today)
+        } else {
+            pendingUpcomingScrollEpochDay = epochDay
+            selectedDestination = .smartView(.upcoming)
+        }
+    }
+
+    @discardableResult
+    public func dropTasksOntoWorkloadDay(_ payloads: [String], epochDay: Int, isToday: Bool) -> Bool {
+        flushModalDraftsIfNeeded()
+        let decodedIds = Self.decodeDragPayloads(payloads)
+        guard !decodedIds.isEmpty else { return false }
+
+        let targetDate = DateEpochConverter.date(fromEpochDay: epochDay)
+        let sodMs = DateEpochConverter.startOfDayMillis(for: targetDate)
+        let targetSchedule: ScheduleState = isToday ? .today : .upcoming
+        let cal = Calendar.current
+        var snapshots: [TaskPlacementSnapshot] = []
+
+        for id in decodedIds {
+            guard var existing = allOpenTasks.first(where: { $0.id == id && $0.status == .open && !$0.isDeleted }) else {
+                continue
+            }
+            guard existing.scheduleState != targetSchedule || existing.whenDate != sodMs else {
+                continue
+            }
+            snapshots.append(
+                TaskPlacementSnapshot(
+                    task: existing,
+                    tagIds: existing.tagIds,
+                    wasDeleted: existing.isDeleted
+                )
+            )
+            if existing.whenDate != sodMs && !isToday {
+                existing.scheduledStartMinutes = nil
+            }
+            if let rem = existing.reminderTime {
+                let comps = cal.dateComponents([.hour, .minute], from: DateEpochConverter.date(fromMillis: rem))
+                if let updatedRem = cal.date(
+                    bySettingHour: comps.hour ?? 9,
+                    minute: comps.minute ?? 0,
+                    second: 0,
+                    of: targetDate
+                ) {
+                    existing.reminderTime = Int64(updatedRem.timeIntervalSince1970 * 1000.0)
+                }
+            }
+            existing.scheduleState = targetSchedule
+            existing.whenDate = sodMs
+            try? database.updateTask(existing, tagIds: existing.tagIds)
+        }
+
+        guard !snapshots.isEmpty else { return false }
+        reloadSnapshot()
+
+        let visibleAfter = Set(currentVisibleTaskIdsInOrder())
+        let remainingSelected = selectedTaskIds.intersection(visibleAfter)
+        if remainingSelected != selectedTaskIds {
+            selectedTaskIds = remainingSelected
+            if !remainingSelected.contains(lastSelectedTaskId ?? "") {
+                lastSelectedTaskId = remainingSelected.first
+            }
+        }
+        if let exp = expandedTaskId, !visibleAfter.contains(exp) {
+            expandedTaskId = nil
+        }
+
+        NotificationReminderService.shared.syncAllTaskReminders(
+            openTasks: allOpenTasks,
+            lang: preferences.language
+        )
+        if preferences.calendarEventsEnabled {
+            Task { await refreshCalendarEvents() }
+        }
+
+        presentUndo(
+            message: trf("v30_drop_moved_feedback", snapshots.count),
+            action: .tasksMoved(snapshots: snapshots)
+        )
+        return true
+    }
+
     @discardableResult
     public func dropTasksIntoProjectSection(
         _ payloads: [String],
@@ -1943,12 +2029,41 @@ public final class ThingsbookStore: ObservableObject {
         showToast(tr("action_copy_todo"))
     }
 
-    public func updateTask(_ task: TaskItem, tagIds: [String]? = nil) {
-        try? database.updateTask(task, tagIds: tagIds)
+    public func updateTask(
+        _ task: TaskItem,
+        tagIds: [String]? = nil,
+        recordScheduleUndo: Bool = true
+    ) {
+        var scheduleSnapshot: TaskPlacementSnapshot? = nil
+        if recordScheduleUndo,
+           let existing = allOpenTasks.first(where: { $0.id == task.id }),
+           existing.status == .open,
+           !existing.isDeleted,
+           (task.scheduleState != existing.scheduleState || task.whenDate != existing.whenDate) {
+            scheduleSnapshot = TaskPlacementSnapshot(
+                task: existing,
+                tagIds: existing.tagIds,
+                wasDeleted: existing.isDeleted
+            )
+        }
+        var normalized = task
+        switch normalized.scheduleState {
+        case .someday, .anytime, .inbox:
+            normalized.scheduledStartMinutes = nil
+        case .today, .thisEvening, .upcoming:
+            break
+        }
+        try? database.updateTask(normalized, tagIds: tagIds)
         reloadSnapshot()
-        NotificationReminderService.shared.syncTaskReminder(task, lang: preferences.language)
+        NotificationReminderService.shared.syncTaskReminder(normalized, lang: preferences.language)
         if preferences.calendarEventsEnabled {
             Task { await refreshCalendarEvents() }
+        }
+        if let scheduleSnapshot {
+            presentUndo(
+                message: trf("v30_drop_moved_feedback", 1),
+                action: .tasksMoved(snapshots: [scheduleSnapshot])
+            )
         }
     }
 
@@ -2228,8 +2343,10 @@ public final class ThingsbookStore: ObservableObject {
         guard !ids.isEmpty else { return }
         let cal = Calendar.current
         let now = Date()
+        var snapshots: [TaskPlacementSnapshot] = []
         for id in ids {
-            if var t = (allOpenTasks + logbookTasks).first(where: { $0.id == id }) {
+            if let existing = (allOpenTasks + logbookTasks).first(where: { $0.id == id }) {
+                var t = existing
                 let hasExistingReminder = t.reminderTime != nil
                 let remComps: DateComponents? = t.reminderTime.map {
                     cal.dateComponents([.hour, .minute], from: DateEpochConverter.date(fromMillis: $0))
@@ -2247,11 +2364,32 @@ public final class ThingsbookStore: ObservableObject {
                 switch preset {
                 case .someday, .anytime, .inbox:
                     t.reminderTime = nil
+                    t.scheduledStartMinutes = nil
                 case .today, .thisEvening, .upcoming:
                     t.reminderTime = resolved.reminderEpochMillis
+                    if preset == .upcoming && t.whenDate != existing.whenDate {
+                        t.scheduledStartMinutes = nil
+                    }
                 }
-                updateTask(t)
+                if existing.status == .open,
+                   !existing.isDeleted,
+                   (t.scheduleState != existing.scheduleState || t.whenDate != existing.whenDate) {
+                    snapshots.append(
+                        TaskPlacementSnapshot(
+                            task: existing,
+                            tagIds: existing.tagIds,
+                            wasDeleted: existing.isDeleted
+                        )
+                    )
+                }
+                updateTask(t, recordScheduleUndo: false)
             }
+        }
+        if !snapshots.isEmpty {
+            presentUndo(
+                message: trf("v30_drop_moved_feedback", snapshots.count),
+                action: .tasksMoved(snapshots: snapshots)
+            )
         }
     }
 
@@ -3270,15 +3408,17 @@ public final class ThingsbookStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self, !self.preferences.localOnlyDbMode else { return }
-            self.syncDebounceTask?.cancel()
-            let sync = self.cloudSync
-            let sem = DispatchSemaphore(value: 0)
-            Task.detached(priority: .userInitiated) {
-                await sync.pushDirtyOnlyIfSignedIn(localOnlyMode: false)
-                sem.signal()
+            MainActor.assumeIsolated {
+                guard let self, !self.preferences.localOnlyDbMode else { return }
+                self.syncDebounceTask?.cancel()
+                let sync = self.cloudSync
+                let sem = DispatchSemaphore(value: 0)
+                Task.detached(priority: .userInitiated) {
+                    await sync.pushDirtyOnlyIfSignedIn(localOnlyMode: false)
+                    sem.signal()
+                }
+                _ = sem.wait(timeout: .now() + .milliseconds(1200))
             }
-            _ = sem.wait(timeout: .now() + .milliseconds(1200))
         }
     }
 

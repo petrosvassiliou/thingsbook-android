@@ -915,7 +915,7 @@ public struct MainWorkspaceView: View {
                 .foregroundStyle(allSelectedInProgress ? ThingsMacPalette.somedayAmber : .white.opacity(0.92))
                 .fixedSize(horizontal: true, vertical: false)
                 .buttonStyle(.plain)
-                .thingsTooltip(store.tr(allSelectedInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"))
+                .thingsTooltip("\(store.tr(allSelectedInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")) (⇧⌘I)")
             }
 
             Button {

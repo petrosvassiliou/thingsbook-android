@@ -461,6 +461,42 @@ public struct TaskRowCardView: View {
                     }
                 }
 
+                if store.selectedDestination == .smartView(.today),
+                   task.status == .open,
+                   task.scheduleState == .today,
+                   let w = task.whenDate {
+                    let todayEpochDay = DateEpochConverter.epochDay(for: Date())
+                    let whenEpochDay = DateEpochConverter.epochDay(forMillis: w)
+                    if whenEpochDay < todayEpochDay {
+                        let rolloverDays = max(1, todayEpochDay - whenEpochDay)
+                        Button {
+                            if isInlineQuickEditing {
+                                commitInlineQuickEdit()
+                            }
+                            store.scheduleTasks([task.id], to: .upcoming)
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                Text("\(rolloverDays)d")
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundStyle(ThingsMacPalette.somedayAmber)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2.5)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(ThingsMacPalette.somedayAmber.opacity(0.13))
+                            )
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .thingsTooltip("\(store.tr("date_tomorrow")) (↺ \(rolloverDays)d)")
+                    }
+                }
+
                 if let dl = task.deadline {
                     deadlineChip(dl)
                 }
@@ -709,6 +745,9 @@ public struct TaskRowCardView: View {
             Button(store.tr("view_today")) {
                 store.scheduleSelectedTasks(.today)
             }
+            Button(store.tr("date_tomorrow")) {
+                store.scheduleSelectedTasks(.upcoming)
+            }
             Button(store.tr("v25_batch_someday")) {
                 store.scheduleSelectedTasks(.someday)
             }
@@ -766,6 +805,11 @@ public struct TaskRowCardView: View {
                     store.scheduleTasks([latestTask.id], to: .thisEvening)
                 } label: {
                     Label(store.tr("view_this_evening"), systemImage: "moon.stars.fill")
+                }
+                Button {
+                    store.scheduleTasks([latestTask.id], to: .upcoming)
+                } label: {
+                    Label(store.tr("date_tomorrow"), systemImage: "sun.horizon.fill")
                 }
                 Button {
                     store.scheduleTasks([latestTask.id], to: .someday)

@@ -102,7 +102,7 @@ class V3Beta5UxRefinementsTest {
         val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
 
         val headerChunk = smartViewKt.substringAfter("private fun ViewTitleHeader(").substringBefore("private fun ProjectHeadingSectionHeader(")
-        assertTrue(headerChunk.contains("val isCompactSmartViewHeader = maxWidth < 600.dp && navTarget is ActiveNavigationTarget.SmartView"))
+        assertTrue(headerChunk.contains("if (maxWidth < 600.dp && navTarget is ActiveNavigationTarget.SmartView)"))
         assertTrue(headerChunk.contains("softWrap = false"))
         assertTrue(headerChunk.contains("showProjectMoreMenu"))
         assertTrue(headerChunk.contains("Icons.Outlined.MoreHoriz"))
@@ -157,8 +157,8 @@ class V3Beta5UxRefinementsTest {
                 assertTrue("Blank $key in $folder/strings.xml", keys[key]!!.isNotBlank())
             }
         }
-        assertEquals(125, BuildConfig.VERSION_CODE)
-        assertEquals("3.3.4", BuildConfig.VERSION_NAME)
-        assertFalse("3.3.4 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
+        assertEquals(126, BuildConfig.VERSION_CODE)
+        assertEquals("3.3.5", BuildConfig.VERSION_NAME)
+        assertFalse("3.3.5 GA must not contain -beta", BuildConfig.VERSION_NAME.contains("-beta"))
     }
 }

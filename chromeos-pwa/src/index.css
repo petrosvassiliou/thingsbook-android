@@ -1360,9 +1360,22 @@ button {
   display: flex;
   align-items: baseline;
   gap: 9px;
-  padding: 4px 4px 7px;
+  padding: 4px 6px 7px;
   margin-bottom: 5px;
   border-bottom: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+
+.upcoming-day-header.drag-over {
+  background: var(--accent-soft, rgba(59, 130, 246, 0.12));
+  box-shadow: inset 0 0 0 1.5px var(--accent-blue, #2563eb);
+}
+
+.group-header.drag-over {
+  border-radius: 8px;
+  background: rgba(124, 58, 237, 0.11);
+  box-shadow: inset 0 0 0 1.5px var(--evening-moon, #7c3aed);
 }
 
 .upcoming-day-num {

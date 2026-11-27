@@ -1723,6 +1723,12 @@ class ThingsbookViewModel @Inject constructor(
                     }
                     destination.displayTitle
                 }
+                is WorkspaceDragDropDestination.ThisEveningTarget -> {
+                    orderedIds.forEach { id ->
+                        repository.updateTaskSchedule(id, ScheduleState.THIS_EVENING, todayMillis)
+                    }
+                    destination.displayTitle
+                }
                 else -> ""
             }
 

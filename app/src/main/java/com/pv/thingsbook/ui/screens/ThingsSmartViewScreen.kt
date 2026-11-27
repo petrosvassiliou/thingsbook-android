@@ -3985,6 +3985,7 @@ private fun ThingsMainTaskLazyList(
                     emptyList()
                 }
                 val dayWorkload = workloadByEpochDay[targetDate.toEpochDay()]
+                val dayStartMillisForDrop = targetDate.atStartOfDay(zone).toInstant().toEpochMilli()
                 val groupBaseIndex = cumulativeTaskOffset
                 cumulativeTaskOffset += dayTasks.size
                 item(key = "upcoming_day_header_${targetDate.toEpochDay()}") {
@@ -3994,7 +3995,9 @@ private fun ThingsMainTaskLazyList(
                         locale = activeLocale,
                         isFirstGroup = groupIdx == 0,
                         dayWorkload = dayWorkload,
-                        calendarEventsEnabled = calendarEventsEnabled
+                        calendarEventsEnabled = calendarEventsEnabled,
+                        dayStartMillis = dayStartMillisForDrop,
+                        dragController = projectDragController
                     )
                 }
                 if (dayEvents.isNotEmpty()) {
@@ -4264,10 +4267,21 @@ private fun ThingsMainTaskLazyList(
         }
         if (safeEveningTasks.isNotEmpty()) {
             item(key = "this_evening_header") {
+                val eveningDropLabel = stringResource(R.string.view_this_evening)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .workspaceDropTarget(
+                            controller = projectDragController,
+                            key = "today_this_evening_header",
+                            destination = com.pv.thingsbook.ui.components.WorkspaceDragDropDestination.ThisEveningTarget(
+                                displayTitle = eveningDropLabel
+                            ),
+                            cornerRadius = 10.dp,
+                            priority = 25
+                        )
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
                     HorizontalDivider(color = colors.hairlineDivider, thickness = 0.75.dp)
                     Spacer(modifier = Modifier.height(6.dp))
@@ -10665,7 +10679,9 @@ private fun UpcomingDayGroupHeader(
     locale: Locale,
     isFirstGroup: Boolean,
     dayWorkload: DayWorkloadSummary? = null,
-    calendarEventsEnabled: Boolean = false
+    calendarEventsEnabled: Boolean = false,
+    dayStartMillis: Long = 0L,
+    dragController: ProjectDragDropController? = null
 ) {
     val colors = ThingsTheme.colors
     val tomorrowLabel = stringResource(R.string.date_tomorrow)
@@ -10690,11 +10706,29 @@ private fun UpcomingDayGroupHeader(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                start = 20.dp,
-                end = 20.dp,
-                top = if (isFirstGroup) 6.dp else 18.dp,
-                bottom = 6.dp
+                start = 14.dp,
+                end = 14.dp,
+                top = if (isFirstGroup) 4.dp else 16.dp,
+                bottom = 4.dp
             )
+            .then(
+                if (dragController != null && dayStartMillis > 0L) {
+                    Modifier.workspaceDropTarget(
+                        controller = dragController,
+                        key = "upcoming_day_header_drop_${date.toEpochDay()}",
+                        destination = com.pv.thingsbook.ui.components.WorkspaceDragDropDestination.WorkloadDayTarget(
+                            dayIndex = if (date == todayDate) 0 else 1,
+                            dayStartMillis = dayStartMillis,
+                            displayTitle = "$dayMonthText · $weekdayText"
+                        ),
+                        cornerRadius = 10.dp,
+                        priority = 25
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

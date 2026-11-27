@@ -409,12 +409,12 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.5")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.5")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 126)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.6")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.6")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 127)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.5", current: "3.3.4"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.5", current: "3.3.3"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.6", current: "3.3.5"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.6", current: "3.3.4"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -7386,5 +7386,10 @@ final class ThingsbookCoreTests: XCTestCase {
         XCTAssertTrue(rowSource.contains("Label(store.tr(\"date_tomorrow\"), systemImage: \"sun.horizon.fill\")"))
         XCTAssertTrue(rowSource.contains("store.scheduleSelectedTasks(.upcoming)"))
         XCTAssertTrue(boardSource.contains("Label(store.tr(\"date_tomorrow\"), systemImage: \"sun.horizon.fill\")"))
+
+        // v3.3.6: Planned day headers & This Evening header act as active drop targets with Undo
+        XCTAssertTrue(storeSource.contains("public func dropTasksOntoThisEvening(_ payloads: [String]) -> Bool"))
+        XCTAssertTrue(smartCanvasSource.contains("store.dropTasksOntoThisEvening(payloads)"))
+        XCTAssertTrue(smartCanvasSource.contains("store.dropTasksOntoWorkloadDay(payloads, epochDay: epochDay, isToday: false)"))
     }
 }

@@ -1234,4 +1234,14 @@ test('v3.3.5 interactive SevenDayWorkloadCard, Ctrl+Shift+I shortcut, and Today 
   // 4. Subtle Today rollover badge & 1-click Tomorrow in context menu
   assert.ok(taskItemSrc.includes('data-testid="task-row-rollover-badge"'));
   assert.ok(taskItemSrc.includes('data-testid="task-ctx-defer-tomorrow-btn"'));
+
+  // 5. v3.3.6: Planned day headers & This Evening header highlight on drag-over and trigger Undoable batchUpdateTasks
+  const cssSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/index.css'),
+    'utf8'
+  );
+  assert.ok(appSrc.includes('data-testid="today-evening-header-drop"'));
+  assert.ok(appSrc.includes('upcoming-day-header-drop-'));
+  assert.ok(cssSrc.includes('.upcoming-day-header.drag-over'));
+  assert.ok(cssSrc.includes('.group-header.drag-over'));
 });

@@ -596,8 +596,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 126"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.5\""))
+        assertTrue(buildGradleKt.contains("versionCode = 127"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.6\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
@@ -1123,5 +1123,11 @@ class V33InProgressIndicatorTest {
             .substringBefore("private fun TaskCardDialogsHost(")
         assertTrue(taskContextMenuChunk.contains("R.string.date_tomorrow"))
         assertTrue(taskContextMenuChunk.contains("onScheduleChange(ScheduleState.UPCOMING, tomorrowStartMillis)"))
+
+        // 5. v3.3.6: Planned (Upcoming) day headers & Today This Evening header act as active drop targets with Undo
+        assertTrue(dragDropKt.contains("data class ThisEveningTarget("))
+        assertTrue(viewModelKt.contains("is WorkspaceDragDropDestination.ThisEveningTarget"))
+        assertTrue(smartViewKt.contains("key = \"today_this_evening_header\""))
+        assertTrue(smartViewKt.contains("key = \"upcoming_day_header_drop_\${date.toEpochDay()}\""))
     }
 }

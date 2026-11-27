@@ -1555,6 +1555,73 @@ public final class ThingsbookStore: ObservableObject {
         return true
     }
 
+    public func dropTasksOntoThisEvening(_ payloads: [String]) -> Bool {
+        flushModalDraftsIfNeeded()
+        let decodedIds = Self.decodeDragPayloads(payloads)
+        guard !decodedIds.isEmpty else { return false }
+
+        let todayDate = Date()
+        let sodToday = DateEpochConverter.startOfDayMillis(for: todayDate)
+        let cal = Calendar.current
+        var snapshots: [TaskPlacementSnapshot] = []
+
+        for id in decodedIds {
+            guard var existing = allOpenTasks.first(where: { $0.id == id && $0.status == .open && !$0.isDeleted }) else {
+                continue
+            }
+            guard existing.scheduleState != .thisEvening || existing.whenDate != sodToday else {
+                continue
+            }
+            snapshots.append(
+                TaskPlacementSnapshot(
+                    task: existing,
+                    tagIds: existing.tagIds,
+                    wasDeleted: existing.isDeleted
+                )
+            )
+            if let rem = existing.reminderTime {
+                let comps = cal.dateComponents([.hour, .minute], from: DateEpochConverter.date(fromMillis: rem))
+                if let updatedRem = cal.date(
+                    bySettingHour: comps.hour ?? 19,
+                    minute: comps.minute ?? 0,
+                    second: 0,
+                    of: todayDate
+                ) {
+                    existing.reminderTime = Int64(updatedRem.timeIntervalSince1970 * 1000.0)
+                }
+            }
+            existing.scheduleState = .thisEvening
+            existing.whenDate = sodToday
+            try? database.updateTask(existing, tagIds: existing.tagIds)
+        }
+
+        guard !snapshots.isEmpty else { return false }
+        reloadSnapshot()
+
+        let visibleAfter = Set(currentVisibleTaskIdsInOrder())
+        let remainingSelected = selectedTaskIds.intersection(visibleAfter)
+        if remainingSelected != selectedTaskIds {
+            selectedTaskIds = remainingSelected
+            if !remainingSelected.contains(lastSelectedTaskId ?? "") {
+                lastSelectedTaskId = remainingSelected.first
+            }
+        }
+        if let exp = expandedTaskId, !visibleAfter.contains(exp) {
+            expandedTaskId = nil
+        }
+
+        NotificationReminderService.shared.syncAllTaskReminders(
+            openTasks: allOpenTasks,
+            lang: preferences.language
+        )
+
+        presentUndo(
+            message: trf("v30_drop_moved_feedback", snapshots.count),
+            action: .tasksMoved(snapshots: snapshots)
+        )
+        return true
+    }
+
     @discardableResult
     public func dropTasksIntoProjectSection(
         _ payloads: [String],

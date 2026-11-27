@@ -503,7 +503,13 @@ public struct SmartViewCanvas: View {
                             .buttonStyle(.plain)
                             .thingsTooltip(store.tr("entity_new_todo"))
                         }
-                        .padding(.top, 14)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .thingsDropTarget(cornerRadius: 8) { payloads in
+                            store.dropTasksOntoThisEvening(payloads)
+                        }
+                        .padding(.top, 10)
 
                         Divider()
                             .opacity(0.65)
@@ -604,6 +610,7 @@ public struct SmartViewCanvas: View {
                             ?? dayMilestones.first?.heading.endDate
                         VStack(alignment: .leading, spacing: 8) {
                             upcomingDayHeader(
+                                epochDay: epochDay,
                                 sampleMillis: sampleMillis,
                                 dayWorkload: workloadByEpochDay[epochDay]
                             )
@@ -743,6 +750,7 @@ public struct SmartViewCanvas: View {
     }
 
     private func upcomingDayHeader(
+        epochDay: Int,
         sampleMillis: Int64?,
         dayWorkload: DayWorkloadSummary? = nil
     ) -> some View {
@@ -794,7 +802,13 @@ public struct SmartViewCanvas: View {
                     .lineLimit(1)
             }
         }
-        .padding(.bottom, 4)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .thingsDropTarget(cornerRadius: 8) { payloads in
+            guard epochDay < Int.max else { return false }
+            return store.dropTasksOntoWorkloadDay(payloads, epochDay: epochDay, isToday: false)
+        }
         .overlay(alignment: .bottom) {
             Divider().opacity(0.65)
         }

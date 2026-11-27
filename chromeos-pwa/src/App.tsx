@@ -448,6 +448,8 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const [dragOverHeaderKey, setDragOverHeaderKey] = useState<string | null>(null);
+
   // Theme application
   useEffect(() => {
     const applyTheme = () => {
@@ -4363,28 +4365,37 @@ export const App: React.FC = () => {
                       {eveFiltered.length > 0 && (
                         <div className="group-section" data-magic-evening="true">
                           <div
-                            className="group-header"
+                            className={`group-header ${
+                              dragOverHeaderKey === 'this-evening' ? 'drag-over' : ''
+                            }`}
+                            data-testid="today-evening-header-drop"
                             onDragOver={(e) => {
                               if (hasDraggedTaskMime(e.dataTransfer)) {
                                 e.preventDefault();
                                 e.dataTransfer.dropEffect = 'move';
+                                if (dragOverHeaderKey !== 'this-evening') {
+                                  setDragOverHeaderKey('this-evening');
+                                }
+                              }
+                            }}
+                            onDragLeave={() => {
+                              if (dragOverHeaderKey === 'this-evening') {
+                                setDragOverHeaderKey(null);
                               }
                             }}
                             onDrop={async (e) => {
                               e.preventDefault();
+                              setDragOverHeaderKey(null);
                               const ids = extractDraggedTaskIds(
                                 e.dataTransfer,
                                 selectedTaskIds,
                                 orderedVisibleTaskIds
                               );
                               if (ids.length === 0) return;
-                              await localDb.batchMoveOrReorderTasksInContainer(ids, {
+                              await localDb.batchUpdateTasks(ids, {
                                 scheduleState: 'THIS_EVENING',
                                 whenDate: startOfDayEpoch()
                               });
-                              if (ids.length > 1) {
-                                showToast(t.dropMovedFeedback(ids.length));
-                              }
                             }}
                           >
                             <div className="group-header-title evening">
@@ -4442,28 +4453,40 @@ export const App: React.FC = () => {
                             data-upcoming-epoch-day={targetEpochDay}
                           >
                             <div
-                              className="upcoming-day-header"
+                              className={`upcoming-day-header ${
+                                dragOverHeaderKey === `upcoming-${targetEpochDay}`
+                                  ? 'drag-over'
+                                  : ''
+                              }`}
+                              data-testid={`upcoming-day-header-drop-${targetEpochDay}`}
                               onDragOver={(e) => {
                                 if (hasDraggedTaskMime(e.dataTransfer)) {
                                   e.preventDefault();
                                   e.dataTransfer.dropEffect = 'move';
+                                  const key = `upcoming-${targetEpochDay}`;
+                                  if (dragOverHeaderKey !== key) {
+                                    setDragOverHeaderKey(key);
+                                  }
+                                }
+                              }}
+                              onDragLeave={() => {
+                                if (dragOverHeaderKey === `upcoming-${targetEpochDay}`) {
+                                  setDragOverHeaderKey(null);
                                 }
                               }}
                               onDrop={async (e) => {
                                 e.preventDefault();
+                                setDragOverHeaderKey(null);
                                 const ids = extractDraggedTaskIds(
                                   e.dataTransfer,
                                   selectedTaskIds,
                                   orderedVisibleTaskIds
                                 );
                                 if (ids.length === 0) return;
-                                await localDb.batchMoveOrReorderTasksInContainer(ids, {
+                                await localDb.batchUpdateTasks(ids, {
                                   scheduleState: 'UPCOMING',
                                   whenDate: dayEpoch
                                 });
-                                if (ids.length > 1) {
-                                  showToast(t.dropMovedFeedback(ids.length));
-                                }
                               }}
                             >
                               <span className="upcoming-day-num">{hdr.numPart}</span>

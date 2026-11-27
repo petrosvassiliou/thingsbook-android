@@ -2002,6 +2002,51 @@ button {
   filter: brightness(0.95);
 }
 
+.chip-btn.someday-active,
+.task-bento-prop-pills .chip-btn.someday-active,
+.inspector-quick-when-grid .chip-btn.someday-active {
+  background: rgba(214, 159, 58, 0.16);
+  border: 1px solid rgba(214, 159, 58, 0.36);
+  color: var(--someday-amber);
+  font-weight: 620;
+}
+
+.chip-btn.someday-active:hover,
+.task-bento-prop-pills .chip-btn.someday-active:hover,
+.inspector-quick-when-grid .chip-btn.someday-active:hover {
+  background: rgba(214, 159, 58, 0.22);
+  border-color: rgba(214, 159, 58, 0.52);
+  color: var(--someday-amber);
+}
+
+.chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent),
+.task-bento-prop-pills .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent),
+.inspector-flags-bar .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent),
+.inspector-quick-when-grid .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent),
+.inspector-prop-pills-wrap .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent),
+.inspector-org-row .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent),
+.inspector-tags-row .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent) {
+  background: transparent;
+  border: 1px solid transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+  opacity: 0.78;
+}
+
+.chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent):hover,
+.task-bento-prop-pills .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent):hover,
+.inspector-flags-bar .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent):hover,
+.inspector-quick-when-grid .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent):hover,
+.inspector-prop-pills-wrap .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent):hover,
+.inspector-org-row .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent):hover,
+.inspector-tags-row .chip-btn.ghost:not(.active):not(.evening-quick):not(.someday-active):not(.milestone-active):not(.in-progress-active):not(.urgent):hover {
+  opacity: 1;
+  background: var(--surface-hover, rgba(128, 128, 128, 0.09));
+  border-color: var(--border-subtle, transparent);
+  color: var(--text-primary);
+}
+
 .task-card-expanded > .md-notes-container {
   margin: 8px 0 6px 31px;
   width: calc(100% - 31px);
@@ -6627,8 +6672,9 @@ button.v2-stalled-pill:hover {
 }
 
 .inspector-quick-when-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -6636,10 +6682,9 @@ button.v2-stalled-pill:hover {
   justify-content: flex-start;
   border: 1px solid var(--border-subtle);
   background: var(--bg-subtle);
-  width: 100%;
 }
 
-.inspector-quick-when-grid .chip-btn:hover:not(.active):not(.evening-quick) {
+.inspector-quick-when-grid .chip-btn:hover:not(.active):not(.evening-quick):not(.someday-active):not(.ghost) {
   background: var(--bg-card-hover);
   border-color: rgba(56, 152, 236, 0.36);
 }

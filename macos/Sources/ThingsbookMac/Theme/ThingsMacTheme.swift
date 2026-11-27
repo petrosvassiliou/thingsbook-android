@@ -497,6 +497,7 @@ public struct ThingsActionChipButton: View {
     public let systemImage: String
     public var isActive: Bool = false
     public var activeTint: Color = ThingsMacPalette.accentBlue
+    public var quietWhenInactive: Bool = false
     public let helpText: String
     public let action: () -> Void
 
@@ -507,6 +508,7 @@ public struct ThingsActionChipButton: View {
         systemImage: String,
         isActive: Bool = false,
         activeTint: Color = ThingsMacPalette.accentBlue,
+        quietWhenInactive: Bool = false,
         helpText: String,
         action: @escaping () -> Void
     ) {
@@ -514,26 +516,35 @@ public struct ThingsActionChipButton: View {
         self.systemImage = systemImage
         self.isActive = isActive
         self.activeTint = activeTint
+        self.quietWhenInactive = quietWhenInactive
         self.helpText = helpText
         self.action = action
     }
 
     public var body: some View {
+        let inactiveForeground: Color = quietWhenInactive
+            ? (isHovering ? Color.primary : Color.secondary.opacity(0.82))
+            : (isHovering ? Color.primary : Color.primary.opacity(0.88))
+
         Button(action: action) {
             HStack(spacing: 5.5) {
                 if systemImage == "circle.lefthalf.filled" {
                     Image(systemName: systemImage)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(isActive ? activeTint : activeTint.opacity(0.88))
+                        .foregroundStyle(
+                            isActive
+                                ? activeTint
+                                : (quietWhenInactive ? inactiveForeground : activeTint.opacity(0.88))
+                        )
                 } else {
                     Image(systemName: systemImage)
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(
                             isActive
                                 ? activeTint
-                                : (systemImage == "diamond"
+                                : (!quietWhenInactive && systemImage == "diamond"
                                     ? activeTint.opacity(0.88)
-                                    : (isHovering ? Color.primary : Color.primary.opacity(0.88)))
+                                    : inactiveForeground)
                         )
                 }
                 Text(title)
@@ -541,39 +552,52 @@ public struct ThingsActionChipButton: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundStyle(
-                isActive
-                    ? activeTint
-                    : (isHovering ? Color.primary : Color.primary.opacity(0.88))
-            )
-            .padding(.horizontal, 10.5)
-            .padding(.vertical, 5.5)
-            .background(
-                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                    .fill(
-                        isActive
-                            ? activeTint.opacity(isHovering ? 0.17 : 0.11)
-                            : ThingsMacPalette.cardSurface
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .fill(
-                                !isActive && isHovering
-                                    ? ThingsMacPalette.accentBlue.opacity(0.075)
-                                    : Color.clear
-                            )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                    .strokeBorder(
-                        isActive
-                            ? activeTint.opacity(isHovering ? 0.50 : 0.32)
-                            : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.38) : Color.primary.opacity(0.11)),
-                        lineWidth: 0.85
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+            .foregroundStyle(isActive ? activeTint : inactiveForeground)
+            .padding(.horizontal, quietWhenInactive ? 10.0 : 10.5)
+            .padding(.vertical, quietWhenInactive ? 5.0 : 5.5)
+            .background {
+                if quietWhenInactive {
+                    Capsule(style: .continuous)
+                        .fill(
+                            isActive
+                                ? activeTint.opacity(isHovering ? 0.19 : 0.14)
+                                : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
+                        )
+                } else {
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(
+                            isActive
+                                ? activeTint.opacity(isHovering ? 0.19 : 0.14)
+                                : ThingsMacPalette.cardSurface
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                                .fill(
+                                    !isActive && isHovering
+                                        ? ThingsMacPalette.accentBlue.opacity(0.075)
+                                        : Color.clear
+                                )
+                        )
+                }
+            }
+            .overlay {
+                if quietWhenInactive {
+                    Capsule(style: .continuous)
+                        .strokeBorder(
+                            isActive ? activeTint.opacity(isHovering ? 0.48 : 0.36) : Color.clear,
+                            lineWidth: isActive ? 0.85 : 0
+                        )
+                } else {
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .strokeBorder(
+                            isActive
+                                ? activeTint.opacity(isHovering ? 0.50 : 0.36)
+                                : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.38) : Color.primary.opacity(0.11)),
+                            lineWidth: 0.85
+                        )
+                }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)

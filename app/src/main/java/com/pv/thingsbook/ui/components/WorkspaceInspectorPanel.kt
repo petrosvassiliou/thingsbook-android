@@ -596,10 +596,6 @@ private fun SelectedTaskInspectorContent(
     val todayStartMillis = remember(todayDate, zone) {
         todayDate.atStartOfDay(zone).toInstant().toEpochMilli()
     }
-    val tomorrowDate = remember(todayDate) { todayDate.plusDays(1) }
-    val tomorrowStartMillis = remember(tomorrowDate, zone) {
-        tomorrowDate.atStartOfDay(zone).toInstant().toEpochMilli()
-    }
 
     val resolvedProject = remember(selectedTask.projectId, projects) {
         selectedTask.projectId?.let { pId -> projects.firstOrNull { it.id == pId && !it.isDeleted } }
@@ -992,6 +988,7 @@ private fun SelectedTaskInspectorContent(
                 )
             }
 
+            val ghostFlagText = colors.secondaryText.copy(alpha = 0.78f)
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1011,10 +1008,10 @@ private fun SelectedTaskInspectorContent(
                                     onToggleInProgress(selectedTask.id)
                                 },
                             shape = RoundedCornerShape(8.dp),
-                            color = if (wipActive) colors.somedayWarmAmber.copy(alpha = 0.16f) else colors.tagPillBg.copy(alpha = 0.72f),
+                            color = if (wipActive) colors.somedayWarmAmber.copy(alpha = 0.16f) else Color.Transparent,
                             border = BorderStroke(
                                 0.75.dp,
-                                if (wipActive) colors.somedayWarmAmber.copy(alpha = 0.55f) else colors.hairlineDivider
+                                if (wipActive) colors.somedayWarmAmber.copy(alpha = 0.55f) else Color.Transparent
                             )
                         ) {
                             Row(
@@ -1024,15 +1021,17 @@ private fun SelectedTaskInspectorContent(
                             ) {
                                 ThingsInProgressIcon(
                                     active = wipActive,
-                                    tint = if (wipActive) colors.somedayWarmAmber else colors.somedayWarmAmber.copy(alpha = 0.88f),
+                                    tint = if (wipActive) colors.somedayWarmAmber else ghostFlagText,
                                     size = 14.dp
                                 )
                                 Text(
                                     text = stringResource(
                                         if (wipActive) R.string.v33_in_progress_badge else R.string.v33_mark_in_progress
                                     ),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = if (wipActive) colors.somedayWarmAmber else colors.secondaryText
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = if (wipActive) FontWeight.SemiBold else FontWeight.Medium
+                                    ),
+                                    color = if (wipActive) colors.somedayWarmAmber else ghostFlagText
                                 )
                             }
                         }
@@ -1051,10 +1050,10 @@ private fun SelectedTaskInspectorContent(
                                 onTogglePin(selectedTask.id)
                             },
                         shape = RoundedCornerShape(8.dp),
-                        color = if (selectedTask.isPinned) colors.thingsBlueSoft else colors.tagPillBg.copy(alpha = 0.72f),
+                        color = if (selectedTask.isPinned) colors.thingsBlueSoft else Color.Transparent,
                         border = BorderStroke(
                             0.75.dp,
-                            if (selectedTask.isPinned) colors.thingsBlue.copy(alpha = 0.45f) else colors.hairlineDivider
+                            if (selectedTask.isPinned) colors.thingsBlue.copy(alpha = 0.45f) else Color.Transparent
                         )
                     ) {
                         Row(
@@ -1065,13 +1064,15 @@ private fun SelectedTaskInspectorContent(
                             Icon(
                                 imageVector = Icons.Outlined.PushPin,
                                 contentDescription = pinTooltip,
-                                tint = if (selectedTask.isPinned) colors.thingsBlue else colors.secondaryText,
+                                tint = if (selectedTask.isPinned) colors.thingsBlue else ghostFlagText,
                                 modifier = Modifier.size(13.5.dp)
                             )
                             Text(
                                 text = stringResource(R.string.v25_batch_pin),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (selectedTask.isPinned) colors.thingsBlue else colors.secondaryText
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (selectedTask.isPinned) FontWeight.SemiBold else FontWeight.Medium
+                                ),
+                                color = if (selectedTask.isPinned) colors.thingsBlue else ghostFlagText
                             )
                         }
                     }
@@ -1089,10 +1090,10 @@ private fun SelectedTaskInspectorContent(
                                 onToggleMilestone(selectedTask.id, !selectedTask.isMilestone)
                             },
                         shape = RoundedCornerShape(8.dp),
-                        color = if (selectedTask.isMilestone) colors.milestoneVioletSoft else colors.tagPillBg.copy(alpha = 0.72f),
+                        color = if (selectedTask.isMilestone) colors.milestoneVioletSoft else Color.Transparent,
                         border = BorderStroke(
                             0.75.dp,
-                            if (selectedTask.isMilestone) colors.milestoneViolet.copy(alpha = 0.55f) else colors.hairlineDivider
+                            if (selectedTask.isMilestone) colors.milestoneViolet.copy(alpha = 0.55f) else Color.Transparent
                         )
                     ) {
                         Row(
@@ -1102,13 +1103,15 @@ private fun SelectedTaskInspectorContent(
                         ) {
                             ThingsMilestoneDiamondIcon(
                                 filled = selectedTask.isMilestone,
-                                tint = if (selectedTask.isMilestone) colors.milestoneViolet else colors.secondaryText,
+                                tint = if (selectedTask.isMilestone) colors.milestoneViolet else ghostFlagText,
                                 size = 12.5.dp
                             )
                             Text(
                                 text = stringResource(R.string.v30_milestone_label),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (selectedTask.isMilestone) colors.milestoneViolet else colors.secondaryText
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (selectedTask.isMilestone) FontWeight.SemiBold else FontWeight.Medium
+                                ),
+                                color = if (selectedTask.isMilestone) colors.milestoneViolet else ghostFlagText
                             )
                         }
                     }
@@ -1123,13 +1126,6 @@ private fun SelectedTaskInspectorContent(
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                 color = colors.secondaryText
             )
-
-            val isScheduledTomorrow = remember(selectedTask.scheduleState, selectedTask.whenDate, tomorrowDate, zone) {
-                selectedTask.scheduleState == ScheduleState.UPCOMING &&
-                    selectedTask.whenDate?.let { ms ->
-                        runCatching { Instant.ofEpochMilli(ms).atZone(zone).toLocalDate() }.getOrNull() == tomorrowDate
-                    } == true
-            }
 
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -1160,98 +1156,74 @@ private fun SelectedTaskInspectorContent(
                     }
                 )
 
-                InspectorWhenQuickPill(
-                    label = stringResource(R.string.date_tomorrow),
-                    icon = Icons.Outlined.CalendarMonth,
-                    isSelected = isScheduledTomorrow,
-                    activeTint = colors.upcomingCoralRed,
-                    activeBg = colors.thingsBlueSoft,
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onUpdateTaskSchedule(selectedTask, ScheduleState.UPCOMING, tomorrowStartMillis)
+                when {
+                    selectedTask.scheduleState == ScheduleState.UPCOMING && selectedTask.whenDate != null -> {
+                        ThingsWhenBadge(
+                            scheduleState = selectedTask.scheduleState,
+                            whenDateEpochMillis = selectedTask.whenDate,
+                            locale = locale,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showWhenDialog = true
+                            }
+                        )
                     }
-                )
-
-                InspectorWhenQuickPill(
-                    label = stringResource(R.string.view_anytime),
-                    icon = Icons.Outlined.Explore,
-                    isSelected = selectedTask.scheduleState == ScheduleState.ANYTIME && selectedTask.whenDate == null,
-                    activeTint = colors.anytimeTeal,
-                    activeBg = colors.thingsBlueSoft,
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onUpdateTaskSchedule(selectedTask, ScheduleState.ANYTIME, null)
+                    selectedTask.scheduleState == ScheduleState.SOMEDAY -> {
+                        ThingsWhenBadge(
+                            scheduleState = ScheduleState.SOMEDAY,
+                            whenDateEpochMillis = null,
+                            locale = locale,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showWhenDialog = true
+                            }
+                        )
                     }
-                )
-
-                InspectorWhenQuickPill(
-                    label = stringResource(R.string.view_someday),
-                    icon = Icons.Outlined.Cloud,
-                    isSelected = selectedTask.scheduleState == ScheduleState.SOMEDAY,
-                    activeTint = colors.somedayWarmAmber,
-                    activeBg = colors.somedayWarmAmber.copy(alpha = 0.16f),
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onUpdateTaskSchedule(selectedTask, ScheduleState.SOMEDAY, null)
+                    else -> {
+                        val pickDateLabel = stringResource(R.string.repeat_ends_pick_date)
+                        val ghostMuted = colors.secondaryText.copy(alpha = 0.78f)
+                        ThingsHoverTooltip(text = stringResource(R.string.context_when_date_reminder)) {
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        showWhenDialog = true
+                                    },
+                                shape = RoundedCornerShape(50),
+                                color = Color.Transparent,
+                                border = BorderStroke(width = 0.75.dp, color = Color.Transparent)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CalendarToday,
+                                        contentDescription = pickDateLabel,
+                                        tint = ghostMuted,
+                                        modifier = Modifier.size(13.5.dp)
+                                    )
+                                    Text(
+                                        text = pickDateLabel,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                        color = ghostMuted,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
                     }
-                )
+                }
             }
 
-            // Calendar / Custom Date, Reminder, Deadline, Timeblock, Repeat, Duration, Effort & Dependencies Pills
+            // Reminder, Deadline, Timeblock, Repeat, Duration, Effort & Dependencies Pills
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (selectedTask.scheduleState == ScheduleState.UPCOMING &&
-                    selectedTask.whenDate != null &&
-                    !isScheduledTomorrow
-                ) {
-                    ThingsWhenBadge(
-                        scheduleState = selectedTask.scheduleState,
-                        whenDateEpochMillis = selectedTask.whenDate,
-                        locale = locale,
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            showWhenDialog = true
-                        }
-                    )
-                } else {
-                    val pickDateLabel = stringResource(R.string.repeat_ends_pick_date)
-                    ThingsHoverTooltip(text = stringResource(R.string.context_when_date_reminder)) {
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .clickable {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    showWhenDialog = true
-                                },
-                            shape = RoundedCornerShape(50),
-                            color = colors.tagPillBg,
-                            border = BorderStroke(width = 0.75.dp, color = colors.hairlineDivider)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.5.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.CalendarToday,
-                                    contentDescription = pickDateLabel,
-                                    tint = colors.thingsBlue,
-                                    modifier = Modifier.size(13.5.dp)
-                                )
-                                Text(
-                                    text = pickDateLabel,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = colors.primaryText,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-
                 selectedTask.reminderTime?.let { rt ->
                     ThingsReminderBadge(
                         reminderEpochMillis = rt,
@@ -1274,6 +1246,7 @@ private fun SelectedTaskInspectorContent(
                 } else {
                     ThingsTagPill(
                         title = "🏁 ${stringResource(R.string.action_deadline)}",
+                        isGhost = true,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showDeadlineDialog = true
@@ -1298,6 +1271,7 @@ private fun SelectedTaskInspectorContent(
                 } else {
                     ThingsTagPill(
                         title = "⏱️ ${stringResource(R.string.v2_timeblock_title)}",
+                        isGhost = true,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showTimeblockDialog = true
@@ -1316,6 +1290,7 @@ private fun SelectedTaskInspectorContent(
                 } else {
                     ThingsTagPill(
                         title = "🔁 ${stringResource(R.string.action_repeat)}",
+                        isGhost = true,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showRepeatDialog = true
@@ -1333,9 +1308,10 @@ private fun SelectedTaskInspectorContent(
                     }
                     ThingsTagPill(
                         title = durLabel,
-                        containerColor = if (formattedDur != null) colors.thingsBlueSoft else colors.tagPillBg,
-                        contentColor = if (formattedDur != null) colors.thingsBlue else colors.secondaryText,
-                        borderColor = if (formattedDur != null) colors.thingsBlue.copy(alpha = 0.32f) else colors.hairlineDivider,
+                        isGhost = formattedDur == null,
+                        containerColor = if (formattedDur != null) colors.thingsBlueSoft else null,
+                        contentColor = if (formattedDur != null) colors.thingsBlue else null,
+                        borderColor = if (formattedDur != null) colors.thingsBlue.copy(alpha = 0.35f) else null,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showDurationMenu = true
@@ -1426,6 +1402,7 @@ private fun SelectedTaskInspectorContent(
                     ThingsHoverTooltip(text = resetActualText) {
                         ThingsTagPill(
                             title = "↺ $resetActualText",
+                            isGhost = true,
                             onClick = {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onResetActualMinutes(selectedTask.id)
@@ -1445,9 +1422,10 @@ private fun SelectedTaskInspectorContent(
                     }
                     ThingsTagPill(
                         title = effortLabel,
-                        containerColor = if (normalizedEffort != null) colors.thingsBlueSoft else colors.tagPillBg,
-                        contentColor = if (normalizedEffort != null) colors.thingsBlue else colors.secondaryText,
-                        borderColor = if (normalizedEffort != null) colors.thingsBlue.copy(alpha = 0.32f) else colors.hairlineDivider,
+                        isGhost = normalizedEffort == null,
+                        containerColor = if (normalizedEffort != null) colors.thingsBlueSoft else null,
+                        contentColor = if (normalizedEffort != null) colors.thingsBlue else null,
+                        borderColor = if (normalizedEffort != null) colors.thingsBlue.copy(alpha = 0.35f) else null,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showEffortMenu = true
@@ -1494,21 +1472,18 @@ private fun SelectedTaskInspectorContent(
                 val activeBlockerCount = remember(selectedTask.blockedByTaskIds, openTaskIds) {
                     selectedTask.blockedByTaskIds.count { it in openTaskIds }
                 }
-                val dependencyCount = if (activeBlockerCount > 0) {
-                    activeBlockerCount
+                val hasActiveBlockers = activelyBlocked || activeBlockerCount > 0
+                val dependencyLabel = if (activeBlockerCount > 0) {
+                    "⏳ ${stringResource(R.string.v30_blocked_by_count_badge, activeBlockerCount)}"
                 } else {
-                    selectedTask.blockedByTaskIds.size
-                }
-                val dependencyLabel = if (selectedTask.blockedByTaskIds.isEmpty()) {
                     "⏳ ${stringResource(R.string.v30_blocked_by_action)}"
-                } else {
-                    "⏳ ${stringResource(R.string.v30_blocked_by_count_badge, dependencyCount)}"
                 }
                 ThingsTagPill(
                     title = dependencyLabel,
-                    containerColor = if (activelyBlocked) colors.somedayWarmAmber.copy(alpha = 0.16f) else null,
-                    contentColor = if (activelyBlocked) colors.somedayWarmAmber else null,
-                    borderColor = if (activelyBlocked) colors.somedayWarmAmber.copy(alpha = 0.45f) else null,
+                    isGhost = !hasActiveBlockers,
+                    containerColor = if (hasActiveBlockers) colors.somedayWarmAmber.copy(alpha = 0.16f) else null,
+                    contentColor = if (hasActiveBlockers) colors.somedayWarmAmber else null,
+                    borderColor = if (hasActiveBlockers) colors.somedayWarmAmber.copy(alpha = 0.45f) else null,
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         showDependenciesDialog = true
@@ -1604,6 +1579,7 @@ private fun SelectedTaskInspectorContent(
             } else {
                 ThingsTagPill(
                     title = "📁 ${stringResource(R.string.move_dialog_title)}",
+                    isGhost = true,
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         showMoveDialog = true
@@ -1625,6 +1601,7 @@ private fun SelectedTaskInspectorContent(
                     ThingsTagPill(
                         title = tag.title,
                         tooltipText = "$categoriesLabel: ${tag.title}",
+                        borderColor = colors.hairlineDivider,
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showTagPickerDialog = true
@@ -1633,6 +1610,7 @@ private fun SelectedTaskInspectorContent(
                 }
                 ThingsTagPill(
                     title = "+ $categoriesLabel",
+                    isGhost = true,
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         showTagPickerDialog = true
@@ -2376,15 +2354,16 @@ internal fun InspectorWhenQuickPill(
     onClick: () -> Unit
 ) {
     val colors = ThingsTheme.colors
+    val ghostMuted = colors.secondaryText.copy(alpha = 0.78f)
     Surface(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(50),
-        color = if (isSelected) activeBg else colors.tagPillBg,
+        color = if (isSelected) activeBg else Color.Transparent,
         border = BorderStroke(
             width = 0.75.dp,
-            color = if (isSelected) activeTint.copy(alpha = 0.48f) else colors.hairlineDivider
+            color = if (isSelected) activeTint.copy(alpha = 0.48f) else Color.Transparent
         )
     ) {
         Row(
@@ -2395,7 +2374,7 @@ internal fun InspectorWhenQuickPill(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (isSelected) activeTint else colors.secondaryText,
+                tint = if (isSelected) activeTint else ghostMuted,
                 modifier = Modifier.size(13.dp)
             )
             Text(
@@ -2403,7 +2382,7 @@ internal fun InspectorWhenQuickPill(
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 ),
-                color = if (isSelected) activeTint else colors.primaryText,
+                color = if (isSelected) activeTint else ghostMuted,
                 maxLines = 1
             )
         }

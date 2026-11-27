@@ -808,17 +808,7 @@ public struct TaskBentoModalView: View {
 
     private var scheduleBentoCard: some View {
         let current = latestTask
-        let isTomorrow: Bool = {
-            guard current.scheduleState == .upcoming, let w = current.whenDate else { return false }
-            return Calendar.current.isDateInTomorrow(DateEpochConverter.date(fromMillis: w))
-        }()
-        let customDateLabel: String? = {
-            guard current.scheduleState == .upcoming, let w = current.whenDate, !isTomorrow else { return nil }
-            let df = DateFormatter()
-            df.locale = store.preferences.language.locale
-            df.setLocalizedDateFormatFromTemplate("EEEdMMM")
-            return df.string(from: DateEpochConverter.date(fromMillis: w))
-        }()
+        let datePickerSpec = whenDateButtonSpec(for: current)
         let dlInfo = current.deadline.map { deadlineSummaryInfo(for: $0) }
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -833,6 +823,7 @@ public struct TaskBentoModalView: View {
                     systemImage: "sun.max.fill",
                     isActive: current.scheduleState == .today,
                     activeTint: ThingsMacPalette.todayYellow,
+                    quietWhenInactive: true,
                     helpText: store.tr("view_today")
                 ) {
                     draftSaveTask?.cancel()
@@ -845,6 +836,7 @@ public struct TaskBentoModalView: View {
                     systemImage: "moon.stars.fill",
                     isActive: current.scheduleState == .thisEvening,
                     activeTint: ThingsMacPalette.eveningPurple,
+                    quietWhenInactive: true,
                     helpText: store.tr("view_this_evening")
                 ) {
                     draftSaveTask?.cancel()
@@ -853,46 +845,11 @@ public struct TaskBentoModalView: View {
                 }
 
                 ThingsActionChipButton(
-                    title: store.tr("date_tomorrow"),
-                    systemImage: "sunrise.fill",
-                    isActive: isTomorrow,
-                    activeTint: ThingsMacPalette.upcomingRed,
-                    helpText: store.tr("date_tomorrow")
-                ) {
-                    draftSaveTask?.cancel()
-                    commitDraftEditsIfNeeded()
-                    store.scheduleTasks([current.id], to: .upcoming)
-                }
-
-                ThingsActionChipButton(
-                    title: store.tr("view_anytime"),
-                    systemImage: "safari.fill",
-                    isActive: current.scheduleState == .anytime && current.whenDate == nil,
-                    activeTint: ThingsMacPalette.anytimeTeal,
-                    helpText: store.tr("view_anytime")
-                ) {
-                    draftSaveTask?.cancel()
-                    commitDraftEditsIfNeeded()
-                    store.scheduleTasks([current.id], to: .anytime)
-                }
-
-                ThingsActionChipButton(
-                    title: store.tr("view_someday"),
-                    systemImage: "cloud.fill",
-                    isActive: current.scheduleState == .someday,
-                    activeTint: ThingsMacPalette.somedayAmber,
-                    helpText: store.tr("view_someday")
-                ) {
-                    draftSaveTask?.cancel()
-                    commitDraftEditsIfNeeded()
-                    store.scheduleTasks([current.id], to: .someday)
-                }
-
-                ThingsActionChipButton(
-                    title: customDateLabel ?? store.tr("repeat_ends_pick_date"),
-                    systemImage: "calendar",
-                    isActive: customDateLabel != nil,
-                    activeTint: ThingsMacPalette.accentBlue,
+                    title: datePickerSpec.title,
+                    systemImage: datePickerSpec.icon,
+                    isActive: datePickerSpec.isActive,
+                    activeTint: datePickerSpec.tint,
+                    quietWhenInactive: true,
                     helpText: whenButtonTooltip(for: current)
                 ) {
                     draftSaveTask?.cancel()
@@ -921,6 +878,7 @@ public struct TaskBentoModalView: View {
                         title: shortTimeString(rem),
                         systemImage: "bell.fill",
                         isActive: true,
+                        quietWhenInactive: true,
                         helpText: store.trf("when_task_reminder_set", shortTimeString(rem))
                     ) {
                         commitDraftEditsIfNeeded()
@@ -940,6 +898,7 @@ public struct TaskBentoModalView: View {
                     systemImage: "clock.badge.checkmark",
                     isActive: current.scheduledStartMinutes != nil,
                     activeTint: ThingsMacPalette.anytimeTeal,
+                    quietWhenInactive: true,
                     helpText: timeblockButtonTooltip(for: current)
                 ) {
                     commitDraftEditsIfNeeded()
@@ -971,6 +930,7 @@ public struct TaskBentoModalView: View {
                     systemImage: "flag",
                     isActive: dlInfo != nil,
                     activeTint: (dlInfo?.isUrgent == true) ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue,
+                    quietWhenInactive: true,
                     helpText: store.tr("context_adjust_deadline")
                 ) {
                     commitDraftEditsIfNeeded()
@@ -990,6 +950,7 @@ public struct TaskBentoModalView: View {
                     title: current.recurrenceRule?.formatShortLabel(locale: store.preferences.language.locale) ?? store.tr("action_repeat"),
                     systemImage: "repeat",
                     isActive: current.recurrenceRule != nil,
+                    quietWhenInactive: true,
                     helpText: repeatButtonTooltip(for: current)
                 ) {
                     commitDraftEditsIfNeeded()
@@ -1006,32 +967,6 @@ public struct TaskBentoModalView: View {
                             copy.whenDate = DateEpochConverter.startOfDayMillis(for: Date())
                         }
                         store.updateTask(copy)
-                    }
-                }
-
-                ThingsActionChipButton(
-                    title: store.tr("v30_milestone_label"),
-                    systemImage: current.isMilestone ? "diamond.fill" : "diamond",
-                    isActive: current.isMilestone,
-                    activeTint: ThingsMacPalette.milestoneViolet,
-                    helpText: store.tr(current.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone")
-                ) {
-                    commitDraftEditsIfNeeded()
-                    let fresh = latestTask
-                    store.setTasksMilestone([fresh.id], isMilestone: !fresh.isMilestone)
-                }
-
-                if current.status == .open {
-                    ThingsActionChipButton(
-                        title: store.tr(current.isInProgress ? "v33_in_progress_badge" : "v33_mark_in_progress"),
-                        systemImage: "circle.lefthalf.filled",
-                        isActive: current.isInProgress,
-                        activeTint: ThingsMacPalette.somedayAmber,
-                        helpText: store.tr(current.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")
-                    ) {
-                        commitDraftEditsIfNeeded()
-                        let fresh = latestTask
-                        store.toggleTaskInProgress(fresh)
                     }
                 }
             }
@@ -1262,6 +1197,7 @@ public struct TaskBentoModalView: View {
                     title: "+ \(store.tr("action_tags"))",
                     systemImage: "square.grid.2x2",
                     isActive: false,
+                    quietWhenInactive: true,
                     helpText: tagsButtonTooltip(for: current)
                 ) {
                     commitDraftEditsIfNeeded()
@@ -1673,6 +1609,23 @@ public struct TaskBentoModalView: View {
         return nil
     }
 
+    private func whenDateButtonSpec(for target: TaskItem) -> (title: String, icon: String, isActive: Bool, tint: Color) {
+        if target.scheduleState == .upcoming, let w = target.whenDate {
+            let wDate = DateEpochConverter.date(fromMillis: w)
+            if Calendar.current.isDateInTomorrow(wDate) {
+                return (store.tr("date_tomorrow"), "calendar", true, ThingsMacPalette.accentBlue)
+            }
+            let df = DateFormatter()
+            df.locale = store.preferences.language.locale
+            df.setLocalizedDateFormatFromTemplate("EEEdMMM")
+            return (df.string(from: wDate), "calendar", true, ThingsMacPalette.accentBlue)
+        } else if target.scheduleState == .someday {
+            return (store.tr("view_someday"), "cloud.fill", true, ThingsMacPalette.somedayAmber)
+        } else {
+            return (store.tr("repeat_ends_pick_date"), "calendar", false, ThingsMacPalette.accentBlue)
+        }
+    }
+
     private func whenSummaryLabel(for target: TaskItem) -> String? {
         switch target.scheduleState {
         case .today:
@@ -1926,7 +1879,7 @@ private struct BentoMenuPill<MenuContent: View>: View {
             .foregroundStyle(
                 isActive
                     ? activeTint
-                    : (isHovering ? Color.primary : Color.primary.opacity(0.88))
+                    : (isHovering ? Color.primary : Color.secondary.opacity(0.82))
             )
         }
         .menuStyle(.borderlessButton)
@@ -1935,28 +1888,18 @@ private struct BentoMenuPill<MenuContent: View>: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+            Capsule(style: .continuous)
                 .fill(
                     isActive
-                        ? activeTint.opacity(isHovering ? 0.17 : 0.11)
-                        : ThingsMacPalette.cardSurface
+                        ? activeTint.opacity(isHovering ? 0.19 : 0.14)
+                        : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .fill(
-                            !isActive && isHovering
-                                ? ThingsMacPalette.accentBlue.opacity(0.075)
-                                : Color.clear
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .strokeBorder(
-                            isActive
-                                ? activeTint.opacity(isHovering ? 0.50 : 0.32)
-                                : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.38) : Color.primary.opacity(0.11)),
-                            lineWidth: 0.85
-                        )
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    isActive ? activeTint.opacity(isHovering ? 0.48 : 0.36) : Color.clear,
+                    lineWidth: isActive ? 0.85 : 0
                 )
         )
         .onHover { hovering in
@@ -1992,36 +1935,26 @@ private struct BentoWrappingChip: View {
             .foregroundStyle(
                 isActive
                     ? activeTint
-                    : (isHovering ? Color.primary : Color.primary.opacity(0.88))
+                    : (isHovering ? Color.primary : Color.secondary.opacity(0.82))
             )
-            .padding(.horizontal, 10.5)
-            .padding(.vertical, 5.5)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .fill(
                         isActive
-                            ? activeTint.opacity(isHovering ? 0.17 : 0.11)
-                            : ThingsMacPalette.cardSurface
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .fill(
-                                !isActive && isHovering
-                                    ? ThingsMacPalette.accentBlue.opacity(0.075)
-                                    : Color.clear
-                            )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                            .strokeBorder(
-                                isActive
-                                    ? activeTint.opacity(isHovering ? 0.50 : 0.32)
-                                    : (isHovering ? ThingsMacPalette.accentBlue.opacity(0.38) : Color.primary.opacity(0.11)),
-                                lineWidth: 0.85
-                            )
+                            ? activeTint.opacity(isHovering ? 0.19 : 0.14)
+                            : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
                     )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(
+                        isActive ? activeTint.opacity(isHovering ? 0.48 : 0.36) : Color.clear,
+                        lineWidth: isActive ? 0.85 : 0
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering in

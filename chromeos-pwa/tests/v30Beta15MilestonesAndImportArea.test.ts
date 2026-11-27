@@ -517,7 +517,7 @@ test('UI components wire Target Area Preselector, Milestone controls, Roadmap di
   assert.ok(!cssSrc.includes('container-type:'));
 
   assert.ok(taskItemSrc.includes('data-testid="task-milestone-btn"'));
-  assert.ok(taskItemSrc.includes('data-testid="task-milestone-chip"'));
+  assert.ok(!taskItemSrc.includes('data-testid="task-milestone-chip"'));
   assert.ok(taskItemSrc.includes('data-testid="task-row-milestone-pill"'));
   assert.ok(taskItemSrc.includes('data-testid="task-ctx-milestone-btn"'));
 

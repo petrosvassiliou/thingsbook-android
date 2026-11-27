@@ -596,8 +596,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 123"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.2\""))
+        assertTrue(buildGradleKt.contains("versionCode = 124"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.3\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
@@ -960,53 +960,80 @@ class V33InProgressIndicatorTest {
     }
 
     @Test
-    fun `ExpandedTaskCardBody and SelectedTaskInspectorContent both render all 5 direct 1-tap When presets and always-visible Pick date calendar trigger`() {
+    fun `ExpandedTaskCardBody and SelectedTaskInspectorContent render streamlined 3-control When bar without duplicate Milestone or preset clutter and use ghost styling for unset properties`() {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
 
+        val badgesKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ThingsBadges.kt").readText()
         val cardKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/ExpandableTaskCard.kt").readText()
         val inspectorKt = File(appSrcMain, "java/com/pv/thingsbook/ui/components/WorkspaceInspectorPanel.kt").readText()
 
         val expandedBodyChunk = cardKt
             .substringAfter("private fun ExpandedTaskCardBody(")
             .substringBefore("private fun TaskContextDropdownMenu(")
+        val expandedScheduleCardChunk = expandedBodyChunk
+            .substringAfter("// 1. Schedule: When + Today This Evening + Reminder + Timeblock + Deadline + Repeat")
+            .substringBefore("// 2. Focus & Dependencies: Duration, Effort & Waiting On")
         val selectedInspectorChunk = inspectorKt
             .substringAfter("private fun SelectedTaskInspectorContent(")
             .substringBefore("private fun InspectorEditableChecklistRow(")
+        val quickPillChunk = inspectorKt
+            .substringAfter("internal fun InspectorWhenQuickPill(")
+            .substringBefore("private fun WorkspaceOverviewInspectorContent(")
 
+        // 1. Streamlined 3-control When bar in BOTH ExpandedTaskCardBody and SelectedTaskInspectorContent
         val requiredSharedScheduleTokens = listOf(
             "ScheduleState.TODAY, todayStartMillis",
             "ScheduleState.THIS_EVENING, todayStartMillis",
-            "ScheduleState.UPCOMING, tomorrowStartMillis",
-            "ScheduleState.ANYTIME, null",
-            "ScheduleState.SOMEDAY, null",
-            "ScheduleState.ANYTIME &&",
-            ".whenDate == null",
-            "!isScheduledTomorrow",
+            "ScheduleState.UPCOMING",
+            "ScheduleState.SOMEDAY",
             "Icons.Outlined.WbSunny",
             "Icons.Outlined.Bedtime",
-            "Icons.Outlined.CalendarMonth",
-            "Icons.Outlined.Explore",
-            "Icons.Outlined.Cloud",
             "Icons.Outlined.CalendarToday",
             "R.string.repeat_ends_pick_date",
-            "ThingsWhenBadge("
+            "ThingsWhenBadge(",
+            "Color.Transparent"
         )
-
         for (token in requiredSharedScheduleTokens) {
             assertTrue("Missing '$token' in ExpandedTaskCardBody", expandedBodyChunk.contains(token))
             assertTrue("Missing '$token' in SelectedTaskInspectorContent", selectedInspectorChunk.contains(token))
         }
 
-        // ExpandedTaskCardBody must invoke onScheduleChange directly for 1-tap presets (without closing modal) and onOpenWhenDialog for Pick date…
+        // Inline Tomorrow / Anytime / Someday preset pill clutter removed from both cards (available in WhenNaturalDateDialog)
+        val removedInlineWhenClutter = listOf(
+            "R.string.date_tomorrow",
+            "R.string.view_anytime",
+            "R.string.view_someday",
+            "tomorrowStartMillis"
+        )
+        for (forbidden in removedInlineWhenClutter) {
+            assertFalse("Unexpected inline When clutter '$forbidden' in ExpandedTaskCardBody", expandedBodyChunk.contains(forbidden))
+            assertFalse("Unexpected inline When clutter '$forbidden' in SelectedTaskInspectorContent", selectedInspectorChunk.contains(forbidden))
+        }
+
+        // 2. ExpandedTaskCardBody invokes onScheduleChange directly for Today & This Evening, and does not duplicate Milestone in Schedule card
         assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.TODAY, todayStartMillis)"))
         assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.THIS_EVENING, todayStartMillis)"))
-        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.UPCOMING, tomorrowStartMillis)"))
-        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.ANYTIME, null)"))
-        assertTrue(expandedBodyChunk.contains("onScheduleChange(ScheduleState.SOMEDAY, null)"))
         assertFalse(
             "ExpandedTaskCardBody must not use legacy morphing Evening-and-close pill",
             expandedBodyChunk.contains("onQuickThisEveningAndClose")
         )
+        assertFalse(
+            "ExpandedTaskCardBody Schedule card must not duplicate Milestone pill (already in pinned header row)",
+            expandedScheduleCardChunk.contains("R.string.v30_milestone_label")
+        )
+        assertTrue(
+            "ExpandableTaskCard as a whole still references v30_milestone_label for collapsed/preview badges",
+            cardKt.contains("R.string.v30_milestone_label")
+        )
+
+        // 3. Quiet borderless ghost styling (isGhost / Color.Transparent + secondaryText 0.78f) wired across badges, modal, and inspector
+        assertTrue(badgesKt.contains("isGhost: Boolean = false"))
+        assertTrue(badgesKt.contains("colors.secondaryText.copy(alpha = 0.78f)"))
+        assertTrue(badgesKt.contains("targetDate == today.plusDays(1) -> stringResource(R.string.date_tomorrow)"))
+        assertTrue(quickPillChunk.contains("Color.Transparent"))
+        assertTrue(quickPillChunk.contains("colors.secondaryText.copy(alpha = 0.78f)"))
+        assertTrue(expandedBodyChunk.contains("isGhost = true"))
+        assertTrue(selectedInspectorChunk.contains("isGhost = true"))
     }
 }

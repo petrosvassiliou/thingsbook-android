@@ -5,7 +5,6 @@ import {
   ArrowUp,
   Bell,
   Calendar,
-  CalendarDays,
   Camera,
   Check,
   CheckCircle2,
@@ -13,7 +12,6 @@ import {
   Circle,
   Clock,
   Cloud,
-  Compass,
   Copy,
   Diamond,
   Edit3,
@@ -45,10 +43,8 @@ import {
   Zap
 } from 'lucide-react';
 import {
-  addDaysLocal,
   daysBetweenToday,
   formatRecurrenceShort,
-  localEpochDayFromMillis,
   type AreaRecord,
   type AttachmentRecord,
   type ChecklistItemRecord,
@@ -1063,14 +1059,6 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       0,
       0
     ).getTime();
-    const tomorrowStartMs = addDaysLocal(todayStartMs, 1);
-    const tomorrowEpochDay = localEpochDayFromMillis(tomorrowStartMs);
-    const taskWhenEpochDay =
-      task.whenDate != null ? localEpochDayFromMillis(task.whenDate) : null;
-    const isTomorrowSelected =
-      task.scheduleState === 'UPCOMING' && taskWhenEpochDay === tomorrowEpochDay;
-    const isCustomUpcomingSelected =
-      task.scheduleState === 'UPCOMING' && task.whenDate != null && !isTomorrowSelected;
 
     const dlMeta = task.deadline != null ? renderDeadlineMeta(task.deadline) : null;
     const currentDuration = task.durationMinutes ?? DEFAULT_TIMEBLOCK_DURATION_MINUTES;
@@ -1472,7 +1460,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   <button
                     type="button"
                     data-testid="task-when-today-chip"
-                    className={`chip-btn ${task.scheduleState === 'TODAY' ? 'active' : ''}`}
+                    className={`chip-btn ${task.scheduleState === 'TODAY' ? 'active' : 'ghost'}`}
                     title={t.viewToday}
                     onClick={() => {
                       flushDraftsIfNeeded();
@@ -1493,7 +1481,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     type="button"
                     data-testid="task-quick-this-evening-chip"
                     className={`chip-btn ${
-                      task.scheduleState === 'THIS_EVENING' ? 'evening-quick' : ''
+                      task.scheduleState === 'THIS_EVENING' ? 'evening-quick' : 'ghost'
                     }`}
                     title={t.viewThisEvening}
                     onClick={() => {
@@ -1513,83 +1501,31 @@ export const TaskItem: React.FC<TaskItemProps> = ({
 
                   <button
                     type="button"
-                    data-testid="task-when-tomorrow-chip"
-                    className={`chip-btn ${isTomorrowSelected ? 'active' : ''}`}
-                    title={t.dateTomorrow}
-                    onClick={() => {
-                      flushDraftsIfNeeded();
-                      void localDb.upsertTask({
-                        id: task.id,
-                        title: titleDraft,
-                        notes: notesDraft,
-                        scheduleState: 'UPCOMING',
-                        whenDate: tomorrowStartMs
-                      });
-                    }}
-                  >
-                    <CalendarDays size={12} />
-                    <span>{t.dateTomorrow}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    data-testid="task-when-anytime-chip"
-                    className={`chip-btn ${
-                      task.scheduleState === 'ANYTIME' && task.whenDate == null ? 'active' : ''
-                    }`}
-                    title={t.viewAnytime}
-                    onClick={() => {
-                      flushDraftsIfNeeded();
-                      void localDb.upsertTask({
-                        id: task.id,
-                        title: titleDraft,
-                        notes: notesDraft,
-                        scheduleState: 'ANYTIME',
-                        whenDate: null,
-                        scheduledStartMinutes: null
-                      });
-                    }}
-                  >
-                    <Compass size={12} />
-                    <span>{t.viewAnytime}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    data-testid="task-when-someday-chip"
-                    className={`chip-btn ${task.scheduleState === 'SOMEDAY' ? 'active' : ''}`}
-                    title={t.viewSomeday}
-                    onClick={() => {
-                      flushDraftsIfNeeded();
-                      void localDb.upsertTask({
-                        id: task.id,
-                        title: titleDraft,
-                        notes: notesDraft,
-                        scheduleState: 'SOMEDAY',
-                        whenDate: null,
-                        scheduledStartMinutes: null
-                      });
-                    }}
-                  >
-                    <Cloud size={12} />
-                    <span>{t.viewSomeday}</span>
-                  </button>
-
-                  <button
-                    type="button"
                     data-testid="task-when-chip"
-                    className={`chip-btn ${isCustomUpcomingSelected ? 'active' : ''}`}
+                    className={`chip-btn ${
+                      task.scheduleState === 'UPCOMING' && task.whenDate != null
+                        ? 'active'
+                        : task.scheduleState === 'SOMEDAY'
+                          ? 'someday-active'
+                          : 'ghost'
+                    }`}
                     title={t.ctxWhenReminder}
                     onClick={() => {
                       flushDraftsIfNeeded();
                       onOpenWhenModal(task.id);
                     }}
                   >
-                    <Calendar size={12.5} />
+                    {task.scheduleState === 'SOMEDAY' ? (
+                      <Cloud size={12.5} />
+                    ) : (
+                      <Calendar size={12.5} />
+                    )}
                     <span>
-                      {isCustomUpcomingSelected && task.whenDate != null
+                      {task.scheduleState === 'UPCOMING' && task.whenDate != null
                         ? formatShortDate(task.whenDate)
-                        : t.repeatEndsOn}
+                        : task.scheduleState === 'SOMEDAY'
+                          ? t.viewSomeday
+                          : t.repeatEndsOn}
                     </span>
                   </button>
 
@@ -1612,7 +1548,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     type="button"
                     data-testid="task-timeblock-chip"
                     className={`chip-btn ${
-                      task.scheduledStartMinutes != null || timeblockOpen ? 'active' : ''
+                      task.scheduledStartMinutes != null || timeblockOpen ? 'active' : 'ghost'
                     }`}
                     title={t.actionTimeblock}
                     onClick={() => {
@@ -1631,7 +1567,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                       type="button"
                       data-testid="task-deadline-chip"
                       className={`chip-btn ${
-                        dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : ''
+                        dlMeta ? (dlMeta.urgent ? 'urgent' : 'active') : 'ghost'
                       }`}
                       title={dlMeta ? `${t.actionDeadline}: ${dlMeta.label}` : t.actionDeadline}
                       onClick={() => {
@@ -1653,7 +1589,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     <button
                       type="button"
                       data-testid="task-repeat-chip"
-                      className={`chip-btn ${task.recurrenceRule != null ? 'active' : ''}`}
+                      className={`chip-btn ${task.recurrenceRule != null ? 'active' : 'ghost'}`}
                       title={t.actionRepeat}
                       onClick={() => {
                         flushDraftsIfNeeded();
@@ -1667,54 +1603,6 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                           : t.actionRepeat}
                       </span>
                     </button>
-
-                    <button
-                      type="button"
-                      data-testid="task-milestone-chip"
-                      className={`chip-btn ${task.isMilestone ? 'milestone-active' : ''}`}
-                      title={task.isMilestone ? t.removeMilestone : t.markAsMilestone}
-                      onClick={() => {
-                        flushDraftsIfNeeded();
-                        void localDb.upsertTask({ id: task.id, isMilestone: !task.isMilestone });
-                      }}
-                    >
-                      <Diamond
-                        size={12}
-                        style={
-                          !task.isMilestone
-                            ? { color: 'var(--milestone-violet)', opacity: 0.85 }
-                            : undefined
-                        }
-                      />
-                      <span>{t.milestoneLabel}</span>
-                    </button>
-
-                    {task.status === 'OPEN' && (
-                      <button
-                        type="button"
-                        data-testid="task-in-progress-chip"
-                        className={`chip-btn ${task.isInProgress ? 'in-progress-active' : ''}`}
-                        title={
-                          task.isInProgress ? t.v33ClearInProgress : t.v33MarkInProgress
-                        }
-                        onClick={() => {
-                          flushDraftsIfNeeded();
-                          void localDb.toggleTaskInProgress(task.id);
-                        }}
-                      >
-                        <InProgressIcon
-                          size={13.5}
-                          style={
-                            !task.isInProgress
-                              ? { color: 'var(--in-progress-amber-ring)', opacity: 0.9 }
-                              : undefined
-                          }
-                        />
-                        <span>
-                          {task.isInProgress ? t.v33InProgressBadge : t.v33MarkInProgress}
-                        </span>
-                      </button>
-                    )}
                   </span>
                 </div>
 
@@ -1823,9 +1711,12 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     type="button"
                     data-testid="task-effort-duration-chip"
                     className={`chip-btn ${
-                      Boolean(anyDurationLabel) || task.effortLevel != null || effortDurationOpen
+                      Boolean(anyDurationLabel) ||
+                      actualMinutesValue > 0 ||
+                      task.effortLevel != null ||
+                      effortDurationOpen
                         ? 'active'
-                        : ''
+                        : 'ghost'
                     }`}
                     title={`${t.durationLabel} / ${t.effortLabel}`}
                     onClick={() => {
@@ -1851,7 +1742,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                         type="button"
                         data-testid="task-waiting-on-chip"
                         className={`chip-btn ${
-                          isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
+                          isActivelyBlocked
+                            ? 'urgent'
+                            : totalBlockerCount > 0
+                              ? 'active'
+                              : 'ghost'
                         }`}
                         title={t.waitingOnLabel}
                         onClick={() => {
@@ -1885,7 +1780,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                       </span>
                       <button
                         type="button"
-                        className="chip-btn"
+                        className="chip-btn ghost"
                         data-testid="task-reset-actual-minutes-btn"
                         title={t.v32ResetActualTime}
                         onClick={() =>
@@ -2032,7 +1927,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                   <button
                     type="button"
                     data-testid="task-move-chip"
-                    className={`chip-btn ${containerLabel ? 'active' : ''}`}
+                    className={`chip-btn ${containerLabel ? 'active' : 'ghost'}`}
                     title={t.ctxMoveContainer}
                     onClick={() => {
                       flushDraftsIfNeeded();
@@ -2063,7 +1958,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                     <button
                       type="button"
                       data-testid="task-tags-chip"
-                      className="chip-btn"
+                      className="chip-btn ghost"
                       title={t.ctxAssignTags}
                       onClick={() => {
                         flushDraftsIfNeeded();

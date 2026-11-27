@@ -440,105 +440,43 @@ public struct WorkspaceInspectorPanelView: View {
             }
 
             ThingsFlowLayout(horizontalSpacing: 7, verticalSpacing: 6) {
-                // In Progress toggle
                 if task.status == .open {
-                    Button {
+                    InspectorFlagChipButton(
+                        title: store.tr(task.isInProgress ? "v33_in_progress_badge" : "v33_mark_in_progress"),
+                        systemImage: "circle.lefthalf.filled",
+                        isActive: task.isInProgress,
+                        activeTint: ThingsMacPalette.somedayAmber,
+                        helpText: store.tr(task.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress")
+                    ) {
                         draftSaveTask?.cancel()
                         commitDraftEditsIfNeeded()
                         store.toggleTaskInProgress(task)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "circle.lefthalf.filled")
-                                .font(.system(size: 13.5, weight: .semibold))
-                                .foregroundStyle(
-                                    task.isInProgress
-                                        ? ThingsMacPalette.somedayAmber
-                                        : ThingsMacPalette.somedayAmber.opacity(0.85)
-                                )
-                            Text(store.tr(task.isInProgress ? "v33_in_progress_badge" : "v33_mark_in_progress"))
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .lineLimit(1)
-                        }
-                        .foregroundStyle(task.isInProgress ? ThingsMacPalette.somedayAmber : .secondary)
-                        .padding(.horizontal, 9.5)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(task.isInProgress ? ThingsMacPalette.somedayAmber.opacity(0.15) : ThingsMacPalette.subtleContainer)
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .strokeBorder(
-                                    task.isInProgress ? ThingsMacPalette.somedayAmber.opacity(0.38) : Color.primary.opacity(0.08),
-                                    lineWidth: 0.75
-                                )
-                        )
                     }
-                    .buttonStyle(.plain)
-                    .thingsTooltip(store.tr(task.isInProgress ? "v33_clear_in_progress" : "v33_mark_in_progress"))
                 }
 
-                // Pin toggle
-                Button {
+                InspectorFlagChipButton(
+                    title: store.tr(task.isPinned ? "v25_pinned_badge" : "v25_pin_task"),
+                    systemImage: task.isPinned ? "pin.fill" : "pin",
+                    isActive: task.isPinned,
+                    activeTint: ThingsMacPalette.todayYellow,
+                    helpText: store.tr(task.isPinned ? "v25_unpin_task" : "v25_pin_task")
+                ) {
                     draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     store.setTasksPinned([task.id], isPinned: !task.isPinned)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 10.5, weight: .semibold))
-                        Text(store.tr(task.isPinned ? "v25_pinned_badge" : "v25_pin_task"))
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(task.isPinned ? ThingsMacPalette.todayYellow : .secondary)
-                    .padding(.horizontal, 9.5)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(task.isPinned ? ThingsMacPalette.todayYellow.opacity(0.15) : ThingsMacPalette.subtleContainer)
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(
-                                task.isPinned ? ThingsMacPalette.todayYellow.opacity(0.38) : Color.primary.opacity(0.08),
-                                lineWidth: 0.75
-                            )
-                    )
                 }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr(task.isPinned ? "v25_unpin_task" : "v25_pin_task"))
 
-                // Milestone toggle
-                Button {
+                InspectorFlagChipButton(
+                    title: store.tr("v30_milestone_label"),
+                    systemImage: task.isMilestone ? "diamond.fill" : "diamond",
+                    isActive: task.isMilestone,
+                    activeTint: ThingsMacPalette.milestoneViolet,
+                    helpText: store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone")
+                ) {
                     draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     store.setTasksMilestone([task.id], isMilestone: !task.isMilestone)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: task.isMilestone ? "diamond.fill" : "diamond")
-                            .font(.system(size: 10.5, weight: .semibold))
-                        Text(store.tr("v30_milestone_label"))
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(task.isMilestone ? ThingsMacPalette.milestoneViolet : .secondary)
-                    .padding(.horizontal, 9.5)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(task.isMilestone ? ThingsMacPalette.milestoneViolet.opacity(0.15) : ThingsMacPalette.subtleContainer)
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(
-                                task.isMilestone ? ThingsMacPalette.milestoneViolet.opacity(0.38) : Color.primary.opacity(0.08),
-                                lineWidth: 0.75
-                            )
-                    )
                 }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr(task.isMilestone ? "v30_remove_milestone" : "v30_mark_as_milestone"))
             }
         }
         .padding(12)
@@ -546,10 +484,7 @@ public struct WorkspaceInspectorPanelView: View {
     }
 
     private func scheduleAndPropertiesCard(for task: TaskItem) -> some View {
-        let isTomorrow: Bool = {
-            guard task.scheduleState == .upcoming, let w = task.whenDate else { return false }
-            return Calendar.current.isDateInTomorrow(DateEpochConverter.date(fromMillis: w))
-        }()
+        let datePickerSpec = whenDateButtonSpec(for: task)
         let dlInfo = task.deadline.map { deadlineSummaryInfo(for: $0) }
         let currentEffort = task.resolvedEffort
         let currentDuration = (task.durationMinutes ?? 0) > 0 ? task.durationMinutes : nil
@@ -571,106 +506,46 @@ public struct WorkspaceInspectorPanelView: View {
         return VStack(alignment: .leading, spacing: 10) {
             inspectorSectionHeader(icon: "calendar", title: store.tr("action_when"))
 
-            // Quick When Pills (Today, Evening, Tomorrow, Anytime, Someday) + Custom Date Popover + Dedicated Reminder Pill
+            // Streamlined 3-control When row: [Today] + [This Evening] + [Date…] (+ optional active Reminder pill)
             ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                quickWhenPill(
+                ThingsActionChipButton(
                     title: store.tr("view_today"),
-                    icon: "sun.max.fill",
+                    systemImage: "sun.max.fill",
                     isActive: task.scheduleState == .today,
-                    tint: ThingsMacPalette.todayYellow
+                    activeTint: ThingsMacPalette.todayYellow,
+                    quietWhenInactive: true,
+                    helpText: store.tr("view_today")
                 ) {
                     draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     store.scheduleTasks([task.id], to: .today)
                 }
 
-                quickWhenPill(
+                ThingsActionChipButton(
                     title: store.tr("view_this_evening"),
-                    icon: "moon.stars.fill",
+                    systemImage: "moon.stars.fill",
                     isActive: task.scheduleState == .thisEvening,
-                    tint: ThingsMacPalette.eveningPurple
+                    activeTint: ThingsMacPalette.eveningPurple,
+                    quietWhenInactive: true,
+                    helpText: store.tr("view_this_evening")
                 ) {
                     draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     store.scheduleTasks([task.id], to: .thisEvening)
                 }
 
-                quickWhenPill(
-                    title: store.tr("date_tomorrow"),
-                    icon: "sunrise.fill",
-                    isActive: isTomorrow,
-                    tint: ThingsMacPalette.upcomingRed
+                ThingsActionChipButton(
+                    title: datePickerSpec.title,
+                    systemImage: datePickerSpec.icon,
+                    isActive: datePickerSpec.isActive,
+                    activeTint: datePickerSpec.tint,
+                    quietWhenInactive: true,
+                    helpText: store.tr("context_when_date_reminder")
                 ) {
-                    draftSaveTask?.cancel()
-                    commitDraftEditsIfNeeded()
-                    store.scheduleTasks([task.id], to: .upcoming)
-                }
-
-                quickWhenPill(
-                    title: store.tr("view_anytime"),
-                    icon: "safari.fill",
-                    isActive: task.scheduleState == .anytime && task.whenDate == nil,
-                    tint: ThingsMacPalette.anytimeTeal
-                ) {
-                    draftSaveTask?.cancel()
-                    commitDraftEditsIfNeeded()
-                    store.scheduleTasks([task.id], to: .anytime)
-                }
-
-                quickWhenPill(
-                    title: store.tr("view_someday"),
-                    icon: "cloud.fill",
-                    isActive: task.scheduleState == .someday,
-                    tint: ThingsMacPalette.somedayAmber
-                ) {
-                    draftSaveTask?.cancel()
-                    commitDraftEditsIfNeeded()
-                    store.scheduleTasks([task.id], to: .someday)
-                }
-
-                let customWhenDateLabel = customUpcomingDateLabel(for: task, isTomorrow: isTomorrow)
-                Button {
                     draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     isWhenPopoverOpen = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(customWhenDateLabel != nil ? ThingsMacPalette.accentBlue : .secondary)
-                        Text(customWhenDateLabel ?? store.tr("repeat_ends_pick_date"))
-                            .font(.system(size: 11.5, weight: customWhenDateLabel != nil ? .semibold : .medium))
-                            .foregroundStyle(
-                                customWhenDateLabel != nil
-                                    ? ThingsMacPalette.accentBlue
-                                    : Color.primary.opacity(0.86)
-                            )
-                            .lineLimit(1)
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 9.5)
-                    .padding(.vertical, 4.5)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(
-                                customWhenDateLabel != nil
-                                    ? ThingsMacPalette.accentBlue.opacity(0.14)
-                                    : ThingsMacPalette.subtleContainer
-                            )
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(
-                                customWhenDateLabel != nil
-                                    ? ThingsMacPalette.accentBlue.opacity(0.38)
-                                    : Color.primary.opacity(0.09),
-                                lineWidth: 0.75
-                            )
-                    )
-                    .contentShape(Capsule(style: .continuous))
                 }
-                .buttonStyle(.plain)
-                .thingsTooltip(store.tr("context_when_date_reminder"))
                 .popover(isPresented: $isWhenPopoverOpen) {
                     WhenPopoverView(
                         store: store,
@@ -693,6 +568,7 @@ public struct WorkspaceInspectorPanelView: View {
                         title: shortTimeString(rem),
                         systemImage: "bell.fill",
                         isActive: true,
+                        quietWhenInactive: true,
                         helpText: store.trf("when_task_reminder_set", shortTimeString(rem))
                     ) {
                         draftSaveTask?.cancel()
@@ -712,6 +588,7 @@ public struct WorkspaceInspectorPanelView: View {
                     systemImage: "flag.fill",
                     isActive: dlInfo != nil,
                     activeTint: (dlInfo?.isUrgent == true) ? ThingsMacPalette.deadlineCrimson : ThingsMacPalette.accentBlue,
+                    quietWhenInactive: true,
                     helpText: store.tr("context_adjust_deadline")
                 ) {
                     draftSaveTask?.cancel()
@@ -735,6 +612,7 @@ public struct WorkspaceInspectorPanelView: View {
                     systemImage: "clock.badge.checkmark",
                     isActive: task.scheduledStartMinutes != nil,
                     activeTint: ThingsMacPalette.anytimeTeal,
+                    quietWhenInactive: true,
                     helpText: store.tr("macos_tooltip_timeblock")
                 ) {
                     draftSaveTask?.cancel()
@@ -755,6 +633,7 @@ public struct WorkspaceInspectorPanelView: View {
                     title: task.recurrenceRule?.formatShortLabel(locale: store.preferences.language.locale) ?? store.tr("action_repeat"),
                     systemImage: "repeat",
                     isActive: task.recurrenceRule != nil,
+                    quietWhenInactive: true,
                     helpText: repeatButtonTooltip(for: task)
                 ) {
                     draftSaveTask?.cancel()
@@ -776,7 +655,13 @@ public struct WorkspaceInspectorPanelView: View {
                 }
 
                 // Standalone Duration Menu
-                Menu {
+                InspectorMenuPill(
+                    title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
+                    systemImage: "timer",
+                    isActive: currentDuration != nil,
+                    activeTint: ThingsMacPalette.anytimeTeal,
+                    helpText: store.tr("v30_duration_label")
+                ) {
                     ForEach(TaskItem.standaloneDurationPresets, id: \.self) { mins in
                         Button {
                             draftSaveTask?.cancel()
@@ -810,17 +695,7 @@ public struct WorkspaceInspectorPanelView: View {
                             store.setTaskActualMinutes(task.id, actualMinutes: nil)
                         }
                     }
-                } label: {
-                    inspectorPropertyPillLabel(
-                        title: currentDuration.map { TaskItem.formatCompactDuration($0) } ?? store.tr("v30_duration_label"),
-                        systemImage: "timer",
-                        isActive: currentDuration != nil,
-                        tint: ThingsMacPalette.anytimeTeal
-                    )
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
                 .popover(isPresented: $isCustomDurationPopoverOpen) {
                     CustomDurationPopoverView(
                         store: store,
@@ -831,28 +706,29 @@ public struct WorkspaceInspectorPanelView: View {
                 }
 
                 if let actualBadge = store.formattedActualTimeBadge(for: task) {
-                    Menu {
+                    InspectorMenuPill(
+                        title: actualBadge,
+                        systemImage: "clock.arrow.circlepath",
+                        isActive: true,
+                        activeTint: ThingsMacPalette.logbookGreen,
+                        helpText: actualBadge
+                    ) {
                         Button(store.tr("v32_reset_actual_time"), role: .destructive) {
                             draftSaveTask?.cancel()
                             commitDraftEditsIfNeeded()
                             store.setTaskActualMinutes(task.id, actualMinutes: nil)
                         }
-                    } label: {
-                        inspectorPropertyPillLabel(
-                            title: actualBadge,
-                            systemImage: "clock.arrow.circlepath",
-                            isActive: true,
-                            tint: ThingsMacPalette.logbookGreen
-                        )
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .thingsTooltip(actualBadge)
                 }
 
                 // Effort Menu
-                Menu {
+                InspectorMenuPill(
+                    title: currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"),
+                    systemImage: currentEffort?.sfSymbol ?? "bolt",
+                    isActive: currentEffort != nil,
+                    activeTint: currentEffort.map { effortTint(for: $0) } ?? ThingsMacPalette.accentBlue,
+                    helpText: store.tr("v30_effort_label")
+                ) {
                     ForEach(TaskEffortLevel.allCases, id: \.rawValue) { level in
                         Button {
                             draftSaveTask?.cancel()
@@ -873,17 +749,7 @@ public struct WorkspaceInspectorPanelView: View {
                             store.setTaskEffort(task.id, effortLevel: nil)
                         }
                     }
-                } label: {
-                    inspectorPropertyPillLabel(
-                        title: currentEffort.map { effortLocalizedTitle(for: $0) } ?? store.tr("v30_effort_label"),
-                        systemImage: currentEffort?.sfSymbol ?? "bolt",
-                        isActive: currentEffort != nil,
-                        tint: currentEffort.map { effortTint(for: $0) } ?? ThingsMacPalette.accentBlue
-                    )
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
 
                 // Dependencies / Blocked By Chip
                 ThingsActionChipButton(
@@ -891,6 +757,7 @@ public struct WorkspaceInspectorPanelView: View {
                     systemImage: "hourglass",
                     isActive: isBlockedActive,
                     activeTint: ThingsMacPalette.somedayAmber,
+                    quietWhenInactive: true,
                     helpText: blockedLabel ?? store.tr("v30_blocked_by_label")
                 ) {
                     draftSaveTask?.cancel()
@@ -906,38 +773,18 @@ public struct WorkspaceInspectorPanelView: View {
                 .opacity(0.55)
 
             // Area › Project › Heading Breadcrumb, Phase/Heading Menu & Tag Pills
-            VStack(alignment: .leading, spacing: 7) {
-                Button {
+            ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
+                InspectorWrappingChip(
+                    title: breadcrumb ?? store.tr("action_move"),
+                    systemImage: "folder",
+                    isActive: task.projectId != nil || task.areaId != nil,
+                    activeTint: ThingsMacPalette.accentBlue,
+                    helpText: breadcrumb ?? store.tr("move_dialog_title")
+                ) {
                     draftSaveTask?.cancel()
                     commitDraftEditsIfNeeded()
                     isMovePopoverOpen = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(breadcrumb != nil ? ThingsMacPalette.accentBlue : .secondary)
-                        Text(breadcrumb ?? store.tr("action_move"))
-                            .font(.system(size: 12, weight: breadcrumb != nil ? .semibold : .medium))
-                            .foregroundStyle(breadcrumb != nil ? Color.primary : Color.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6.5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(ThingsMacPalette.subtleContainer)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.75)
-                            )
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .buttonStyle(.plain)
                 .popover(isPresented: $isMovePopoverOpen) {
                     MoveDestinationPopoverView(store: store, task: task) { projId, headId, areaId, schedOverride in
                         var copy = store.task(byId: task.id) ?? task
@@ -953,98 +800,92 @@ public struct WorkspaceInspectorPanelView: View {
                     }
                 }
 
-                ThingsFlowLayout(horizontalSpacing: 6, verticalSpacing: 6) {
-                    if !projectHeadings.isEmpty {
-                        Menu {
+                if !projectHeadings.isEmpty {
+                    InspectorMenuPill(
+                        title: activeHeading?.title ?? store.tr("entity_heading"),
+                        systemImage: "flag.checkered",
+                        isActive: activeHeading != nil,
+                        activeTint: ThingsMacPalette.accentBlue,
+                        helpText: store.tr("entity_heading")
+                    ) {
+                        Button {
+                            draftSaveTask?.cancel()
+                            commitDraftEditsIfNeeded()
+                            var copy = store.task(byId: task.id) ?? task
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            copy.headingId = nil
+                            store.updateTask(copy)
+                        } label: {
+                            if activeHeading == nil {
+                                Label(store.tr("v30_board_ungrouped_column"), systemImage: "checkmark")
+                            } else {
+                                Text(store.tr("v30_board_ungrouped_column"))
+                            }
+                        }
+                        Divider()
+                        ForEach(projectHeadings) { heading in
                             Button {
                                 draftSaveTask?.cancel()
                                 commitDraftEditsIfNeeded()
                                 var copy = store.task(byId: task.id) ?? task
                                 copy.title = draftTitle
                                 copy.notes = draftNotes
-                                copy.headingId = nil
+                                copy.headingId = heading.id
                                 store.updateTask(copy)
                             } label: {
-                                if activeHeading == nil {
-                                    Label(store.tr("v30_board_ungrouped_column"), systemImage: "checkmark")
+                                if activeHeading?.id == heading.id {
+                                    Label(heading.title, systemImage: "checkmark")
                                 } else {
-                                    Text(store.tr("v30_board_ungrouped_column"))
+                                    Text(heading.title)
                                 }
                             }
-                            Divider()
-                            ForEach(projectHeadings) { heading in
-                                Button {
-                                    draftSaveTask?.cancel()
-                                    commitDraftEditsIfNeeded()
-                                    var copy = store.task(byId: task.id) ?? task
-                                    copy.title = draftTitle
-                                    copy.notes = draftNotes
-                                    copy.headingId = heading.id
-                                    store.updateTask(copy)
-                                } label: {
-                                    if activeHeading?.id == heading.id {
-                                        Label(heading.title, systemImage: "checkmark")
-                                    } else {
-                                        Text(heading.title)
-                                    }
-                                }
-                            }
-                        } label: {
-                            inspectorPropertyPillLabel(
-                                title: activeHeading?.title ?? store.tr("entity_heading"),
-                                systemImage: "flag.checkered",
-                                isActive: activeHeading != nil,
-                                tint: ThingsMacPalette.accentBlue
-                            )
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                        .thingsTooltip(store.tr("entity_heading"))
-                    }
-
-                    ForEach(task.tags) { tag in
-                        TagPillBadge(
-                            title: tag.title,
-                            isSelected: true,
-                            showIcon: true,
-                            helpText: "#\(tag.title)"
-                        ) {
-                            draftSaveTask?.cancel()
-                            commitDraftEditsIfNeeded()
-                            isTagPopoverOpen = true
                         }
                     }
+                }
 
-                    ThingsActionChipButton(
-                        title: "+ \(store.tr("action_tags"))",
-                        systemImage: "square.grid.2x2",
-                        isActive: false,
-                        helpText: store.tr("action_tags")
+                ForEach(task.tags) { tag in
+                    TagPillBadge(
+                        title: tag.title,
+                        isSelected: true,
+                        showIcon: true,
+                        helpText: "#\(tag.title)"
                     ) {
                         draftSaveTask?.cancel()
                         commitDraftEditsIfNeeded()
                         isTagPopoverOpen = true
                     }
-                    .popover(isPresented: $isTagPopoverOpen) {
-                        TagPickerPopoverView(
-                            store: store,
-                            selectedTagIds: Set(task.tagIds),
-                            onToggleTag: { tagId in
-                                let base = store.task(byId: task.id) ?? task
-                                var tids = Set(base.tagIds)
-                                if tids.contains(tagId) {
-                                    tids.remove(tagId)
-                                } else {
-                                    tids.insert(tagId)
-                                }
-                                var copy = base
-                                copy.title = draftTitle
-                                copy.notes = draftNotes
-                                store.updateTask(copy, tagIds: Array(tids))
+                }
+
+                ThingsActionChipButton(
+                    title: "+ \(store.tr("action_tags"))",
+                    systemImage: "square.grid.2x2",
+                    isActive: false,
+                    quietWhenInactive: true,
+                    helpText: store.tr("action_tags")
+                ) {
+                    draftSaveTask?.cancel()
+                    commitDraftEditsIfNeeded()
+                    isTagPopoverOpen = true
+                }
+                .popover(isPresented: $isTagPopoverOpen) {
+                    TagPickerPopoverView(
+                        store: store,
+                        selectedTagIds: Set(task.tagIds),
+                        onToggleTag: { tagId in
+                            let base = store.task(byId: task.id) ?? task
+                            var tids = Set(base.tagIds)
+                            if tids.contains(tagId) {
+                                tids.remove(tagId)
+                            } else {
+                                tids.insert(tagId)
                             }
-                        )
-                    }
+                            var copy = base
+                            copy.title = draftTitle
+                            copy.notes = draftNotes
+                            store.updateTask(copy, tagIds: Array(tids))
+                        }
+                    )
                 }
             }
 
@@ -2190,80 +2031,21 @@ public struct WorkspaceInspectorPanelView: View {
         }
     }
 
-    private func quickWhenPill(
-        title: String,
-        icon: String,
-        isActive: Bool,
-        tint: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4.5) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(isActive ? tint : .secondary)
-                Text(title)
-                    .font(.system(size: 11.5, weight: isActive ? .semibold : .medium))
-                    .foregroundStyle(isActive ? Color.primary : Color.primary.opacity(0.84))
-                    .lineLimit(1)
+    private func whenDateButtonSpec(for task: TaskItem) -> (title: String, icon: String, isActive: Bool, tint: Color) {
+        if task.scheduleState == .upcoming, let w = task.whenDate {
+            let wDate = DateEpochConverter.date(fromMillis: w)
+            if Calendar.current.isDateInTomorrow(wDate) {
+                return (store.tr("date_tomorrow"), "calendar", true, ThingsMacPalette.accentBlue)
             }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4.5)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isActive ? tint.opacity(0.16) : ThingsMacPalette.subtleContainer)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(
-                        isActive ? tint.opacity(0.42) : Color.primary.opacity(0.08),
-                        lineWidth: 0.75
-                    )
-            )
-            .contentShape(Capsule(style: .continuous))
+            let df = DateFormatter()
+            df.locale = store.preferences.language.locale
+            df.setLocalizedDateFormatFromTemplate("EEEdMMM")
+            return (df.string(from: wDate), "calendar", true, ThingsMacPalette.accentBlue)
+        } else if task.scheduleState == .someday {
+            return (store.tr("view_someday"), "cloud.fill", true, ThingsMacPalette.somedayAmber)
+        } else {
+            return (store.tr("repeat_ends_pick_date"), "calendar", false, ThingsMacPalette.accentBlue)
         }
-        .buttonStyle(.plain)
-        .thingsTooltip(title)
-    }
-
-    private func inspectorPropertyPillLabel(
-        title: String,
-        systemImage: String,
-        isActive: Bool,
-        tint: Color
-    ) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .semibold))
-            Text(title)
-                .font(.system(size: 12, weight: isActive ? .semibold : .medium))
-                .lineLimit(1)
-        }
-        .foregroundStyle(isActive ? tint : Color.primary.opacity(0.88))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5.5)
-        .background(
-            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                .fill(isActive ? tint.opacity(0.12) : ThingsMacPalette.cardSurface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
-                        .strokeBorder(
-                            isActive ? tint.opacity(0.34) : Color.primary.opacity(0.11),
-                            lineWidth: 0.85
-                        )
-                )
-        )
-    }
-
-    private func customUpcomingDateLabel(for task: TaskItem, isTomorrow: Bool) -> String? {
-        guard task.scheduleState == .upcoming && !isTomorrow, let w = task.whenDate else {
-            return nil
-        }
-        let df = DateFormatter()
-        df.locale = store.preferences.language.locale
-        df.setLocalizedDateFormatFromTemplate("EEEdMMM")
-        return df.string(from: DateEpochConverter.date(fromMillis: w))
     }
 
     private func repeatButtonTooltip(for target: TaskItem) -> String {
@@ -2334,6 +2116,175 @@ public struct WorkspaceInspectorPanelView: View {
         let df = DateFormatter()
         df.timeStyle = .short
         return df.string(from: DateEpochConverter.date(fromMillis: millis))
+    }
+}
+
+private struct InspectorFlagChipButton: View {
+    let title: String
+    let systemImage: String
+    let isActive: Bool
+    let activeTint: Color
+    let helpText: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        let inactiveFg: Color = isHovering ? Color.primary : Color.secondary.opacity(0.82)
+
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if systemImage == "circle.lefthalf.filled" {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(isActive ? activeTint : inactiveFg)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(isActive ? activeTint : inactiveFg)
+                }
+                Text(title)
+                    .font(.system(size: 11.5, weight: isActive ? .semibold : .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isActive ? activeTint : inactiveFg)
+            .padding(.horizontal, 9.5)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(
+                        isActive
+                            ? activeTint.opacity(isHovering ? 0.19 : 0.14)
+                            : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
+                    )
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(
+                        isActive ? activeTint.opacity(isHovering ? 0.48 : 0.36) : Color.clear,
+                        lineWidth: isActive ? 0.85 : 0
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .thingsTooltip(helpText)
+    }
+}
+
+private struct InspectorMenuPill<MenuContent: View>: View {
+    let title: String
+    let systemImage: String
+    let isActive: Bool
+    let activeTint: Color
+    let helpText: String
+    @ViewBuilder let menuContent: () -> MenuContent
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            menuContent()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(
+                isActive
+                    ? activeTint
+                    : (isHovering ? Color.primary : Color.secondary.opacity(0.82))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(
+                    isActive
+                        ? activeTint.opacity(isHovering ? 0.19 : 0.14)
+                        : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
+                )
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    isActive ? activeTint.opacity(isHovering ? 0.48 : 0.36) : Color.clear,
+                    lineWidth: isActive ? 0.85 : 0
+                )
+        )
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .thingsTooltip(helpText)
+    }
+}
+
+private struct InspectorWrappingChip: View {
+    let title: String
+    let systemImage: String
+    let isActive: Bool
+    let activeTint: Color
+    let helpText: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 5.5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.top, 1.5)
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(
+                isActive
+                    ? activeTint
+                    : (isHovering ? Color.primary : Color.secondary.opacity(0.82))
+            )
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(
+                        isActive
+                            ? activeTint.opacity(isHovering ? 0.19 : 0.14)
+                            : (isHovering ? Color.primary.opacity(0.06) : Color.clear)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(
+                        isActive ? activeTint.opacity(isHovering ? 0.48 : 0.36) : Color.clear,
+                        lineWidth: isActive ? 0.85 : 0
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+        .thingsTooltip(helpText)
     }
 }
 

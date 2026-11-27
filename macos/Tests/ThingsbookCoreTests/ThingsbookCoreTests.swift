@@ -409,12 +409,12 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.2")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.2")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 123)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.3")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.3")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 124)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.2", current: "3.3.1"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.2", current: "3.3.0"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.3", current: "3.3.2"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.3", current: "3.3.1"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -6949,7 +6949,7 @@ final class ThingsbookCoreTests: XCTestCase {
             "MarkdownNotesParser.renderAttributed",
             "ChecklistItemRowView",
             "handleFileDropProviders",
-            "view_anytime",
+            "WhenPopoverView",
             "flag.checkered",
             "action_duplicate_todo",
             "action_copy_todo",
@@ -7117,67 +7117,86 @@ final class ThingsbookCoreTests: XCTestCase {
             contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/WorkspaceInspectorPanelView.swift"),
             encoding: .utf8
         )
+        let themeSource = try String(
+            contentsOf: macosRoot.appendingPathComponent("Sources/ThingsbookMac/Theme/ThingsMacTheme.swift"),
+            encoding: .utf8
+        )
 
-        let requiredPresetTokens = [
+        // 1. Streamlined 3-control When row ([Today] + [This Evening] + [Date…]) in BOTH Task Detail & Task Inspector
+        let requiredWhenTokens = [
             "view_today",
             "view_this_evening",
-            "date_tomorrow",
-            "view_anytime",
-            "view_someday",
             "repeat_ends_pick_date",
             "WhenPopoverView",
-            "isWhenPopoverOpen = true"
+            "isWhenPopoverOpen = true",
+            "to: .today)",
+            "to: .thisEvening)",
+            "whenDateButtonSpec"
         ]
-
-        for token in requiredPresetTokens {
+        for token in requiredWhenTokens {
             XCTAssertTrue(
                 modalSource.contains(token),
-                "TaskBentoModalView.swift must include \(token) for unified 1-tap When presets + always-visible Pick date… button"
+                "TaskBentoModalView.swift must include \(token) for streamlined 3-control When row"
             )
             XCTAssertTrue(
                 inspectorSource.contains(token),
-                "WorkspaceInspectorPanelView.swift must include \(token) for unified 1-tap When presets + always-visible Pick date… button"
+                "WorkspaceInspectorPanelView.swift must include \(token) for streamlined 3-control When row"
             )
         }
 
-        // Verify direct 1-tap preset scheduling in TaskBentoModalView & WorkspaceInspectorPanelView without modal dismissal
-        let directScheduleCalls = [
-            "to: .today)",
-            "to: .thisEvening)",
+        // Inline Tomorrow / Anytime / Someday preset pill clutter removed (accessible via WhenPopoverView)
+        let removedInlinePresetTokens = [
+            "sunrise.fill",
+            "safari.fill",
+            "view_anytime",
             "to: .upcoming)",
             "to: .anytime)",
-            "to: .someday)"
+            "to: .someday)",
+            "quickMoveToThisEveningAndClose"
         ]
-        for callToken in directScheduleCalls {
-            XCTAssertTrue(
-                modalSource.contains(callToken),
-                "TaskBentoModalView.swift must directly schedule \(callToken) in 1 tap"
+        for forbidden in removedInlinePresetTokens {
+            XCTAssertFalse(
+                modalSource.contains(forbidden),
+                "TaskBentoModalView.swift must not render inline preset pill clutter (\(forbidden))"
             )
-            XCTAssertTrue(
-                inspectorSource.contains(callToken),
-                "WorkspaceInspectorPanelView.swift must directly schedule \(callToken) in 1 tap"
+            XCTAssertFalse(
+                inspectorSource.contains(forbidden),
+                "WorkspaceInspectorPanelView.swift must not render inline preset pill clutter (\(forbidden))"
             )
         }
 
-        XCTAssertFalse(
-            modalSource.contains("quickMoveToThisEveningAndClose"),
-            "TaskBentoModalView.swift must not auto-close when clicking This Evening"
-        )
-        XCTAssertFalse(
-            inspectorSource.contains("quickMoveToThisEveningAndClose"),
-            "WorkspaceInspectorPanelView.swift must not auto-close when clicking This Evening"
-        )
-
-        // Verify Anytime active state requires whenDate == nil in both Task Detail Window and Task Inspector
-        XCTAssertTrue(modalSource.contains("current.scheduleState == .anytime && current.whenDate == nil"))
-        XCTAssertTrue(inspectorSource.contains("task.scheduleState == .anytime && task.whenDate == nil"))
-
-        // Verify dedicated Calendar icon + always-visible repeat_ends_pick_date fallback in both views
-        XCTAssertTrue(modalSource.contains("customDateLabel ?? store.tr(\"repeat_ends_pick_date\")"))
-        XCTAssertTrue(modalSource.contains("systemImage: \"calendar\""))
-        XCTAssertTrue(inspectorSource.contains("customWhenDateLabel ?? store.tr(\"repeat_ends_pick_date\")"))
-        XCTAssertTrue(inspectorSource.contains("Image(systemName: \"calendar\")"))
+        // Dedicated Date picker button shows Tomorrow / custom EEEdMMM date / Someday cloud pill when active, else Pick date… ghost button
+        XCTAssertTrue(modalSource.contains("store.tr(\"date_tomorrow\")"))
+        XCTAssertTrue(inspectorSource.contains("store.tr(\"date_tomorrow\")"))
+        XCTAssertTrue(modalSource.contains("store.tr(\"view_someday\")"))
+        XCTAssertTrue(inspectorSource.contains("store.tr(\"view_someday\")"))
         XCTAssertFalse(inspectorSource.contains("calendar.badge.clock"))
+
+        // 2. TaskBentoModalView.scheduleBentoCard must NOT duplicate Milestone or In Progress pills (kept exclusively in modalHeaderBar)
+        let scheduleCardStart = try XCTUnwrap(modalSource.range(of: "private var scheduleBentoCard: some View")?.lowerBound)
+        let scheduleCardEnd = try XCTUnwrap(modalSource.range(of: "private var focusAndDependenciesBentoCard: some View")?.lowerBound)
+        let scheduleCardSlice = String(modalSource[scheduleCardStart..<scheduleCardEnd])
+        XCTAssertFalse(
+            scheduleCardSlice.contains("v30_milestone_label"),
+            "TaskBentoModalView.scheduleBentoCard must not duplicate Milestone pill"
+        )
+        XCTAssertFalse(
+            scheduleCardSlice.contains("v33_mark_in_progress"),
+            "TaskBentoModalView.scheduleBentoCard must not duplicate In Progress pill"
+        )
+        // Modal header bar retains Milestone & In Progress controls
+        let headerStart = try XCTUnwrap(modalSource.range(of: "private var modalHeaderBar: some View")?.lowerBound)
+        let headerEnd = try XCTUnwrap(modalSource.range(of: "private var leftPrimaryContentColumn: some View")?.lowerBound)
+        let headerSlice = String(modalSource[headerStart..<headerEnd])
+        XCTAssertTrue(headerSlice.contains("v33_mark_in_progress"))
+        XCTAssertTrue(headerSlice.contains("v30_mark_as_milestone"))
+
+        // 3. Quiet borderless ghost styling for unset optional properties in ThingsActionChipButton, Detail & Inspector
+        XCTAssertTrue(themeSource.contains("public var quietWhenInactive: Bool"))
+        XCTAssertTrue(themeSource.contains("Color.secondary.opacity(0.82)"))
+        XCTAssertTrue(themeSource.contains("Color.primary.opacity(0.06)"))
+        XCTAssertTrue(modalSource.contains("quietWhenInactive: true"))
+        XCTAssertTrue(inspectorSource.contains("quietWhenInactive: true"))
 
         // Verify localization of repeat_ends_pick_date across all 5 languages
         for lang in [AppLanguage.en, .de, .fr, .it, .es] {

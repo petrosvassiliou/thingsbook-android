@@ -189,6 +189,7 @@ fun ThingsTagPill(
     title: String,
     modifier: Modifier = Modifier,
     tooltipText: String? = null,
+    isGhost: Boolean = false,
     containerColor: Color? = null,
     contentColor: Color? = null,
     borderColor: Color? = null,
@@ -199,10 +200,31 @@ fun ThingsTagPill(
     val isHovered by hoverSource.collectIsHoveredAsState()
     val interactiveHover = isHovered && onClick != null
     val shape = RoundedCornerShape(50)
+    val ghostFg = colors.secondaryText.copy(alpha = 0.78f)
 
-    val resolvedBg = containerColor ?: if (interactiveHover) colors.thingsBlueSoft else colors.tagPillBg
-    val resolvedFg = contentColor ?: if (interactiveHover) colors.thingsBlue else colors.tagPillText
-    val resolvedBorder = borderColor ?: if (interactiveHover) colors.thingsBlue.copy(alpha = 0.42f) else Color.Transparent
+    val resolvedBg = when {
+        containerColor != null -> containerColor
+        interactiveHover -> colors.thingsBlueSoft
+        isGhost -> Color.Transparent
+        else -> colors.tagPillBg
+    }
+    val resolvedFg = when {
+        contentColor != null -> contentColor
+        interactiveHover -> colors.thingsBlue
+        isGhost -> ghostFg
+        else -> colors.tagPillText
+    }
+    val resolvedBorder = when {
+        borderColor != null -> borderColor
+        interactiveHover -> colors.thingsBlue.copy(alpha = 0.42f)
+        isGhost -> Color.Transparent
+        else -> Color.Transparent
+    }
+    val resolvedFontWeight = when {
+        contentColor != null -> FontWeight.Bold
+        isGhost && !interactiveHover -> FontWeight.Medium
+        else -> FontWeight.SemiBold
+    }
 
     ThingsHoverTooltip(
         text = tooltipText ?: title,
@@ -225,7 +247,7 @@ fun ThingsTagPill(
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = if (contentColor != null) FontWeight.Bold else FontWeight.SemiBold
+                    fontWeight = resolvedFontWeight
                 ),
                 color = resolvedFg
             )
@@ -253,6 +275,12 @@ fun ThingsDeadlineBadge(
     val isUrgentOrOverdue = daysDiff <= 2
     val textColor = if (isUrgentOrOverdue) colors.deadlineUrgentRed else colors.secondaryText
     val bgColor = if (isUrgentOrOverdue) colors.deadlineSoftBg else colors.tagPillBg
+    val borderColor = if (isUrgentOrOverdue) {
+        colors.deadlineUrgentRed.copy(alpha = 0.35f)
+    } else {
+        colors.hairlineDivider
+    }
+    val shape = RoundedCornerShape(50)
 
     val label = when {
         daysDiff == 0 -> stringResource(R.string.deadline_today)
@@ -266,8 +294,9 @@ fun ThingsDeadlineBadge(
     ) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(50))
+                .clip(shape)
                 .background(bgColor)
+                .border(width = 0.75.dp, color = borderColor, shape = shape)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                 .padding(horizontal = 8.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -315,11 +344,18 @@ fun ThingsWhenBadge(
             stringResource(R.string.view_this_evening)
         )
         ScheduleState.UPCOMING -> {
-            val formattedDate = whenDateEpochMillis?.let { millis ->
+            val today = LocalDate.now(zone)
+            val targetDate = whenDateEpochMillis?.let { millis ->
                 runCatching {
-                    Instant.ofEpochMilli(millis).atZone(zone).toLocalDate().format(formatter)
+                    Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
                 }.getOrNull()
-            } ?: stringResource(R.string.view_upcoming)
+            }
+            val formattedDate = when {
+                targetDate == today.plusDays(1) -> stringResource(R.string.date_tomorrow)
+                targetDate != null -> runCatching { targetDate.format(formatter) }.getOrNull()
+                    ?: stringResource(R.string.view_upcoming)
+                else -> stringResource(R.string.view_upcoming)
+            }
             Triple(Icons.Outlined.CalendarMonth, colors.upcomingCoralRed, formattedDate)
         }
         ScheduleState.SOMEDAY -> Triple(
@@ -339,14 +375,30 @@ fun ThingsWhenBadge(
         )
     }
 
+    val shape = RoundedCornerShape(50)
+    val bgColor = when (scheduleState) {
+        ScheduleState.SOMEDAY -> colors.somedayWarmAmber.copy(alpha = 0.16f)
+        else -> colors.tagPillBg
+    }
+    val borderColor = when (scheduleState) {
+        ScheduleState.SOMEDAY -> colors.somedayWarmAmber.copy(alpha = 0.48f)
+        ScheduleState.UPCOMING -> colors.upcomingCoralRed.copy(alpha = 0.38f)
+        else -> colors.hairlineDivider
+    }
+    val textColor = when (scheduleState) {
+        ScheduleState.SOMEDAY -> colors.somedayWarmAmber
+        else -> colors.primaryText
+    }
+
     ThingsHoverTooltip(
         text = "${stringResource(R.string.action_when)}: $label",
         modifier = modifier
     ) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(colors.tagPillBg)
+                .clip(shape)
+                .background(bgColor)
+                .border(width = 0.75.dp, color = borderColor, shape = shape)
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                 .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -360,8 +412,14 @@ fun ThingsWhenBadge(
             )
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.primaryText
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (scheduleState == ScheduleState.SOMEDAY || scheduleState == ScheduleState.UPCOMING) {
+                        FontWeight.SemiBold
+                    } else {
+                        FontWeight.Medium
+                    }
+                ),
+                color = textColor
             )
         }
     }

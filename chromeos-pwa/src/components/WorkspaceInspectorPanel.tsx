@@ -5,7 +5,6 @@ import {
   BarChart3,
   Bell,
   Calendar,
-  CalendarDays,
   Camera,
   Check,
   CheckCircle2,
@@ -13,7 +12,6 @@ import {
   Circle,
   Clock,
   Cloud,
-  Compass,
   Copy,
   Diamond,
   FileText,
@@ -42,7 +40,6 @@ import {
   Zap
 } from 'lucide-react';
 import {
-  addDaysLocal,
   daysBetweenToday,
   formatRecurrenceShort,
   type AreaRecord,
@@ -677,16 +674,6 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
     const taskTags = selectedTask.tagIds
       .map((id) => tagsMap.get(id))
       .filter((tg): tg is TagRecord => tg != null);
-
-    const tomorrowEpoch = addDaysLocal(todayStartMs, 1);
-    const isTomorrowSelected =
-      selectedTask.scheduleState === 'UPCOMING' &&
-      selectedTask.whenDate != null &&
-      daysBetweenToday(selectedTask.whenDate) === 1;
-    const isCustomUpcomingSelected =
-      selectedTask.scheduleState === 'UPCOMING' &&
-      selectedTask.whenDate != null &&
-      !isTomorrowSelected;
 
     const dlDiff =
       selectedTask.deadline != null ? daysBetweenToday(selectedTask.deadline) : null;
@@ -1438,7 +1425,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
             <div className="inspector-flags-bar">
               <button
                 type="button"
-                className={`chip-btn ${selectedTask.isPinned ? 'active' : ''}`}
+                className={`chip-btn ${selectedTask.isPinned ? 'active' : 'ghost'}`}
                 data-testid="inspector-pin-btn"
                 title={selectedTask.isPinned ? t.unpinTask : t.pinTask}
                 aria-label={selectedTask.isPinned ? t.unpinTask : t.pinTask}
@@ -1456,7 +1443,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn ${
-                  selectedTask.isMilestone ? 'milestone-active' : ''
+                  selectedTask.isMilestone ? 'milestone-active' : 'ghost'
                 }`}
                 data-testid="inspector-milestone-btn"
                 title={
@@ -1480,7 +1467,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 <button
                   type="button"
                   className={`chip-btn ${
-                    selectedTask.isInProgress ? 'in-progress-active' : ''
+                    selectedTask.isInProgress ? 'in-progress-active' : 'ghost'
                   }`}
                   data-testid="inspector-in-progress-btn"
                   title={
@@ -1532,17 +1519,18 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn ${
-                  selectedTask.scheduleState === 'TODAY' ? 'active' : ''
+                  selectedTask.scheduleState === 'TODAY' ? 'active' : 'ghost'
                 }`}
                 data-testid="inspector-when-today"
                 title={t.viewToday}
-                onClick={() =>
+                onClick={() => {
+                  flushDraftsIfNeeded();
                   void localDb.upsertTask({
                     id: selectedTask.id,
                     scheduleState: 'TODAY',
                     whenDate: todayStartMs
-                  })
-                }
+                  });
+                }}
               >
                 <Sun size={12} style={{ color: 'var(--today-star)' }} />
                 <span>{t.viewToday}</span>
@@ -1551,17 +1539,18 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn ${
-                  selectedTask.scheduleState === 'THIS_EVENING' ? 'evening-quick' : ''
+                  selectedTask.scheduleState === 'THIS_EVENING' ? 'evening-quick' : 'ghost'
                 }`}
                 data-testid="inspector-when-evening"
                 title={t.viewThisEvening}
-                onClick={() =>
+                onClick={() => {
+                  flushDraftsIfNeeded();
                   void localDb.upsertTask({
                     id: selectedTask.id,
                     scheduleState: 'THIS_EVENING',
                     whenDate: todayStartMs
-                  })
-                }
+                  });
+                }}
               >
                 <Moon size={12} />
                 <span>{t.viewThisEvening}</span>
@@ -1569,67 +1558,13 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
 
               <button
                 type="button"
-                className={`chip-btn ${isTomorrowSelected ? 'active' : ''}`}
-                data-testid="inspector-when-tomorrow"
-                title={t.dateTomorrow}
-                onClick={() =>
-                  void localDb.upsertTask({
-                    id: selectedTask.id,
-                    scheduleState: 'UPCOMING',
-                    whenDate: tomorrowEpoch
-                  })
-                }
-              >
-                <CalendarDays size={12} />
-                <span>{t.dateTomorrow}</span>
-              </button>
-
-              <button
-                type="button"
                 className={`chip-btn ${
-                  selectedTask.scheduleState === 'ANYTIME' &&
-                  selectedTask.whenDate == null
+                  selectedTask.scheduleState === 'UPCOMING' && selectedTask.whenDate != null
                     ? 'active'
-                    : ''
+                    : selectedTask.scheduleState === 'SOMEDAY'
+                      ? 'someday-active'
+                      : 'ghost'
                 }`}
-                data-testid="inspector-when-anytime"
-                title={t.viewAnytime}
-                onClick={() =>
-                  void localDb.upsertTask({
-                    id: selectedTask.id,
-                    scheduleState: 'ANYTIME',
-                    whenDate: null,
-                    scheduledStartMinutes: null
-                  })
-                }
-              >
-                <Compass size={12} />
-                <span>{t.viewAnytime}</span>
-              </button>
-
-              <button
-                type="button"
-                className={`chip-btn ${
-                  selectedTask.scheduleState === 'SOMEDAY' ? 'active' : ''
-                }`}
-                data-testid="inspector-when-someday"
-                title={t.viewSomeday}
-                onClick={() =>
-                  void localDb.upsertTask({
-                    id: selectedTask.id,
-                    scheduleState: 'SOMEDAY',
-                    whenDate: null,
-                    scheduledStartMinutes: null
-                  })
-                }
-              >
-                <Cloud size={12} />
-                <span>{t.viewSomeday}</span>
-              </button>
-
-              <button
-                type="button"
-                className={`chip-btn ${isCustomUpcomingSelected ? 'active' : ''}`}
                 data-testid="inspector-when-custom-date"
                 title={t.ctxWhenReminder}
                 onClick={() => {
@@ -1637,11 +1572,17 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                   onOpenWhenModal(selectedTask.id);
                 }}
               >
-                <Calendar size={12.5} />
+                {selectedTask.scheduleState === 'SOMEDAY' ? (
+                  <Cloud size={12.5} />
+                ) : (
+                  <Calendar size={12.5} />
+                )}
                 <span>
-                  {isCustomUpcomingSelected && selectedTask.whenDate != null
+                  {selectedTask.scheduleState === 'UPCOMING' && selectedTask.whenDate != null
                     ? formatShortDate(selectedTask.whenDate)
-                    : t.repeatEndsOn}
+                    : selectedTask.scheduleState === 'SOMEDAY'
+                      ? t.viewSomeday
+                      : t.repeatEndsOn}
                 </span>
               </button>
             </div>
@@ -1670,7 +1611,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                     ? dlUrgent
                       ? 'urgent'
                       : 'active'
-                    : ''
+                    : 'ghost'
                 }`}
                 data-testid="inspector-deadline-btn"
                 title={t.actionDeadline}
@@ -1686,7 +1627,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn ${
-                  selectedTask.recurrenceRule != null ? 'active' : ''
+                  selectedTask.recurrenceRule != null ? 'active' : 'ghost'
                 }`}
                 data-testid="inspector-repeat-btn"
                 title={t.actionRepeat}
@@ -1708,7 +1649,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 className={`chip-btn ${
                   selectedTask.scheduledStartMinutes != null || showTimeblockPicker
                     ? 'active'
-                    : ''
+                    : 'ghost'
                 }`}
                 data-testid="inspector-timeblock-btn"
                 title={t.actionTimeblock}
@@ -1727,9 +1668,10 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 className={`chip-btn ${
                   (selectedTask.durationMinutes != null &&
                     selectedTask.durationMinutes > 0) ||
+                  actualMinutesValue > 0 ||
                   showDurationPicker
                     ? 'active'
-                    : ''
+                    : 'ghost'
                 }`}
                 data-testid="inspector-duration-btn"
                 title={t.durationLabel}
@@ -1746,7 +1688,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn ${
-                  selectedTask.effortLevel != null || showEffortPicker ? 'active' : ''
+                  selectedTask.effortLevel != null || showEffortPicker ? 'active' : 'ghost'
                 }`}
                 data-testid="inspector-effort-btn"
                 title={t.effortLabel}
@@ -1763,7 +1705,11 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn task-waiting-on-chip ${
-                  isActivelyBlocked ? 'urgent' : totalBlockerCount > 0 ? 'active' : ''
+                  isActivelyBlocked
+                    ? 'urgent'
+                    : totalBlockerCount > 0
+                      ? 'active'
+                      : 'ghost'
                 }`}
                 data-testid="task-waiting-on-chip"
                 title={t.waitingOnLabel}
@@ -1797,7 +1743,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
                 </span>
                 <button
                   type="button"
-                  className="chip-btn"
+                  className="chip-btn ghost"
                   data-testid="inspector-reset-actual-minutes-btn"
                   title={t.v32ResetActualTime}
                   onClick={() =>
@@ -2044,7 +1990,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               <button
                 type="button"
                 className={`chip-btn inspector-breadcrumb-btn ${
-                  proj || area ? 'active' : ''
+                  proj || area ? 'active' : 'ghost'
                 }`}
                 data-testid="inspector-container-btn"
                 title={t.ctxMoveContainer}
@@ -2100,7 +2046,7 @@ export const WorkspaceInspectorPanel: React.FC<WorkspaceInspectorPanelProps> = (
               ))}
               <button
                 type="button"
-                className="chip-btn"
+                className="chip-btn ghost"
                 data-testid="inspector-tags-btn"
                 title={t.ctxAssignTags}
                 onClick={() => {

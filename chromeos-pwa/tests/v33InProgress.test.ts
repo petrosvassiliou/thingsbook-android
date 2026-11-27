@@ -707,7 +707,10 @@ test('v3.3.0-beta.2 Task Inspector Panel achieves 1:1 parity with Expanded Bento
   assert.ok(inspectorSrc.includes('SpeechRecognition'));
   assert.ok(inspectorSrc.includes('navigator.clipboard.writeText'));
   assert.ok(inspectorSrc.includes('inspector-heading-select'));
-  assert.ok(inspectorSrc.includes('inspector-when-anytime'));
+  assert.ok(inspectorSrc.includes('inspector-when-today'));
+  assert.ok(inspectorSrc.includes('inspector-when-evening'));
+  assert.ok(inspectorSrc.includes('inspector-when-custom-date'));
+  assert.ok(!inspectorSrc.includes('inspector-when-anytime'));
 
   // App.tsx call site passes full snapshot & modal callbacks to WorkspaceInspectorPanel
   const inspectorCallMatch = appSrc.match(/<WorkspaceInspectorPanel[\s\S]*?\/>/);
@@ -904,9 +907,9 @@ test('v3.3 InProgressIcon crisp SVG component is used in TaskItem, WorkspaceInsp
     taskItemSrc,
     /data-testid="task-in-progress-btn"[\s\S]*?<InProgressIcon[\s\S]*?size=\{16\}/
   );
-  assert.match(
-    taskItemSrc,
-    /data-testid="task-in-progress-chip"[\s\S]*?<InProgressIcon[\s\S]*?size=\{13\.5\}/
+  assert.ok(
+    !taskItemSrc.includes('data-testid="task-in-progress-chip"'),
+    'Duplicate task-in-progress-chip must be removed from the Schedule card'
   );
 
   assert.ok(inspectorSrc.includes('<InProgressIcon'));
@@ -924,7 +927,7 @@ test('v3.3 InProgressIcon crisp SVG component is used in TaskItem, WorkspaceInsp
   assert.ok(appSrc.includes('upcomingWorkloadByEpochDay'));
 });
 
-test('v3.3 Task Detail Modal and Task Inspector render unified 1-tap When presets and always-visible dedicated Calendar Pick date button', async () => {
+test('v3.3.3 Task Detail Modal and Task Inspector streamline When row to 3 controls, deduplicate Schedule flags, and apply quiet .chip-btn.ghost styling', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
   const taskItemSrc = fs.readFileSync(
@@ -935,6 +938,10 @@ test('v3.3 Task Detail Modal and Task Inspector render unified 1-tap When preset
     path.resolve(import.meta.dirname, '../src/components/WorkspaceInspectorPanel.tsx'),
     'utf8'
   );
+  const cssSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/index.css'),
+    'utf8'
+  );
 
   // Extract task-bento-tile-when section in TaskItem.tsx
   const modalTileStart = taskItemSrc.indexOf('data-testid="task-bento-tile-when"');
@@ -942,24 +949,34 @@ test('v3.3 Task Detail Modal and Task Inspector render unified 1-tap When preset
     'data-testid="task-bento-tile-deadline-repeat"',
     modalTileStart
   );
-  assert.ok(modalTileStart !== -1 && modalDeadlineRepeatStart > modalTileStart);
+  const modalDurationEffortStart = taskItemSrc.indexOf(
+    'data-testid="task-bento-tile-duration-effort"',
+    modalDeadlineRepeatStart
+  );
+  assert.ok(
+    modalTileStart !== -1 &&
+      modalDeadlineRepeatStart > modalTileStart &&
+      modalDurationEffortStart > modalDeadlineRepeatStart
+  );
   const modalWhenSlice = taskItemSrc.slice(modalTileStart, modalDeadlineRepeatStart);
+  const modalScheduleCardSlice = taskItemSrc.slice(modalTileStart, modalDurationEffortStart);
 
-  // 1. TaskItem Modal renders all 5 direct 1-tap presets without calling onCollapse()
-  for (const tid of [
-    'task-when-today-chip',
-    'task-quick-this-evening-chip',
+  // 1. TaskItem Modal renders exact 3 When controls (Today + This Evening + Date…) without calling onCollapse()
+  for (const tid of ['task-when-today-chip', 'task-quick-this-evening-chip', 'task-when-chip']) {
+    assert.ok(modalWhenSlice.includes(`data-testid="${tid}"`), `Missing ${tid} in TaskItem modal`);
+  }
+  for (const removedTid of [
     'task-when-tomorrow-chip',
     'task-when-anytime-chip',
     'task-when-someday-chip'
   ]) {
-    assert.ok(modalWhenSlice.includes(`data-testid="${tid}"`), `Missing ${tid} in TaskItem modal`);
+    assert.ok(
+      !taskItemSrc.includes(removedTid),
+      `Inline ${removedTid} must be removed from TaskItem modal`
+    );
   }
   assert.ok(modalWhenSlice.includes("scheduleState: 'TODAY'"));
   assert.ok(modalWhenSlice.includes("scheduleState: 'THIS_EVENING'"));
-  assert.ok(modalWhenSlice.includes("scheduleState: 'UPCOMING'"));
-  assert.ok(modalWhenSlice.includes("scheduleState: 'ANYTIME'"));
-  assert.ok(modalWhenSlice.includes("scheduleState: 'SOMEDAY'"));
   assert.ok(
     !modalWhenSlice.includes('onCollapse()'),
     '1-tap When presets in TaskItem modal must not close the modal'
@@ -969,13 +986,20 @@ test('v3.3 Task Detail Modal and Task Inspector render unified 1-tap When preset
     'This Evening preset in TaskItem modal must be unconditionally visible'
   );
 
-  // 2. TaskItem Modal unconditionally renders dedicated Calendar date-picker button (task-when-chip) with t.repeatEndsOn fallback
+  // 2. TaskItem Modal Date… button handles UPCOMING short date, SOMEDAY warm-amber Cloud pill, and ghost Pick date… fallback
   assert.match(
     modalWhenSlice,
-    /data-testid="task-when-chip"[\s\S]*?onOpenWhenModal\(task\.id\)[\s\S]*?<Calendar size=\{12\.5\} \/>[\s\S]*?:\s*t\.repeatEndsOn/
+    /data-testid="task-when-chip"[\s\S]*?someday-active[\s\S]*?onOpenWhenModal\(task\.id\)[\s\S]*?<Cloud size=\{12\.5\} \/>[\s\S]*?<Calendar size=\{12\.5\} \/>[\s\S]*?formatShortDate\(task\.whenDate\)[\s\S]*?t\.viewSomeday[\s\S]*?t\.repeatEndsOn/
   );
 
-  // 3. WorkspaceInspectorPanel renders all 5 direct 1-tap presets AND unconditionally renders inspector-when-custom-date with <Calendar size={12.5} /> and t.repeatEndsOn fallback
+  // 3. Duplicate Milestone & In Progress chips are removed from TaskItem Schedule card while preserved in modal header
+  assert.ok(taskItemSrc.includes('data-testid="task-in-progress-btn"'));
+  assert.ok(taskItemSrc.includes('data-testid="task-milestone-btn"'));
+  assert.ok(taskItemSrc.includes('data-testid="task-pin-btn"'));
+  assert.ok(!modalScheduleCardSlice.includes('task-milestone-chip'));
+  assert.ok(!modalScheduleCardSlice.includes('task-in-progress-chip'));
+
+  // 4. WorkspaceInspectorPanel renders exact 3 When controls (Today + This Evening + Date…) and keeps flags solely in .inspector-flags-bar
   const inspectorGridStart = inspectorSrc.indexOf('className="inspector-quick-when-grid"');
   const inspectorReminderWrapStart = inspectorSrc.indexOf(
     'className="inspector-prop-pills-wrap"',
@@ -987,9 +1011,6 @@ test('v3.3 Task Detail Modal and Task Inspector render unified 1-tap When preset
   for (const tid of [
     'inspector-when-today',
     'inspector-when-evening',
-    'inspector-when-tomorrow',
-    'inspector-when-anytime',
-    'inspector-when-someday',
     'inspector-when-custom-date'
   ]) {
     assert.ok(
@@ -997,19 +1018,31 @@ test('v3.3 Task Detail Modal and Task Inspector render unified 1-tap When preset
       `Missing ${tid} in WorkspaceInspectorPanel`
     );
   }
+  for (const removedTid of [
+    'inspector-when-tomorrow',
+    'inspector-when-anytime',
+    'inspector-when-someday'
+  ]) {
+    assert.ok(
+      !inspectorSrc.includes(removedTid),
+      `Inline ${removedTid} must be removed from WorkspaceInspectorPanel`
+    );
+  }
   assert.ok(inspectorWhenSlice.includes("scheduleState: 'TODAY'"));
   assert.ok(inspectorWhenSlice.includes("scheduleState: 'THIS_EVENING'"));
-  assert.ok(inspectorWhenSlice.includes("scheduleState: 'UPCOMING'"));
-  assert.ok(inspectorWhenSlice.includes("scheduleState: 'ANYTIME'"));
-  assert.ok(inspectorWhenSlice.includes("scheduleState: 'SOMEDAY'"));
-  assert.ok(
-    !inspectorWhenSlice.includes('isCustomUpcomingSelected && selectedTask.whenDate != null && ('),
-    'inspector-when-custom-date must be unconditionally visible'
-  );
   assert.match(
     inspectorWhenSlice,
-    /data-testid="inspector-when-custom-date"[\s\S]*?onOpenWhenModal\(selectedTask\.id\)[\s\S]*?<Calendar size=\{12\.5\} \/>[\s\S]*?:\s*t\.repeatEndsOn/
+    /someday-active[\s\S]*?data-testid="inspector-when-custom-date"[\s\S]*?onOpenWhenModal\(selectedTask\.id\)[\s\S]*?<Cloud size=\{12\.5\} \/>[\s\S]*?<Calendar size=\{12\.5\} \/>[\s\S]*?formatShortDate\(selectedTask\.whenDate\)[\s\S]*?t\.viewSomeday[\s\S]*?t\.repeatEndsOn/
   );
+
+  // 5. Visually quiet borderless .chip-btn.ghost styling in index.css, TaskItem.tsx, and WorkspaceInspectorPanel.tsx
+  assert.ok(cssSrc.includes('.chip-btn.ghost'));
+  assert.ok(cssSrc.includes('.chip-btn.someday-active'));
+  assert.ok(cssSrc.includes('opacity: 0.78;'));
+  assert.ok(taskItemSrc.includes("'ghost'"));
+  assert.ok(taskItemSrc.includes('className="chip-btn ghost"'));
+  assert.ok(inspectorSrc.includes("'ghost'"));
+  assert.ok(inspectorSrc.includes('className="chip-btn ghost"'));
 
   // Verify t.repeatEndsOn is non-empty across all 5 languages ("Pick date…" / "Datum wählen…")
   for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {

@@ -409,12 +409,12 @@ final class ThingsbookCoreTests: XCTestCase {
     // MARK: - 7. v2.0.0-beta.11 AppUpdateService Beta Channel, Stable Isolation & Version Bump
 
     func testAppUpdateServiceSemanticVersioningAndBetaIsolationV181() {
-        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.3")
-        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.3")
-        XCTAssertEqual(AppUpdateService.currentBuildNumber, 124)
+        XCTAssertEqual(AppUpdateService.currentVersion, "3.3.4")
+        XCTAssertEqual(AppUpdateService.displayVersion, "3.3.4")
+        XCTAssertEqual(AppUpdateService.currentBuildNumber, 125)
         XCTAssertFalse(AppUpdateService.currentVersionIsPrerelease)
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.3", current: "3.3.2"))
-        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.3", current: "3.3.1"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.4", current: "3.3.3"))
+        XCTAssertTrue(AppUpdateService.isSemanticNewer(remote: "3.3.4", current: "3.3.2"))
         XCTAssertFalse(AppUpdateService.resolveEffectiveIncludeBeta(requested: false))
         XCTAssertTrue(AppUpdateService.resolveEffectiveIncludeBeta(requested: true))
         XCTAssertFalse(AppUpdateService.isSemanticNewer(remote: "3.0.0-beta.19", current: "2.5.0", includeBeta: false))
@@ -7204,5 +7204,17 @@ final class ThingsbookCoreTests: XCTestCase {
             XCTAssertFalse(pickDateLabel.isEmpty, "repeat_ends_pick_date must not be empty in \(lang.rawValue)")
             XCTAssertNotEqual(pickDateLabel, "repeat_ends_pick_date", "Unresolved repeat_ends_pick_date in \(lang.rawValue)")
         }
+
+        // 4. v3.3.4: 7-Day Workload card lives exclusively in WorkspaceInspectorPanelView Overview (not duplicated in SmartViewCanvas upcomingCanvas)
+        let smartCanvasURL = macosRoot.appendingPathComponent("Sources/ThingsbookMac/Views/SmartViewCanvas.swift")
+        let smartCanvasSource = try String(contentsOf: smartCanvasURL, encoding: .utf8)
+        XCTAssertFalse(
+            smartCanvasSource.contains("SevenDayWorkloadStripCard"),
+            "SmartViewCanvas.upcomingCanvas must not duplicate SevenDayWorkloadStripCard"
+        )
+        XCTAssertTrue(
+            inspectorSource.contains("SevenDayWorkloadStripCard("),
+            "WorkspaceInspectorPanelView Overview retains SevenDayWorkloadStripCard"
+        )
     }
 }

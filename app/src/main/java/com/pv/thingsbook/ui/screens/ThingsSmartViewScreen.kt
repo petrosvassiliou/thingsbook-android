@@ -12,7 +12,6 @@ import com.pv.thingsbook.domain.model.DayWorkloadSummary
 import com.pv.thingsbook.domain.model.computeMultiDayWorkloadForecast
 import com.pv.thingsbook.ui.components.AreaPortfolioRoadmapWorkspace
 import com.pv.thingsbook.ui.components.AreaWorkspaceSegmentedSwitcher
-import com.pv.thingsbook.ui.components.SevenDayWorkloadStripCard
 import com.pv.thingsbook.ui.components.CompactMobileDragDropDock
 import com.pv.thingsbook.ui.components.MagicPlusDropMode
 import com.pv.thingsbook.ui.components.MagicPlusPositionalDropHandler
@@ -3866,17 +3865,6 @@ private fun ThingsMainTaskLazyList(
                 )
             }
             val workloadByEpochDay = upcomingWorkloadForecast.associateBy { it.epochDay }
-            val stripSevenDayForecast = sevenDayWorkload.take(7)
-
-            if (stripSevenDayForecast.isNotEmpty()) {
-                item(key = "upcoming_7day_workload_strip") {
-                    SevenDayWorkloadStripCard(
-                        forecast = stripSevenDayForecast,
-                        locale = activeLocale,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
-                    )
-                }
-            }
 
             var cumulativeTaskOffset = 0
             allUpcomingDates.forEachIndexed { groupIdx, targetDate ->

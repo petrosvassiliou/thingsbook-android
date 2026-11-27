@@ -589,10 +589,6 @@ public struct SmartViewCanvas: View {
         let forecast = store.sevenDayWorkloadForecast(daysCount: forecastDaysCount)
         let workloadByEpochDay = Dictionary(forecast.map { ($0.epochDay, $0) }, uniquingKeysWith: { first, _ in first })
 
-        if !forecast.isEmpty {
-            SevenDayWorkloadStripCard(store: store, forecast: Array(forecast.prefix(7)), compact: false)
-        }
-
         if filtered.isEmpty && milestones.isEmpty {
             emptyPlaceholder(icon: "calendar", text: store.tr("empty_view"))
         } else {

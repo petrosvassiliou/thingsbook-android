@@ -1048,4 +1048,18 @@ test('v3.3.3 Task Detail Modal and Task Inspector streamline When row to 3 contr
   for (const lang of ['en', 'de', 'fr', 'it', 'es'] as const) {
     assert.ok(TRANSLATIONS[lang].repeatEndsOn.trim().length > 0);
   }
+
+  // 6. v3.3.4: 7-Day Workload card lives exclusively in WorkspaceInspectorPanel Overview (not duplicated in App.tsx UPCOMING view)
+  const appSrc = fs.readFileSync(
+    path.resolve(import.meta.dirname, '../src/App.tsx'),
+    'utf8'
+  );
+  assert.ok(
+    !appSrc.includes('SevenDayWorkloadCard'),
+    'App.tsx UPCOMING view must not duplicate SevenDayWorkloadCard'
+  );
+  assert.ok(
+    inspectorSrc.includes('<SevenDayWorkloadCard'),
+    'WorkspaceInspectorPanel Overview retains SevenDayWorkloadCard'
+  );
 });

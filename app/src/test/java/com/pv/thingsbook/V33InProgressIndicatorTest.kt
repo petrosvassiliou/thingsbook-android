@@ -596,8 +596,8 @@ class V33InProgressIndicatorTest {
         val appRoot = sequenceOf(File("."), File("app")).first { File(it, "src/main").isDirectory }
         val appSrcMain = File(appRoot, "src/main")
         val buildGradleKt = File(appRoot, "build.gradle.kts").readText()
-        assertTrue(buildGradleKt.contains("versionCode = 124"))
-        assertTrue(buildGradleKt.contains("versionName = \"3.3.3\""))
+        assertTrue(buildGradleKt.contains("versionCode = 125"))
+        assertTrue(buildGradleKt.contains("versionName = \"3.3.4\""))
 
         val dbKt = File(appSrcMain, "java/com/pv/thingsbook/data/local/ThingsDatabase.kt").readText()
         val appModuleKt = File(appSrcMain, "java/com/pv/thingsbook/di/AppModule.kt").readText()
@@ -1035,5 +1035,16 @@ class V33InProgressIndicatorTest {
         assertTrue(quickPillChunk.contains("colors.secondaryText.copy(alpha = 0.78f)"))
         assertTrue(expandedBodyChunk.contains("isGhost = true"))
         assertTrue(selectedInspectorChunk.contains("isGhost = true"))
+
+        // 4. v3.3.4: 7-Day Workload card lives exclusively in WorkspaceInspectorPanel Overview (removed from Planned main view)
+        val smartViewKt = File(appSrcMain, "java/com/pv/thingsbook/ui/screens/ThingsSmartViewScreen.kt").readText()
+        assertFalse(
+            "Planned/Upcoming main list must not duplicate SevenDayWorkloadStripCard",
+            smartViewKt.contains("SevenDayWorkloadStripCard")
+        )
+        assertTrue(
+            "WorkspaceInspectorPanel Overview retains SevenDayWorkloadStripCard",
+            inspectorKt.contains("SevenDayWorkloadStripCard(")
+        )
     }
 }

@@ -185,10 +185,7 @@ import {
   type WeeklyReviewStep
 } from './components/WeeklyReviewModal';
 import { DeadlineModal, RepeatModal, WhenModal } from './components/WhenAndRepeatModals';
-import {
-  SevenDayWorkloadCard,
-  WorkspaceInspectorPanel
-} from './components/WorkspaceInspectorPanel';
+import { WorkspaceInspectorPanel } from './components/WorkspaceInspectorPanel';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -1298,11 +1295,6 @@ export const App: React.FC = () => {
       workdayBounds.startMinutes,
       workdayBounds.endMinutes
     ]
-  );
-
-  const sevenDayWorkload = useMemo(
-    () => upcomingWorkloadForecast.slice(0, 7),
-    [upcomingWorkloadForecast]
   );
 
   const upcomingWorkloadByEpochDay = useMemo(
@@ -4391,11 +4383,6 @@ export const App: React.FC = () => {
                 {/* UPCOMING View (Day-by-Day Groups — v1.6.22+: only future dates with tasks display non-past calendar events) */}
                 {activeNav.view === 'UPCOMING' && (
                   <>
-                    <SevenDayWorkloadCard
-                      forecast={sevenDayWorkload}
-                      lang={lang}
-                      t={t}
-                    />
                     {upcomingGroups.length === 0 ? (
                       <div className="empty-state">{t.emptyView}</div>
                     ) : (
